@@ -128,8 +128,85 @@ async function askBot({ bot, message, model }) {
   return reply.trim() || '(no reply)';
 }
 
-async function runTask(prompt, { userDataDir, onEvent, abortController, model, resume, bot, teammates, messageBot, codeChats, email, alwaysSkills, activeSkill, skillIndex }) {
-  const { query, tool, createSdkMcpServer } = await import('@anthropic-ai/claude-agent-sdk');
+async function runTask(prompt, { userDataDir, onEvent, abortController, model, resume, bot, teammates, messageBot, codeChats, email, alwaysSkills, activeSkill, skillIndex, dryRun }) {
+  const { query, tool: sdkTool, createSdkMcpServer } = await import('@anthropic-ai/claude-agent-sdk');
+
+  /* ── dry run ──────────────────────────────────────────────────────────
+   * A rehearsal. The agent works the task against the real screen and the
+   * real pages, but nothing it does can change anything: looking still
+   * happens for real, so the plan is grounded in what is actually there,
+   * while every action that would touch the world is intercepted here and
+   * recorded as a plan step instead.
+   *
+   * Enforced in code rather than asked for in the system prompt, on purpose —
+   * a rehearsal the model can be talked out of is not a rehearsal.
+   */
+
+  // Anything that sends input, opens something, spends, writes or sends.
+  const WRITES = new Set([
+    'screen_do', 'screen_click', 'screen_move', 'screen_drag', 'screen_scroll',
+    'screen_type', 'screen_key', 'launch_app', 'focus_window', 'run_command',
+    'browser_click_text', 'browser_type_into', 'browser_fill_form',
+    'browser_click_xy', 'browser_press_key', 'browser_scroll',
+    'email_send', 'remember', 'message_bot',
+  ]);
+
+  // A shell command only counts as looking if it matches a conservative
+  // allowlist AND carries nothing that could write, install or redirect.
+  const READS_ONLY = /^\s*(get-\w+|test-path|resolve-path|select-string|measure-object|where-object|sort-object|select-object|format-\w+|out-string|convertto-json|ls|dir|cat|type|echo|whoami|hostname|systeminfo|findstr|tree|pwd)\b/i;
+  const MUTATES = /(\bremove-|\bset-|\bnew-|\bmove-|\bcopy-|\brename-|\bstop-|\bstart-|\brestart-|\binstall|\buninstall|\bout-file|\badd-content|\bset-content|\bclear-|\binvoke-webrequest|\binvoke-expression|\biex\b|\bdel\b|\brm\b|\brmdir\b|\bmkdir\b|\bcurl\b|\bwget\b|\breg\s+add|\bschtasks\b|\bnet\s+user|>|\|\s*out-)/i;
+  const readOnlyCommand = (c) => READS_ONLY.test(String(c || '')) && !MUTATES.test(String(c || ''));
+
+  // Flag steps that would be hard to take back, so the plan says so out loud.
+  const RISKY = /\b(buy|pay|purchase|checkout|order|delete|remove|erase|send|submit|confirm|post|publish|transfer|subscribe|unsubscribe|cancel)\b/i;
+  function riskOf(name, a) {
+    if (name === 'email_send') return `sends an email to ${a.to}`;
+    if (name === 'run_command') return 'runs a shell command';
+    if (name === 'message_bot') return `messages ${a.bot}`;
+    const words = [a.text, a.keys, a.target, a.title].filter(Boolean).join(' ');
+    return RISKY.test(words) ? 'looks hard to undo' : null;
+  }
+
+  function describeStep(name, a) {
+    switch (name) {
+      case 'screen_do': return `on screen: ${(a.steps || []).map((s) => s.action).join(' → ')}`;
+      case 'screen_click': return `click (${a.x}, ${a.y})`;
+      case 'screen_move': return `move the mouse to (${a.x}, ${a.y})`;
+      case 'screen_drag': return `drag (${a.x1}, ${a.y1}) to (${a.x2}, ${a.y2})`;
+      case 'screen_scroll': return `scroll ${a.direction}`;
+      case 'screen_type': return `type "${String(a.text || '').slice(0, 60)}"`;
+      case 'screen_key': return `press ${a.keys}`;
+      case 'launch_app': return `open ${a.target}`;
+      case 'focus_window': return `switch to "${a.title}"`;
+      case 'run_command': return `run: ${String(a.command || '').slice(0, 140)}`;
+      case 'browser_click_text': return `click "${a.text}" in the browser`;
+      case 'browser_click_xy': return `click (${a.x}, ${a.y}) in the browser`;
+      case 'browser_type_into': return `type "${String(a.text || '').slice(0, 50)}" into "${a.target}"`;
+      case 'browser_fill_form': return `fill ${(a.fields || []).length} field(s)${a.submit ? ' and submit' : ''}`;
+      case 'browser_press_key': return `press ${a.key} in the browser`;
+      case 'browser_scroll': return `scroll ${a.direction} in the browser`;
+      case 'email_send': return `email ${a.to} — "${a.subject}"`;
+      case 'remember': return `remember "${String(a.note || '').slice(0, 60)}"`;
+      case 'message_bot': return `ask ${a.bot}: "${String(a.message || '').slice(0, 60)}"`;
+      default: return name;
+    }
+  }
+
+  // Every tool is registered through this wrapper, so a tool added later is
+  // guarded by default instead of relying on someone remembering.
+  let planNo = 0;
+  const tool = (name, description, schema, handler) =>
+    sdkTool(name, description, schema, async (...call) => {
+      const args = call[0] || {};
+      const writes = WRITES.has(name) && !(name === 'run_command' && readOnlyCommand(args.command));
+      if (!dryRun || !writes) return handler(...call);
+
+      const text = describeStep(name, args);
+      onEvent({ type: 'plan_step', n: ++planNo, name, input: args, text, risk: riskOf(name, args) });
+      return { content: [{ type: 'text', text:
+        `DRY RUN — this did NOT happen. Recorded as step ${planNo} of the plan: ${text}. ` +
+        `Assume it worked and carry on planning the rest of the task.` }] };
+    });
 
   // Chromium starts on first use, not on every task — asking Operator to open
   // Notepad should not pop a browser window.
@@ -580,6 +657,19 @@ ${blocks}`;
 
 THE USER'S SKILLS (their own; invoked by typing /name in the chat, or switched on per bot). These are the ONLY skills that exist here — do not mention any others:
 ${lines}`;
+  }
+
+  // Rehearsal mode. The interception above is what actually makes this safe;
+  // this only tells the agent what it is seeing so it plans the whole job
+  // instead of stopping at the first step that "failed".
+  if (dryRun) {
+    systemPrompt += `
+
+YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is real — screenshots, page text, listing windows and reading email all work normally — but every action that would click, type, run a command, open an app, remember something or send a message is intercepted and recorded as a plan step instead.
+- Work through the WHOLE task in order, exactly as you would for real, so the plan is complete.
+- When a step comes back marked DRY RUN, that is expected. Treat it as having succeeded and move straight on to the next step.
+- Keep grounding yourself as you go: look before each step, as usual.
+- Finish with a short plain-English summary of what you WOULD have done, and name anything you would need from the user to do it for real. Never claim you actually did it.`;
   }
 
   // A one-off skill the user invoked for THIS message with /name. It takes

@@ -107,34 +107,41 @@ ipcMain.handle('list-models', async () => {
   return {
     models: agent.listModels(),
     current: agent.DEFAULT_MODEL,
-    nvidia: store.nvidiaStatus(),
+    nvidia: nvidiaStatus(),
   };
 });
 
 /* ── NVIDIA NIM key ──────────────────────────────────────────────── */
 
-ipcMain.handle('nvidia:status', async () => store.nvidiaStatus());
+// A key can also arrive as NVIDIA_API_KEY in the environment, which the store
+// knows nothing about — so "is there a key?" is the agent's question to answer.
+const nvidiaStatus = () => {
+  const saved = store.nvidiaStatus();
+  return { configured: saved.configured || agent.nim.hasKey(), hint: saved.hint || (agent.nim.hasKey() ? 'from the environment' : '') };
+};
+
+ipcMain.handle('nvidia:status', async () => nvidiaStatus());
 
 // Saving a key checks it first — a key that NVIDIA rejects is worse than no
 // key, because the picker would go on offering models that cannot run. An
 // empty key clears it.
 ipcMain.handle('nvidia:set', async (_e, key) => {
   if (!String(key || '').trim()) {
-    const status = store.setNvidia('');
+    store.setNvidia('');
     agent.nim.setKey('');
-    return { ok: true, status, models: 0 };
+    return { ok: true, status: nvidiaStatus(), models: 0 };
   }
 
   const check = await agent.nim.testKey(key);
-  if (!check.ok) return { ok: false, error: check.error, status: store.nvidiaStatus() };
+  if (!check.ok) return { ok: false, error: check.error, status: nvidiaStatus() };
 
-  const status = store.setNvidia(key);
+  store.setNvidia(key);
   agent.nim.setKey(store.getNvidia().key);
   await agent.nim.refresh({ force: true });
-  return { ok: true, status, models: agent.nim.listModels().length };
+  return { ok: true, status: nvidiaStatus(), models: agent.nim.listModels().length };
 });
 
-async function runOne({ prompt, model, botId, chatId, silent, record }) {
+async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) {
   if (running) return { ok: false, error: 'A task is already running.' };
 
   const bot = botId ? store.getBot(botId) : null;
@@ -162,7 +169,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record }) {
 
   const abortController = new AbortController();
   running = { abortController, botId, chatId };
-  send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent) });
+  send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent), dryRun: Boolean(dryRun) });
 
   // Whether the agent got far enough to touch anything. If it did not, a retry
   // is free; if it did, a retry would do the same work to the machine twice.
@@ -278,6 +285,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record }) {
       alwaysSkills,
       activeSkill,
       skillIndex,
+      dryRun,
       onEvent,
     });
 
@@ -303,8 +311,8 @@ async function runOne({ prompt, model, botId, chatId, silent, record }) {
   return { ok: true };
 }
 
-ipcMain.handle('run-task', async (_e, prompt, model, botId, chatId) =>
-  runOne({ prompt, model, botId, chatId }));
+ipcMain.handle('run-task', async (_e, prompt, model, botId, chatId, dryRun) =>
+  runOne({ prompt, model, botId, chatId, dryRun }));
 
 /* ── which computer Operator is driving ──────────────────────────── */
 

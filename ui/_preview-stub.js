@@ -34,6 +34,9 @@
   }
   function put(v) { try { sessionStorage.setItem(KEY, JSON.stringify(v)); } catch { /* fine */ } }
 
+  // Whether the fake NVIDIA key is saved, for the Models settings tab.
+  let NVIDIA = { configured: false, hint: '' };
+
   let BOTS = load();
   put(BOTS);
 
@@ -62,20 +65,93 @@
 
     openBrowser: async () => ({ ok: true, chrome: true }),
 
+    // A snapshot of a real NIM catalog, so the picker's grouping, search and
+    // locked rows can be exercised without a key. NVIDIA_KEY below flips
+    // between the connected and not-connected states.
     listModels: async () => ({
       current: 'claude-sonnet-5',
+      nvidia: NVIDIA,
       models: [
-        { id: 'claude-fable-5-1', name: 'Fable 5.1', note: 'The most capable, and the slowest' },
-        { id: 'claude-opus-5', name: 'Opus 5', note: 'Deep reasoning, for work that needs care' },
-        { id: 'claude-sonnet-5', name: 'Sonnet 5', note: 'Quick enough to drive a screen', best: true },
-        { id: 'claude-haiku-4-5', name: 'Haiku 4.5', note: 'Fastest, for short repetitive jobs' },
-        { id: 'claude-fable-5', name: 'Fable 5', note: 'Previous generation', older: true },
-        { id: 'claude-opus-4-8', name: 'Opus 4.8', note: 'Previous generation', older: true },
-        { id: 'claude-opus-4-7', name: 'Opus 4.7', note: 'Previous generation', older: true },
-        { id: 'claude-opus-4-6', name: 'Opus 4.6', note: 'Previous generation', older: true },
-        { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', note: 'Previous generation', older: true },
+        { id: 'claude-fable-5-1', name: 'Fable 5.1', note: 'The most capable, and the slowest' , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-opus-5', name: 'Opus 5', note: 'Deep reasoning, for work that needs care' , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-sonnet-5', name: 'Sonnet 5', note: 'Quick enough to drive a screen', best: true , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-haiku-4-5', name: 'Haiku 4.5', note: 'Fastest, for short repetitive jobs' , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-fable-5', name: 'Fable 5', note: 'Previous generation', older: true , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-opus-4-8', name: 'Opus 4.8', note: 'Previous generation', older: true , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-opus-4-7', name: 'Opus 4.7', note: 'Previous generation', older: true , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-opus-4-6', name: 'Opus 4.6', note: 'Previous generation', older: true , providerName: 'Claude', vendor: 'claude' },
+        { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', note: 'Previous generation', older: true , providerName: 'Claude', vendor: 'claude' },
+        {"id":"nim:nvidia/cosmos-reason2-8b","name":"Cosmos Reason2 8B","note":"nvidia/cosmos-reason2-8b","tags":["sees the screen"],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/ising-calibration-1.5-31b","name":"Ising Calibration 1.5 31B","note":"nvidia/ising-calibration-1.5-31b","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/llama3-chatqa-1.5-70b","name":"Llama 3 ChatQA 1.5 70B","note":"nvidia/llama3-chatqa-1.5-70b","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/llama-3.1-nemotron-51b-instruct","name":"Llama 3.1 Nemotron 51B Instruct","note":"nvidia/llama-3.1-nemotron-51b-instruct","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/llama-3.1-nemotron-70b-instruct","name":"Llama 3.1 Nemotron 70B Instruct","note":"nvidia/llama-3.1-nemotron-70b-instruct","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/llama-3.1-nemotron-ultra-253b-v1","name":"Llama 3.1 Nemotron Ultra 253B v1","note":"nvidia/llama-3.1-nemotron-ultra-253b-v1","tags":["reasoning"],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/mistral-nemo-minitron-8b-8k-instruct","name":"Mistral Nemo Minitron 8B 8k Instruct","note":"nvidia/mistral-nemo-minitron-8b-8k-instruct","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","name":"Nemotron 3 Nano Omni 30B A3B Reasoning","note":"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning","tags":["sees the screen","reasoning"],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/nemotron-3-super-120b-a12b","name":"Nemotron 3 Super 120B A12B","note":"nvidia/nemotron-3-super-120b-a12b","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/nemotron-3-ultra-550b-a55b","name":"Nemotron 3 Ultra 550B A55B","note":"nvidia/nemotron-3-ultra-550b-a55b","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/nemotron-3.5-lightning-30b-a3b","name":"Nemotron 3.5 Lightning 30B A3B","note":"nvidia/nemotron-3.5-lightning-30b-a3b","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/nemotron-4-340b-instruct","name":"Nemotron 4 340B Instruct","note":"nvidia/nemotron-4-340b-instruct","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/nemotron-nano-3-30b-a3b","name":"Nemotron Nano 3 30B A3B","note":"nvidia/nemotron-nano-3-30b-a3b","tags":[],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/neva-22b","name":"NeVA 22B","note":"nvidia/neva-22b","tags":["sees the screen","no tool calling"],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:nvidia/vila","name":"VILA","note":"nvidia/vila","tags":["sees the screen","no tool calling"],"providerName":"NVIDIA","vendor":"nvidia"},
+        {"id":"nim:meta/codellama-70b","name":"Code Llama 70B","note":"meta/codellama-70b","tags":["code","no tool calling"],"providerName":"Meta","vendor":"nvidia"},
+        {"id":"nim:meta/llama2-70b","name":"Llama 2 70B","note":"meta/llama2-70b","tags":["no tool calling"],"providerName":"Meta","vendor":"nvidia"},
+        {"id":"nim:meta/llama-3.2-11b-vision-instruct","name":"Llama 3.2 11B Vision Instruct","note":"meta/llama-3.2-11b-vision-instruct","tags":["sees the screen"],"providerName":"Meta","vendor":"nvidia"},
+        {"id":"nim:meta/llama-3.2-90b-vision-instruct","name":"Llama 3.2 90B Vision Instruct","note":"meta/llama-3.2-90b-vision-instruct","tags":["sees the screen"],"providerName":"Meta","vendor":"nvidia"},
+        {"id":"nim:meta/muse-glimmer-30b","name":"Muse Glimmer 30B","note":"meta/muse-glimmer-30b","tags":[],"providerName":"Meta","vendor":"nvidia"},
+        {"id":"nim:openai/gpt-oss-20b","name":"GPT OSS 20B","note":"openai/gpt-oss-20b","tags":[],"providerName":"OpenAI","vendor":"nvidia"},
+        {"id":"nim:google/codegemma-1.1-7b","name":"CodeGemma 1.1 7B","note":"google/codegemma-1.1-7b","tags":["code","no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/codegemma-7b","name":"CodeGemma 7B","note":"google/codegemma-7b","tags":["code","no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/deplot","name":"DePlot","note":"google/deplot","tags":["sees the screen","no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/gemma-2b","name":"Gemma 2B","note":"google/gemma-2b","tags":["no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/gemma-3-12b-it","name":"Gemma 3 12B IT","note":"google/gemma-3-12b-it","tags":["sees the screen","no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/gemma-3-4b-it","name":"Gemma 3 4B IT","note":"google/gemma-3-4b-it","tags":["sees the screen","no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/gemma-4-31b-it","name":"Gemma 4 31B IT","note":"google/gemma-4-31b-it","tags":["sees the screen","no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:google/recurrentgemma-2b","name":"RecurrentGemma 2B","note":"google/recurrentgemma-2b","tags":["no tool calling"],"providerName":"Google","vendor":"nvidia"},
+        {"id":"nim:deepseek-ai/deepseek-coder-6.7b-instruct","name":"DeepSeek Coder 6.7B Instruct","note":"deepseek-ai/deepseek-coder-6.7b-instruct","tags":["code"],"providerName":"DeepSeek","vendor":"nvidia"},
+        {"id":"nim:deepseek-ai/deepseek-v4-flash-0731","name":"DeepSeek v4 Flash 0731","note":"deepseek-ai/deepseek-v4-flash-0731","tags":[],"providerName":"DeepSeek","vendor":"nvidia"},
+        {"id":"nim:mistralai/codestral-22b-instruct-v0.1","name":"Codestral 22B Instruct v0.1","note":"mistralai/codestral-22b-instruct-v0.1","tags":["code"],"providerName":"Mistral AI","vendor":"nvidia"},
+        {"id":"nim:mistralai/mistral-7b-instruct-v0.3","name":"Mistral 7B Instruct v0.3","note":"mistralai/mistral-7b-instruct-v0.3","tags":[],"providerName":"Mistral AI","vendor":"nvidia"},
+        {"id":"nim:mistralai/mistral-large","name":"Mistral Large","note":"mistralai/mistral-large","tags":[],"providerName":"Mistral AI","vendor":"nvidia"},
+        {"id":"nim:mistralai/mistral-large-2-instruct","name":"Mistral Large 2 Instruct","note":"mistralai/mistral-large-2-instruct","tags":[],"providerName":"Mistral AI","vendor":"nvidia"},
+        {"id":"nim:mistralai/mistral-nemotron","name":"Mistral Nemotron","note":"mistralai/mistral-nemotron","tags":[],"providerName":"Mistral AI","vendor":"nvidia"},
+        {"id":"nim:mistralai/mixtral-8x22b-v0.1","name":"Mixtral 8x22B v0.1","note":"mistralai/mixtral-8x22b-v0.1","tags":[],"providerName":"Mistral AI","vendor":"nvidia"},
+        {"id":"nim:nv-mistralai/mistral-nemo-12b-instruct","name":"Mistral Nemo 12B Instruct","note":"nv-mistralai/mistral-nemo-12b-instruct","tags":[],"providerName":"NVIDIA × Mistral","vendor":"nvidia"},
+        {"id":"nim:moonshotai/kimi-k2.6","name":"Kimi K2.6","note":"moonshotai/kimi-k2.6","tags":[],"providerName":"Moonshot AI","vendor":"nvidia"},
+        {"id":"nim:moonshotai/kimi-k3","name":"Kimi K3","note":"moonshotai/kimi-k3","tags":[],"providerName":"Moonshot AI","vendor":"nvidia"},
+        {"id":"nim:z-ai/glm-5.3","name":"GLM 5.3","note":"z-ai/glm-5.3","tags":[],"providerName":"Z.ai","vendor":"nvidia"},
+        {"id":"nim:z-ai/glm-5.3-flash","name":"GLM 5.3 Flash","note":"z-ai/glm-5.3-flash","tags":[],"providerName":"Z.ai","vendor":"nvidia"},
+        {"id":"nim:microsoft/kosmos-2","name":"Kosmos 2","note":"microsoft/kosmos-2","tags":["sees the screen","no tool calling"],"providerName":"Microsoft","vendor":"nvidia"},
+        {"id":"nim:microsoft/phi-3-vision-128k-instruct","name":"Phi 3 Vision 128k Instruct","note":"microsoft/phi-3-vision-128k-instruct","tags":["sees the screen","no tool calling"],"providerName":"Microsoft","vendor":"nvidia"},
+        {"id":"nim:microsoft/phi-3.5-moe-instruct","name":"Phi 3.5 MoE Instruct","note":"microsoft/phi-3.5-moe-instruct","tags":["no tool calling"],"providerName":"Microsoft","vendor":"nvidia"},
+        {"id":"nim:ibm/granite-3.0-3b-a800m-instruct","name":"Granite 3.0 3B A800M Instruct","note":"ibm/granite-3.0-3b-a800m-instruct","tags":[],"providerName":"IBM","vendor":"nvidia"},
+        {"id":"nim:ibm/granite-3.0-8b-instruct","name":"Granite 3.0 8B Instruct","note":"ibm/granite-3.0-8b-instruct","tags":[],"providerName":"IBM","vendor":"nvidia"},
+        {"id":"nim:ibm/granite-34b-code-instruct","name":"Granite 34B Code Instruct","note":"ibm/granite-34b-code-instruct","tags":["code"],"providerName":"IBM","vendor":"nvidia"},
+        {"id":"nim:ibm/granite-8b-code-instruct","name":"Granite 8B Code Instruct","note":"ibm/granite-8b-code-instruct","tags":["code"],"providerName":"IBM","vendor":"nvidia"},
+        {"id":"nim:writer/palmyra-creative-122b","name":"Palmyra Creative 122B","note":"writer/palmyra-creative-122b","tags":["no tool calling"],"providerName":"Writer","vendor":"nvidia"},
+        {"id":"nim:writer/palmyra-fin-70b-32k","name":"Palmyra Fin 70B 32k","note":"writer/palmyra-fin-70b-32k","tags":["no tool calling"],"providerName":"Writer","vendor":"nvidia"},
+        {"id":"nim:writer/palmyra-med-70b","name":"Palmyra Med 70B","note":"writer/palmyra-med-70b","tags":["no tool calling"],"providerName":"Writer","vendor":"nvidia"},
+        {"id":"nim:writer/palmyra-med-70b-32k","name":"Palmyra Med 70B 32k","note":"writer/palmyra-med-70b-32k","tags":["no tool calling"],"providerName":"Writer","vendor":"nvidia"},
+        {"id":"nim:01-ai/yi-large","name":"Yi Large","note":"01-ai/yi-large","tags":["no tool calling"],"providerName":"01.AI","vendor":"nvidia"},
+        {"id":"nim:adept/fuyu-8b","name":"Fuyu 8B","note":"adept/fuyu-8b","tags":["sees the screen","no tool calling"],"providerName":"Adept","vendor":"nvidia"},
+        {"id":"nim:aisingapore/sea-lion-7b-instruct","name":"Sea Lion 7B Instruct","note":"aisingapore/sea-lion-7b-instruct","tags":["no tool calling"],"providerName":"AI Singapore","vendor":"nvidia"},
+        {"id":"nim:ai21labs/jamba-1.5-large-instruct","name":"Jamba 1.5 Large Instruct","note":"ai21labs/jamba-1.5-large-instruct","tags":[],"providerName":"AI21 Labs","vendor":"nvidia"},
+        {"id":"nim:bigcode/starcoder2-15b","name":"StarCoder2 15B","note":"bigcode/starcoder2-15b","tags":["code","no tool calling"],"providerName":"BigCode","vendor":"nvidia"},
+        {"id":"nim:databricks/dbrx-instruct","name":"DBRX Instruct","note":"databricks/dbrx-instruct","tags":["no tool calling"],"providerName":"Databricks","vendor":"nvidia"},
+        {"id":"nim:poolside/laguna-xs-2.1","name":"Laguna XS 2.1","note":"poolside/laguna-xs-2.1","tags":["code"],"providerName":"Poolside","vendor":"nvidia"},
+        {"id":"nim:zyphra/zamba2-7b-instruct","name":"Zamba2 7B Instruct","note":"zyphra/zamba2-7b-instruct","tags":["no tool calling"],"providerName":"Zyphra","vendor":"nvidia"},
       ],
     }),
+
+    nvidiaStatus: async () => NVIDIA,
+    nvidiaSetKey: async (key) => {
+      if (!key) { NVIDIA = { configured: false, hint: '' }; return { ok: true, status: NVIDIA, models: 0 }; }
+      if (!/^nvapi-/.test(key)) return { ok: false, error: 'NVIDIA rejected that key.', status: NVIDIA };
+      NVIDIA = { configured: true, hint: '…' + key.slice(-4) };
+      return { ok: true, status: NVIDIA, models: 61 };
+    },
 
     listBots: async () => BOTS.map(card),
     getBot: async (id) => find(id) || null,

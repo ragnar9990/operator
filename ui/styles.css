@@ -463,6 +463,9 @@ body:not(.started) .thread { flex: 0 1 auto; overflow: visible; padding-bottom: 
   transition: background 0.15s, color 0.15s;
 }
 .picker-btn:hover, .picker.open .picker-btn { background: var(--raise-hi); color: var(--ink); }
+/* "Nemotron 3 Nano Omni 30B A3B Reasoning" is a real model name, and it would
+   otherwise push the mic and send button off the bar. */
+#pickerName { display: inline-block; max-width: 190px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .picker-btn .chev { width: 15px; height: 15px; color: var(--ink-4); transition: transform 0.18s; }
 .picker.open .picker-btn .chev { transform: rotate(180deg); }
 
@@ -484,12 +487,73 @@ body:not(.started) .thread { flex: 0 1 auto; overflow: visible; padding-bottom: 
 }
 @keyframes menu-in { from { opacity: 0; transform: translateY(6px); } }
 
+/* With NVIDIA NIM connected the list is a hundred models long, so it gets a
+   search box that stays put while the list scrolls under it. */
+.menu-search {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px -6px 2px;
+  padding: 12px 14px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+}
+.menu-search .mag { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--ink-4); stroke-width: 1.8; stroke-linecap: round; }
+.menu-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  letter-spacing: -0.2px;
+  outline: none;
+}
+.menu-search input::placeholder { color: var(--ink-4); }
+
+.menu-empty { padding: 18px 10px; color: var(--ink-4); font-size: 13px; text-align: center; }
+
 .menu-label {
   padding: 10px 10px 6px;
   color: var(--ink-4);
   font-size: 12px;
   letter-spacing: -0.1px;
 }
+.menu-label + .menu-label { padding-top: 4px; }
+
+/* Which half of the list you are in: Claude above, NVIDIA's catalog below. */
+.menu-label.via-nim::after {
+  content: "NIM";
+  margin-left: 7px;
+  padding: 1px 5px;
+  border: 1px solid var(--line-max);
+  border-radius: 5px;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  color: #76b900;                      /* NVIDIA green, small enough to be a hint */
+  vertical-align: 1px;
+}
+
+.menu-cta {
+  display: block;
+  width: 100%;
+  margin: 2px 0 4px;
+  padding: 9px 10px;
+  border: 1px dashed var(--line-max);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-cta:hover { background: var(--raise); color: var(--ink); }
 
 .opt {
   display: flex;
@@ -508,8 +572,43 @@ body:not(.started) .thread { flex: 0 1 auto; overflow: visible; padding-bottom: 
 
 .opt .body { flex: 1; min-width: 0; }
 .opt .name { display: block; color: var(--ink-2); font-size: 14px; font-weight: 500; letter-spacing: -0.2px; }
-.opt .note { display: block; margin-top: 1px; color: var(--ink-4); font-size: 12px; line-height: 1.4; }
+/* The bare padding/border resets are load-bearing: a bot's saved memories are
+   also called .note, and that rule would otherwise draw a box around every
+   line of this menu. */
+.opt .note {
+  display: block;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-4);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 .opt.on .name { color: var(--ink); }
+
+/* What a model is good for, next to its id: "sees the screen", "reasoning",
+   and the one that actually matters — whether it can call tools at all. */
+.opt .tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--raise-hi);
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 15px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.opt .tag.warn { background: rgba(244, 104, 95, 0.14); color: var(--fail); }
+
+/* No NVIDIA key yet: still listed, so you can see what a key would buy you,
+   but picking one takes you to Settings rather than failing a task. */
+.opt.locked { opacity: 0.55; }
+.opt.locked:hover { opacity: 0.8; }
 
 .opt .tick { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--accent); opacity: 0; }
 .opt.on .tick { opacity: 1; }
@@ -819,6 +918,8 @@ body.started .intro { display: none; }
 
 .field input[type="text"],
 .field input[type="time"],
+.field input[type="password"],
+.field input[type="email"],
 .field textarea,
 .field select {
   width: 100%;
@@ -1171,6 +1272,22 @@ body.started .intro { display: none; }
 .conn-form { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); }
 .connector.on .conn-ic { color: #46d17f; background: rgba(70, 209, 127, 0.12); }
 
+/* NVIDIA NIM keeps its own green, so the two providers in Settings → Models
+   are told apart at a glance. */
+.conn-ic.nv { color: #76b900; background: rgba(118, 185, 0, 0.12); }
+.connector.on .conn-ic.nv { color: #76b900; background: rgba(118, 185, 0, 0.16); }
+
+/* What the key actually bought: how many models, from how many vendors. */
+.nv-catalog { display: flex; flex-direction: column; gap: 8px; padding-top: 2px; }
+.nv-count { font-size: 12px; color: var(--ink-3); }
+.nv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.nv-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border: 1px solid var(--line-hi); border-radius: 8px;
+  background: var(--raise); color: var(--ink-2); font-size: 12px;
+}
+.nv-chip i { font-style: normal; color: var(--ink-4); font-size: 11px; }
+
 /* disconnected: the sign-in options */
 .conn-body { padding: 2px 14px 16px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); }
 .conn-lead { font-size: 12.5px; color: var(--ink-3); line-height: 1.55; margin: 8px 0 2px; }
@@ -1278,6 +1395,60 @@ body.started .intro { display: none; }
 
 /* a /command shown inside a chat message */
 .turn.you .cmd { color: var(--accent); font-weight: 600; }
+
+/* ── rehearse (dry run) ─────────────────────────────────────────── */
+
+.dry-toggle {
+  display: flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px;
+  border: 1px solid var(--line-hi); border-radius: 9999px;
+  background: transparent; color: var(--ink-3);
+  font-size: 12.5px; font-weight: 500; letter-spacing: -0.2px;
+  cursor: pointer; transition: color .15s, border-color .15s, background .15s;
+}
+.dry-toggle svg { width: 15px; height: 15px; }
+.dry-toggle:hover { color: var(--ink); border-color: var(--line-max); }
+.dry-toggle.on { color: var(--accent); border-color: var(--accent); background: rgba(41, 159, 255, 0.1); }
+
+/* while armed, the composer says what will happen */
+body.rehearsing #input { border-color: rgba(41, 159, 255, 0.35); }
+
+/* the plan card */
+.plan { border: 1px solid var(--line-hi); border-radius: 13px; background: var(--raise); overflow: hidden; }
+.plan-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+  color: var(--accent); font-size: 13px; font-weight: 550;
+}
+.plan-head svg { width: 16px; height: 16px; flex: none; }
+.plan-title { flex: 1; min-width: 0; }
+.plan-n { color: var(--ink-4); font-weight: 400; font-size: 12px; }
+
+.plan-steps { list-style: none; counter-reset: plan; margin: 0; padding: 8px 14px 10px; }
+.plan-step {
+  counter-increment: plan;
+  position: relative;
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 0 6px 26px;
+  font-size: 13px; line-height: 1.5;
+}
+.plan-step::before {
+  content: counter(plan);
+  position: absolute; left: 0; top: 6px;
+  width: 18px; text-align: right;
+  color: var(--ink-4); font-family: var(--mono); font-size: 11px;
+}
+.plan-what { flex: 1; min-width: 0; color: var(--ink-2); }
+.plan-step.risky .plan-what { color: var(--ink); }
+.plan-risk {
+  flex: none; padding: 1px 8px; border-radius: 9999px;
+  background: rgba(244, 104, 95, 0.14); color: var(--fail);
+  font-size: 11px; white-space: nowrap;
+}
+
+.plan-foot { display: flex; align-items: center; gap: 12px; padding: 0 14px 14px; }
+.plan-warn { flex: 1; min-width: 0; color: var(--fail); font-size: 12px; line-height: 1.45; }
+.plan-foot .pill.solid { margin-left: auto; height: auto; }
 
 
 /* ── top mode bar: Agents / Code ───────────────────────────────────── */

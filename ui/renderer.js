@@ -18,6 +18,10 @@ let actionCount = 0;
 let hasFrame = false;
 let group = null; // the open run of tool steps in the thread
 
+// Rehearsal state: the task being planned, and the open plan card.
+let lastTask = '';
+let plan = null;
+
 /* ── helpers ─────────────────────────────────────────────────────── */
 
 function esc(s) {
@@ -192,6 +196,74 @@ function closeGroup() {
   if (last) last.classList.remove('now');
   group = null;
   stepsRec = null;
+}
+
+/* ── the rehearsal plan ──────────────────────────────────────────────
+ * A dry run collects every step the agent WOULD have taken into one card,
+ * calls out the ones that are hard to undo, and offers to do it for real.
+ */
+
+function openPlan() {
+  const el = turn('', '<div class="plan">' +
+    '<div class="plan-head">' +
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5 9 16.5 19 7"/><path d="M3 20h18"/></svg>' +
+    '<span class="plan-title">Rehearsal — nothing was changed</span>' +
+    '<span class="plan-n">0 steps</span></div>' +
+    '<ol class="plan-steps"></ol>' +
+    '<div class="plan-foot"></div></div>');
+
+  plan = {
+    steps: el.querySelector('.plan-steps'),
+    count: el.querySelector('.plan-n'),
+    foot: el.querySelector('.plan-foot'),
+    n: 0,
+    risky: 0,
+  };
+  return plan;
+}
+
+function addPlanStep(evt) {
+  const p = plan || openPlan();
+  p.n += 1;
+  if (evt.risk) p.risky += 1;
+
+  const stick = nearBottom();
+  const li = document.createElement('li');
+  li.className = 'plan-step' + (evt.risk ? ' risky' : '');
+  li.innerHTML = '<span class="plan-what">' + esc(evt.text || evt.name) + '</span>' +
+    (evt.risk ? '<span class="plan-risk">' + esc(evt.risk) + '</span>' : '');
+  p.steps.appendChild(li);
+  p.count.textContent = p.n + (p.n === 1 ? ' step' : ' steps');
+  if (stick) thread.scrollTop = thread.scrollHeight;
+}
+
+// Close the card and offer the real run. The task is replayed from what was
+// asked, so the button does exactly what was rehearsed.
+function finishPlan() {
+  if (!plan) return;
+  const p = plan;
+  plan = null;
+
+  if (p.risky) {
+    const warn = document.createElement('div');
+    warn.className = 'plan-warn';
+    warn.textContent = p.risky + (p.risky === 1 ? ' step is' : ' steps are') +
+      ' hard to undo — worth a read before you run it.';
+    p.foot.appendChild(warn);
+  }
+
+  const task = lastTask;
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'pill solid';
+  go.textContent = 'Run it for real';
+  go.addEventListener('click', () => {
+    if (busy) return;
+    if (dryRun && dryBtn) dryBtn.click();   // drop out of rehearsal first
+    go.disabled = true;
+    run(task);
+  });
+  p.foot.appendChild(go);
 }
 
 // Pure rendering, shared by a live run and by a chat read back from disk.
@@ -967,10 +1039,18 @@ window.operator.onEvent((evt) => {
       showDots();
       break;
 
+    // a step it WOULD have taken — rehearsal only, nothing happened
+    case 'plan_step':
+      hideDots();
+      addPlanStep(evt);
+      showDots();
+      break;
+
     // text is null when the result just repeats what was already said
     case 'done':
       closeGroup();
       if (evt.text) { turn('says', nl2br(evt.text)); rec({ k: 'says', text: evt.text }); speak(evt.text); }
+      finishPlan();
       endRun();
       break;
 
@@ -978,6 +1058,7 @@ window.operator.onEvent((evt) => {
       closeGroup();
       turn('', '<div class="error"><b>Stopped</b><span>' + esc(evt.text) + '</span></div>');
       rec({ k: 'error', text: evt.text });
+      finishPlan();
       endRun();
       break;
   }
@@ -990,8 +1071,22 @@ function resize() {
   input.style.height = Math.min(input.scrollHeight, 168) + 'px';
 }
 
-async function run() {
-  const task = input.value.trim();
+// Rehearse: plan the whole task without letting it change anything. Kept on the
+// composer rather than in settings because it is a per-task decision.
+const dryBtn = document.getElementById('dryBtn');
+let dryRun = false;
+if (dryBtn) {
+  dryBtn.addEventListener('click', () => {
+    dryRun = !dryRun;
+    dryBtn.classList.toggle('on', dryRun);
+    dryBtn.setAttribute('aria-pressed', String(dryRun));
+    document.body.classList.toggle('rehearsing', dryRun);
+    input.focus();
+  });
+}
+
+async function run(override) {
+  const task = (override !== undefined ? override : input.value).trim();
   if (!task || busy) return;
 
   await ensureChat();
@@ -1000,10 +1095,13 @@ async function run() {
   if (!chat.turns.length) chat.title = task.replace(/\s+/g, ' ').slice(0, 70);
   rec({ k: 'you', text: task });
 
-  input.value = '';
-  resize();
+  // Remembered so the plan card's "Run it for real" can replay the same task.
+  lastTask = task;
+  plan = null;
+
+  if (override === undefined) { input.value = ''; resize(); }
   startRun();
-  await window.operator.runTask(task, chosenModel, bot.id, chat.id);
+  await window.operator.runTask(task, chosenModel, bot.id, chat.id, dryRun);
 }
 
 composer.addEventListener('submit', (e) => { e.preventDefault(); run(); });

@@ -117,11 +117,14 @@ const CODE = /(coder|code|codestral|starcoder|codegemma|codellama|devstral|lagun
 const REASON = /(reasoning|-r1|thinking|nemotron-ultra|qwq|magistral)/i;
 
 const ACRONYMS = {
-  ai: 'AI', vl: 'VL', vlm: 'VLM', llm: 'LLM', moe: 'MoE', it: 'IT', qa: 'QA',
+  ai: 'AI', vl: 'VL', vlm: 'VLM', llm: 'LLM', moe: 'MoE', it: 'IT', qa: 'QA', xs: 'XS',
   gpt: 'GPT', oss: 'OSS', glm: 'GLM', dbrx: 'DBRX', nvlm: 'NVLM', nv: 'NV',
   chatqa: 'ChatQA', vila: 'VILA', neva: 'NeVA', llama: 'Llama', llama2: 'Llama 2',
-  llama3: 'Llama 3', qwen: 'Qwen', qwq: 'QwQ', kimi: 'Kimi', phi: 'Phi',
+  llama3: 'Llama 3', llama4: 'Llama 4', qwen: 'Qwen', qwq: 'QwQ', kimi: 'Kimi', phi: 'Phi',
   seallm: 'SeaLLM', minitron: 'Minitron', nemo: 'Nemo', nemotron: 'Nemotron',
+  deepseek: 'DeepSeek', codellama: 'Code Llama', codegemma: 'CodeGemma',
+  recurrentgemma: 'RecurrentGemma', diffusiongemma: 'DiffusionGemma',
+  starcoder: 'StarCoder', starcoder2: 'StarCoder2', deplot: 'DePlot', kosmos: 'Kosmos',
   v1: 'v1', v2: 'v2', v3: 'v3', instruct: 'Instruct', chat: 'Chat', base: 'Base',
 };
 
@@ -132,9 +135,10 @@ function prettify(bare) {
   return tail.split('-').map((w) => {
     const low = w.toLowerCase();
     if (ACRONYMS[low]) return ACRONYMS[low];
-    if (/^\d+(\.\d+)?b$/i.test(w)) return w.slice(0, -1) + 'B';           // 70b -> 70B
-    if (/^a\d+(\.\d+)?b$/i.test(w)) return 'A' + w.slice(1, -1) + 'B';    // a3b -> A3B
-    if (/^\d+k$/i.test(w)) return w.toLowerCase();                        // 32k
+    // Parameter counts: 70b -> 70B, a3b -> A3B, 8x22b -> 8x22B, a800m -> A800M,
+    // and context lengths stay lower case: 32k, 128k.
+    const size = w.match(/^(a?)(\d+(?:\.\d+)?(?:x\d+)?)([bmk])$/i);
+    if (size) return (size[1] ? 'A' : '') + size[2] + (size[3].toLowerCase() === 'k' ? 'k' : size[3].toUpperCase());
     if (/^v\d/i.test(w)) return w.toLowerCase();                          // v0.1
     if (/^\d/.test(w)) return w;                                          // 3.1, 2024
     return w.charAt(0).toUpperCase() + w.slice(1);

@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('operator', {
-  runTask: (prompt, model, botId, chatId) => ipcRenderer.invoke('run-task', prompt, model, botId, chatId),
+  runTask: (prompt, model, botId, chatId, dryRun) => ipcRenderer.invoke('run-task', prompt, model, botId, chatId, dryRun),
   stopTask: () => ipcRenderer.invoke('stop-task'),
   listModels: () => ipcRenderer.invoke('list-models'),
 
