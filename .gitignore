@@ -1,0 +1,10 @@
+# Dependencies and build output — huge, and reproducible from package.json.
+node_modules/
+dist/
+
+# A hand-made snapshot of the UI from before a redesign; not part of the app.
+.ui-backup/
+
+# Local scratch
+*.log
+sktest.tmp.js

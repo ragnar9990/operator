@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Operator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@100..900&display=swap"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="modebar">
+      <div class="modes">
+        <button class="mode active" data-mode="agents" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="13" rx="3"/><path d="M9.5 20.5h5"/><circle cx="14.2" cy="11.4" r="1.5"/></svg>
+          Agents
+        </button>
+        <button class="mode" data-mode="code" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg>
+          Code
+        </button>
+      </div>
+    </div>
+
+    <div class="shell">
+      <!-- slim icon rail -->
+      <nav class="rail" id="rail">
+        <div class="rail-top">
+          <span class="mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="13" rx="3" /><path d="M9.5 20.5h5" /><circle cx="14.2" cy="11.4" r="1.5" /></svg>
+          </span>
+
+          <button class="rail-btn" id="historyBtn" type="button" title="Show bots" aria-expanded="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+          </button>
+
+          <button class="rail-btn" id="browserBtn" type="button" title="Open the agent's browser — sign in to sites here once" aria-label="Open the agent's browser">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 9.5h17M3.5 14.5h17M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/></svg>
+          </button>
+
+          <button class="rail-btn" id="newBotBtn" type="button" title="New bot" aria-label="New bot">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13" /></svg>
+          </button>
+
+          <button class="rail-btn" id="settingsBtn" type="button" title="Settings — pick which computer Operator uses" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/></svg>
+          </button>
+        </div>
+
+        <div class="rail-list" id="railList">
+          <div class="rail-head">Bots</div>
+          <div class="roster" id="roster"></div>
+
+          <div class="rail-head chats-head">
+            <span id="chatsFor">Chats</span>
+            <button class="mini" id="newChatBtn" type="button" title="New chat">New</button>
+          </div>
+          <div class="chats" id="chats"></div>
+        </div>
+
+        <span class="rail-spacer"></span>
+
+        <span class="rail-state" id="railState" title="Idle" aria-live="polite"><i></i></span>
+      </nav>
+
+      <div class="main">
+        <header class="topbar">
+          <button class="who" id="whoBtn" type="button" title="Bot settings">
+            <span class="who-face" id="whoFace"></span>
+            <span class="who-text">
+              <span class="who-name" id="whoName">Operator</span>
+              <span class="who-title" id="whoTitle"></span>
+            </span>
+          </button>
+          <button class="target-badge" id="targetBadge" type="button" title="Which computer Operator is using — click to change">
+            <i></i><span id="targetBadgeText">This computer</span>
+          </button>
+          <button class="pill stop" id="stopBtn" type="button" hidden>Stop</button>
+        </header>
+
+        <div class="split">
+          <!-- conversation -->
+          <section class="thread-col">
+            <div class="thread" id="thread">
+              <div class="intro" id="intro">
+                <h1>What should Operator do?</h1>
+                <p>It drives this computer to get it done — your apps, your desktop and its own browser.</p>
+              </div>
+            </div>
+
+            <div class="dock">
+              <div class="slash-menu" id="slashMenu" hidden></div>
+              <form class="composer" id="composer">
+                <textarea
+                  id="input"
+                  rows="1"
+                  placeholder="Give Operator a task — or /skill"
+                  autocomplete="off"
+                  spellcheck="false"
+                ></textarea>
+
+                <div class="controls">
+                  <div class="left">
+                    <button type="button" class="round mic" id="micBtn" title="Talk to Operator" aria-pressed="false">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z" />
+                        <path d="M18 11a6 6 0 0 1-12 0M12 17v4" />
+                      </svg>
+                      <span class="ring" aria-hidden="true"></span>
+                    </button>
+                    <span class="heard" id="heard"></span>
+                  </div>
+
+                  <div class="picker" id="picker">
+                    <button
+                      type="button"
+                      class="picker-btn"
+                      id="pickerBtn"
+                      aria-haspopup="listbox"
+                      aria-expanded="false"
+                      title="Which model runs the task"
+                    >
+                      <span id="pickerName">Sonnet 5</span>
+                      <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+                    </button>
+                    <div class="menu" id="menu" hidden>
+                      <!-- There are a hundred-odd models once NVIDIA NIM is on;
+                           the search bar is how you find one without scrolling. -->
+                      <div class="menu-search">
+                        <svg class="mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                        <input id="menuSearch" type="text" placeholder="Search models" spellcheck="false" autocomplete="off" aria-label="Search models" />
+                      </div>
+                      <div class="menu-list" id="menuList" role="listbox" aria-label="Model"></div>
+                    </div>
+                  </div>
+
+                  <button type="submit" class="round send" id="runBtn" title="Run" aria-label="Run">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11.5 12 5.5l6 6" /></svg>
+                  </button>
+                </div>
+              </form>
+
+              <div class="suggestions" id="suggestions">
+                <button class="chip" type="button">Open Notepad and write me a shopping list for a roast dinner</button>
+                <button class="chip" type="button">Tidy my Downloads folder into images, installers and PDFs</button>
+                <button class="chip" type="button">What is open on my second monitor?</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- the computer it is using -->
+          <aside class="computer" id="computer" hidden>
+            <div class="comp-head">
+              <span class="live" id="live"><i></i>Live</span>
+              <span class="surface" id="surface"></span>
+              <span class="counters"><span id="elapsed">0:00</span><em></em><span id="actions">0 actions</span></span>
+              <button class="expand" id="expand" type="button" title="Watch full screen" aria-label="Watch full screen">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+              </button>
+            </div>
+            <div class="screen">
+              <img id="frame" alt="What Operator is looking at" />
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <!-- CODE mode: a Claude-Code-style coding workspace -->
+    <div class="codeview" id="codeView" hidden>
+      <aside class="code-side">
+        <button class="code-new" id="codeNewChat" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>
+          New chat
+        </button>
+        <div class="code-history" id="codeHistory"></div>
+      </aside>
+
+      <section class="code-main">
+        <div class="code-thread" id="codeThread">
+          <div class="intro" id="codeIntro">
+            <h1>Code</h1>
+            <p>A coding assistant with your project's files and terminal — the same engine as Claude Code. Start a chat, choose a folder, then tell it what to build or fix.</p>
+          </div>
+        </div>
+
+        <div class="dock">
+          <form class="composer" id="codeComposer">
+            <textarea id="codeInput" rows="1" placeholder="Describe a change, a bug, or a feature" autocomplete="off" spellcheck="false"></textarea>
+            <div class="controls">
+              <div class="left">
+                <button type="button" class="folder-btn" id="codeFolderBtn" title="Choose the project folder">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>
+                  <span id="codeCwd">Choose folder</span>
+                </button>
+              </div>
+
+              <div class="picker" id="codeBotPicker">
+                <button type="button" class="picker-btn" id="codeBotBtn" aria-haspopup="listbox" aria-expanded="false" title="Code as one of your bots">
+                  <span id="codeBotName">No bot</span>
+                  <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+                </button>
+                <div class="menu" id="codeBotMenu" role="listbox" aria-label="Bot" hidden></div>
+              </div>
+
+              <div class="picker" id="codePicker">
+                <button type="button" class="picker-btn" id="codePickerBtn" aria-haspopup="listbox" aria-expanded="false" title="Which model runs the task">
+                  <span id="codePickerName">Sonnet 5</span>
+                  <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+                </button>
+                <div class="menu" id="codeMenu" role="listbox" aria-label="Model" hidden></div>
+              </div>
+
+              <button type="button" class="pill stop" id="codeStop" hidden>Stop</button>
+              <button type="submit" class="round send" id="codeRun" title="Run" aria-label="Run">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11.5 12 5.5l6 6"/></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+
+
+    <div class="sheet" id="sheet" hidden>
+      <div class="sheet-scrim" id="sheetScrim"></div>
+      <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+        <header class="sheet-top">
+          <span class="who-face" id="sheetFace"></span>
+          <h2 id="sheetTitle">Bot</h2>
+          <button class="rail-btn" id="sheetClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+
+        <div class="sheet-body">
+          <label class="field">
+            <span>Name</span>
+            <input id="fName" type="text" maxlength="40" placeholder="Tyler" />
+          </label>
+
+          <label class="field">
+            <span>What it does</span>
+            <input id="fTitle" type="text" maxlength="60" placeholder="Keeps the inbox at zero" />
+          </label>
+
+          <label class="field">
+            <span>How it should work</span>
+            <textarea id="fPersona" rows="4" placeholder="Anything it should always know or always do. Tone, rules, accounts to use, what to never touch."></textarea>
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <select id="fModel"></select>
+          </label>
+
+          <div class="field">
+            <span>Face</span>
+            <div class="faces" id="fFaces"></div>
+          </div>
+
+          <div class="field">
+            <span>What it remembers</span>
+            <div class="notes" id="fMemory"></div>
+            <form class="add-row" id="memForm">
+              <input id="memText" type="text" placeholder="Tell it something to keep" maxlength="200" />
+              <button class="mini solid-mini" type="submit">Keep</button>
+            </form>
+          </div>
+
+          <div class="field">
+            <span>Routines</span>
+            <div class="notes" id="fRoutines"></div>
+            <form class="add-row routine-row" id="routForm">
+              <input id="routText" type="text" placeholder="What should it do on its own?" maxlength="200" />
+              <select id="routEvery">
+                <option value="min5">Every 5 minutes</option>
+                <option value="min15">Every 15 minutes</option>
+                <option value="min30">Every 30 minutes</option>
+                <option value="hour">Every hour</option>
+                <option value="day" selected>Every day</option>
+                <option value="weekday">Weekdays</option>
+                <option value="week">Mondays</option>
+              </select>
+              <input id="routAt" type="time" value="09:00" />
+              <button class="mini solid-mini" type="submit">Add routine</button>
+            </form>
+          </div>
+
+          <div class="field">
+            <span>Always-on skills</span>
+            <div class="skill-toggles" id="botSkills"></div>
+            <p class="field-hint">These stay on for this bot every time. Create skills in <b>Settings → Skills</b>.</p>
+          </div>
+
+        </div>
+
+        <footer class="sheet-foot">
+          <button class="danger" id="deleteBot" type="button">Delete</button>
+          <button class="solid-btn" id="sheetDone" type="button">Done</button>
+        </footer>
+      </section>
+    </div>
+    <!-- settings: which computer Operator drives -->
+    <div class="sheet" id="settingsSheet" hidden>
+      <div class="sheet-scrim" id="settingsScrim"></div>
+      <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="sheet-top">
+          <h2 id="settingsTitle">Settings</h2>
+          <button class="rail-btn" id="settingsClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+
+        <nav class="tabs" id="settingsTabs">
+          <button class="tab active" data-tab="computer" type="button">Computer</button>
+          <button class="tab" data-tab="models" type="button">Models</button>
+          <button class="tab" data-tab="connectors" type="button">Connectors</button>
+          <button class="tab" data-tab="skills" type="button">Skills</button>
+        </nav>
+
+        <div class="sheet-body">
+          <div class="tab-panel" data-panel="computer">
+          <div class="set-section">
+            <div class="set-label">Which computer Operator uses</div>
+
+            <button class="target" id="targetLocal" type="button">
+              <span class="target-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/></svg></span>
+              <span class="target-text">
+                <span class="target-name">This computer</span>
+                <span class="target-sub">The machine Operator is running on</span>
+              </span>
+              <span class="target-dot" aria-hidden="true"></span>
+            </button>
+
+            <button class="target" id="targetRemote" type="button">
+              <span class="target-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="11" rx="2"/><path d="M7 20h10M9 16.5 8.5 20M15 16.5l.5 3.5M12 9.5v3"/><circle cx="12" cy="8" r="0.6"/></svg></span>
+              <span class="target-text">
+                <span class="target-name" id="remoteName">Another computer</span>
+                <span class="target-sub" id="remoteSub">Drive a laptop or PC over the network</span>
+              </span>
+              <span class="target-dot" aria-hidden="true"></span>
+            </button>
+
+            <label class="hands-off" id="handsOffRow">
+              <span class="ho-text">
+                <span class="ho-name">Work on its own desktop</span>
+                <span class="ho-sub">The agent gets a hidden desktop with its own mouse and keyboard, so you can keep working while it does. Turn off to let it share your screen.</span>
+              </span>
+              <span class="switch"><input type="checkbox" id="handsOff" /><span class="knob"></span></span>
+            </label>
+
+            <div class="remote-form" id="remoteForm" hidden>
+              <label class="field">
+                <span>Address</span>
+                <input id="remoteUrl" type="text" spellcheck="false" placeholder="http://100.66.223.8:8391" />
+              </label>
+              <label class="field">
+                <span>Token</span>
+                <input id="remoteToken" type="text" spellcheck="false" placeholder="the token the node printed" />
+              </label>
+              <div class="remote-actions">
+                <button class="pill ghost" id="remoteTest" type="button">Connect</button>
+                <span class="remote-status" id="remoteStatusText"></span>
+              </div>
+              <p class="set-hint">Run <code>start-operator-node.cmd</code> on the other machine; it prints an address and token. This link uses your network, so keep both machines on the same one (or on Tailscale).</p>
+            </div>
+          </div>
+          </div>
+
+          <div class="tab-panel" data-panel="models" hidden>
+            <div class="set-section">
+              <div class="set-label">Which brains Operator can use</div>
+
+              <div class="connector on" id="claudeProvider">
+                <div class="conn-head">
+                  <span class="conn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 20 19H4l8-15.5Z"/></svg></span>
+                  <span class="conn-text">
+                    <span class="conn-name">Claude</span>
+                    <span class="conn-sub">On your Claude subscription — nothing to set up</span>
+                  </span>
+                  <span class="acct-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                </div>
+              </div>
+
+              <div class="connector" id="nvidiaProvider">
+                <div class="conn-head">
+                  <span class="conn-ic nv"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5h5.5a5.5 5.5 0 0 1 0 11H4v-11Z"/><path d="M13 4.5h3.5a6 6 0 0 1 0 12"/></svg></span>
+                  <span class="conn-text">
+                    <span class="conn-name">NVIDIA NIM</span>
+                    <span class="conn-sub" id="nvSub">Not connected</span>
+                  </span>
+                  <button class="pill ghost" id="nvDisconnect" type="button" hidden>Remove key</button>
+                </div>
+
+                <div class="conn-body">
+                  <p class="conn-lead">One key, every other vendor's models: Meta's Llama, Google's Gemma, Mistral, DeepSeek, Qwen, Microsoft's Phi, IBM Granite, Moonshot Kimi, Z.ai GLM, OpenAI's open weights and NVIDIA's own Nemotron family — all through NVIDIA's hosted endpoint.</p>
+
+                  <label class="field">
+                    <span>API key</span>
+                    <input id="nvKey" type="password" spellcheck="false" autocomplete="off" placeholder="nvapi-…" />
+                  </label>
+                  <div class="remote-actions">
+                    <button class="pill ghost" id="nvSave" type="button">Save key</button>
+                    <span class="remote-status" id="nvStatus"></span>
+                  </div>
+                  <p class="set-hint">Get one free at <a href="https://build.nvidia.com" target="_blank" rel="noreferrer">build.nvidia.com</a> — sign in, open any model and click <b>Get API Key</b>. It is stored only on this computer. Once it is saved, every model it can reach appears in the picker next to the send button.</p>
+
+                  <div class="nv-catalog" id="nvCatalog" hidden></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="connectors" hidden>
+            <div class="set-section">
+              <div class="set-label">Connect your accounts so the agents can use them</div>
+
+              <div class="connector" id="emailConnector">
+                <div class="conn-head">
+                  <span class="conn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg></span>
+                  <span class="conn-text">
+                    <span class="conn-name">Email</span>
+                    <span class="conn-sub" id="emailSub">Not connected</span>
+                  </span>
+                  <button class="pill ghost" id="emailDisconnect" type="button" hidden>Disconnect</button>
+                </div>
+
+                <!-- connected: the signed-in account -->
+                <div class="conn-account" id="emailAccount" hidden>
+                  <span class="acct-avatar" id="acctAvatar">@</span>
+                  <span class="acct-text">
+                    <span class="acct-email" id="acctEmail"></span>
+                    <span class="acct-meta" id="acctMeta">Agents can read and send mail</span>
+                  </span>
+                  <span class="acct-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                </div>
+
+                <!-- disconnected: how to sign in -->
+                <div class="conn-body" id="emailSignin">
+                  <p class="conn-lead">Let your agents read and send your mail. Sign in with Google for Gmail, or connect any other mailbox with an app password.</p>
+
+                  <button class="gbtn" id="googleSignIn" type="button">
+                    <span class="gbtn-g" aria-hidden="true">
+                      <svg viewBox="0 0 18 18" width="18" height="18">
+                        <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92a8.78 8.78 0 0 0 2.68-6.62Z"/>
+                        <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.85.86-3.04.86-2.34 0-4.32-1.58-5.03-3.71H.96v2.33A9 9 0 0 0 9 18Z"/>
+                        <path fill="#FBBC05" d="M3.97 10.71a5.4 5.4 0 0 1 0-3.43V4.95H.96a9 9 0 0 0 0 8.09l3.01-2.33Z"/>
+                        <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59A9 9 0 0 0 .96 4.95l3.01 2.34C4.67 5.17 6.66 3.58 9 3.58Z"/>
+                      </svg>
+                    </span>
+                    <span>Sign in with Google</span>
+                  </button>
+                  <div class="conn-note" id="googleStatus" hidden></div>
+
+                  <button class="conn-more" id="googleSetupToggle" type="button" aria-expanded="false">
+                    <svg class="caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.5 7 6.5-7 6.5"/></svg>
+                    <span>Google API keys</span>
+                  </button>
+                  <div class="conn-sub-form" id="googleSetup" hidden>
+                    <p class="set-hint">One-time setup. In your <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud project</a>, enable the Gmail API and create an <b>OAuth client ID</b> of type <b>Desktop app</b>, then paste it here. Stored only on this computer.</p>
+                    <label class="field">
+                      <span>Client ID</span>
+                      <input id="gClientId" type="text" spellcheck="false" autocomplete="off" placeholder="…apps.googleusercontent.com" />
+                    </label>
+                    <label class="field">
+                      <span>Client secret</span>
+                      <input id="gClientSecret" type="password" spellcheck="false" autocomplete="off" placeholder="GOCSPX-…" />
+                    </label>
+                    <div class="remote-actions">
+                      <button class="pill ghost" id="gCredsSave" type="button">Save keys</button>
+                      <span class="remote-status" id="gCredsStatus"></span>
+                    </div>
+                  </div>
+
+                  <div class="conn-divider"><span>or</span></div>
+
+                  <button class="conn-more" id="emailAltToggle" type="button" aria-expanded="false">
+                    <svg class="caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.5 7 6.5-7 6.5"/></svg>
+                    <span>Other email with an app password</span>
+                  </button>
+                  <div class="conn-sub-form" id="emailForm" hidden>
+                    <label class="field">
+                      <span>Email address</span>
+                      <input id="emailAddr" type="email" spellcheck="false" autocomplete="off" placeholder="you@outlook.com" />
+                    </label>
+                    <label class="field">
+                      <span>App password</span>
+                      <input id="emailPass" type="password" spellcheck="false" autocomplete="off" placeholder="16-character app password" />
+                    </label>
+                    <div class="remote-actions">
+                      <button class="pill ghost" id="emailConnect" type="button">Connect</button>
+                      <span class="remote-status" id="emailStatus"></span>
+                    </div>
+                    <p class="set-hint" id="emailHint">Gmail, Yahoo and iCloud need an <b>app password</b> (made with 2-step verification on), not your normal one — but for Gmail, "Sign in with Google" above is easier. Outlook accepts your normal password.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="skills" hidden>
+            <div class="set-section">
+              <div class="set-label">Skills — reusable instructions for your agents</div>
+              <p class="set-hint">Give a skill a short name and what it should do. Turn one on for a bot in that bot's settings so it is always active, or type <b>/name</b> in a chat to use it once.</p>
+
+              <div class="skills-list" id="skillsList"></div>
+
+              <form class="skill-editor" id="skillEditor">
+                <div class="skill-editor-head" id="skillEditorHead">New skill</div>
+                <label class="field">
+                  <span>Command name</span>
+                  <div class="slash-field">
+                    <span class="slash">/</span>
+                    <input id="skName" type="text" spellcheck="false" autocomplete="off" placeholder="summarise-inbox" maxlength="40" />
+                  </div>
+                </label>
+                <label class="field">
+                  <span>What it does</span>
+                  <textarea id="skPrompt" rows="4" placeholder="e.g. Read my latest 10 emails and give me a 3-bullet summary of what needs a reply."></textarea>
+                </label>
+                <div class="remote-actions">
+                  <button class="pill solid" id="skSave" type="submit">Add skill</button>
+                  <button class="pill ghost" id="skCancel" type="button" hidden>Cancel</button>
+                  <span class="remote-status" id="skStatus"></span>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- full-screen live view of the computer Operator is using -->
+    <div class="watch" id="watch" hidden>
+      <div class="watch-top">
+        <span class="live" id="watchLive"><i></i>Live</span>
+        <span class="watch-fps" id="watchFps">0 fps</span>
+        <span class="watch-label" id="watchLabel"></span>
+        <button class="watch-close" id="watchClose" type="button" aria-label="Exit full screen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>
+          <span>Exit</span>
+        </button>
+      </div>
+      <div class="watch-stage">
+        <img id="watchFrame" alt="Live view of the computer Operator is using" />
+      </div>
+    </div>
+
+    <script src="avatar.js"></script>
+    <script src="mic.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>

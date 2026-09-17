@@ -1,0 +1,50 @@
+{
+  "name": "operator",
+  "version": "0.2.0",
+  "description": "An AI agent with its own computer. Drives the whole Windows desktop plus a dedicated browser, using your Claude subscription.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node build-icon.js",
+    "dist": "electron-builder",
+    "postinstall": "playwright install chromium"
+  },
+  "author": "Proximal",
+  "license": "UNLICENSED",
+  "build": {
+    "appId": "com.proximal.operator",
+    "productName": "Operator",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!build-icon.js",
+      "!ui/_preview*",
+      "!ui-preview.js"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Operator"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.251",
+    "imapflow": "^2.0.5",
+    "nodemailer": "^10.0.10",
+    "playwright": "^1.48.0",
+    "zod": "^4.0.0"
+  }
+}

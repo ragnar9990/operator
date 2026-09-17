@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Operator cursor</title>
+    <style>
+      :root {
+        --purple: #8B5CF6;
+        --purple-hi: #A78BFA;
+        --purple-deep: #6D28D9;
+      }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        /* The whole overlay is click-through; this is belt and braces on top of
+           setIgnoreMouseEvents so nothing here can ever steal a click. */
+        pointer-events: none;
+        cursor: none;
+      }
+
+      #ptr {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 34px;
+        height: 34px;
+        opacity: 0;
+        transform: translate(-100px, -100px);
+        transition: opacity 160ms ease;
+        will-change: transform;
+      }
+      #ptr.show { opacity: 1; }
+
+      /* A ring that fires outward on a click — the same idea as a screen
+         recorder's click indicator, so you can see what it actually pressed. */
+      #ring {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 34px;
+        height: 34px;
+        margin: -8px 0 0 -8px;
+        border: 2px solid var(--purple-hi);
+        border-radius: 50%;
+        opacity: 0;
+        transform: translate(-100px, -100px) scale(0.3);
+        will-change: transform;
+      }
+      #ring.fire { animation: tap 420ms ease-out; }
+
+      @keyframes tap {
+        0%   { opacity: 0.9; transform: var(--at) scale(0.25); }
+        100% { opacity: 0;   transform: var(--at) scale(1.5); }
+      }
+
+      .label {
+        position: absolute;
+        left: 26px;
+        top: 20px;
+        padding: 2px 7px 3px;
+        border-radius: 5px;
+        background: var(--purple-deep);
+        color: #fff;
+        font: 600 10px/1.3 "Geist", "Segoe UI", sans-serif;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ring"></div>
+
+    <div id="ptr">
+      <svg width="34" height="34" viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="fill" x1="0" y1="0" x2="0.6" y2="1">
+            <stop offset="0%" stop-color="#A78BFA" />
+            <stop offset="100%" stop-color="#6D28D9" />
+          </linearGradient>
+          <filter id="drop" x="-60%" y="-60%" width="240%" height="240%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="1.8" flood-color="#000" flood-opacity="0.55" />
+          </filter>
+        </defs>
+
+        <!-- Classic arrow silhouette: instantly readable as a pointer, but in
+             Operator's purple and a little heavier than the system one so you
+             can tell at a glance which cursor is which. -->
+        <path
+          d="M7 4.5 L7 25.5 L12.4 20.4 L16.1 28.4 L19.9 26.6 L16.2 18.9 L23.6 18.6 Z"
+          fill="url(#fill)"
+          stroke="#FFFFFF"
+          stroke-width="1.6"
+          stroke-linejoin="round"
+          filter="url(#drop)"
+        />
+      </svg>
+      <div class="label">Operator</div>
+    </div>
+
+    <script>
+      const ptr = document.getElementById('ptr');
+      const ring = document.getElementById('ring');
+      let hideTimer = null;
+
+      // Matches the easing the Windows helper uses, so the drawn cursor and the
+      // real one stay together instead of drifting apart mid-glide.
+      const EASE = 'cubic-bezier(0.45, 0, 0.35, 1)';
+
+      window.operatorCursor.onMove(({ x, y, ms, action }) => {
+        clearTimeout(hideTimer);
+        ptr.classList.add('show');
+
+        ptr.style.transition = ms > 0
+          ? `transform ${Math.round(ms)}ms ${EASE}, opacity 160ms ease`
+          : 'opacity 160ms ease';
+        ptr.style.transform = `translate(${x}px, ${y}px)`;
+
+        if (action === 'click' || action === 'scroll') {
+          // Fire the ring when the pointer arrives, not when it sets off.
+          setTimeout(() => {
+            ring.style.setProperty('--at', `translate(${x}px, ${y}px)`);
+            ring.classList.remove('fire');
+            void ring.offsetWidth;          // restart the animation
+            ring.classList.add('fire');
+          }, Math.round(ms));
+        }
+
+        // Fade out once the agent stops moving, so it isn't sitting on your
+        // screen for the rest of the day.
+        hideTimer = setTimeout(() => ptr.classList.remove('show'), 4000);
+      });
+
+      window.operatorCursor.onHide(() => {
+        clearTimeout(hideTimer);
+        ptr.classList.remove('show');
+      });
+    </script>
+  </body>
+</html>
