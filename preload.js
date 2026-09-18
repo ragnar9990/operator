@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('operator', {
   // NVIDIA NIM — one key, every vendor's models
   nvidiaStatus: () => ipcRenderer.invoke('nvidia:status'),
   nvidiaSetKey: (key) => ipcRenderer.invoke('nvidia:set', key),
+  nvidiaSweep: () => ipcRenderer.invoke('nvidia:sweep'),
+  onNvidiaProgress: (cb) => ipcRenderer.on('nvidia-progress', (_e, p) => cb(p)),
 
   openBrowser: (url) => ipcRenderer.invoke('browser:open', url),
   onEvent: (cb) => ipcRenderer.on('agent-event', (_e, payload) => cb(payload)),
@@ -59,7 +61,8 @@ contextBridge.exposeInMainWorld('operator', {
   codeSetBot: (id, botId) => ipcRenderer.invoke('codeChats:setBot', id, botId),
   codePickFolder: (id) => ipcRenderer.invoke('code:pickFolder', id),
   codeRun: (chatId, prompt) => ipcRenderer.invoke('code:run', chatId, prompt),
-  codeStop: () => ipcRenderer.invoke('code:stop'),
+  codeStop: (chatId) => ipcRenderer.invoke('code:stop', chatId),
+  codeRunningChats: () => ipcRenderer.invoke('code:running'),
   onCode: (cb) => ipcRenderer.on('code-event', (_e, payload) => cb(payload)),
 
   connectorsList: () => ipcRenderer.invoke('connectors:list'),

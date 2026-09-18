@@ -70,12 +70,14 @@ function setLive(word, on) {
 
 function startRun() {
   if (window.__applyHandsOff) window.__applyHandsOff();  // survive a helper restart
+  stopBtn.classList.remove('stopping');
   busy = true;
   startedAt = Date.now();
   actionCount = 0;
   actionsEl.textContent = '0 actions';
   document.body.classList.add('started');
   runBtn.disabled = true;
+  runBtn.hidden = true;
   stopBtn.hidden = false;
   railState.classList.add('on');
   railState.title = 'Running';
@@ -92,6 +94,7 @@ function endRun() {
   hideDots();
   if (live) { live.el.classList.remove('live'); live = null; }
   runBtn.disabled = false;
+  runBtn.hidden = false;
   stopBtn.hidden = true;
   railState.classList.remove('on');
   railState.title = 'Idle';
@@ -658,7 +661,9 @@ async function paintSheet() {
     if (m.providerName !== group) {
       group = m.providerName;
       holder = document.createElement('optgroup');
-      holder.label = m.vendor === 'nvidia' ? `${group} · NVIDIA NIM` : group;
+      holder.label = m.vendor !== 'nvidia' ? group
+        : group === 'NVIDIA' ? 'NVIDIA NIM'
+        : `${group} · NVIDIA NIM`;
       fModel.appendChild(holder);
     }
     const o = document.createElement('option');
@@ -926,8 +931,8 @@ window.operator.onEvent((evt) => {
 
   if (evt.type === 'status') {
     if (evt.text === 'running') { if (!busy) startRun(); }
-    else if (evt.text === 'idle' && busy) {
-      endRun();
+    else if (evt.text === 'idle') {
+      if (busy) endRun();
       // pick the finished transcript back up so a follow-up carries on from it
       if (chat && chat.theirs && evt.chatId === chat.id) adopt(evt.botId, chat.id);
     }
@@ -1105,7 +1110,15 @@ async function run(override) {
 }
 
 composer.addEventListener('submit', (e) => { e.preventDefault(); run(); });
-stopBtn.addEventListener('click', () => window.operator.stopTask());
+// Stop is instant here, not when the backend gets round to confirming it: a
+// tool already running can take a while to unwind, and watching a dead Stop
+// button for ten seconds is the thing that made it feel broken.
+stopBtn.addEventListener('click', () => {
+  if (stopBtn.classList.contains('stopping')) return;
+  stopBtn.classList.add('stopping');
+  window.operator.stopTask();
+  endRun();
+});
 
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); }
@@ -1158,6 +1171,8 @@ function paintPicker() {
   pickerName.textContent = m ? m.name
     : chosenModel && chosenModel.startsWith('nim:') ? chosenModel.split('/').pop()
     : 'Model';
+  // The label is clipped when the name is long, so the full one lives here.
+  pickerBtn.title = m ? `${m.providerName} · ${m.note}` : 'Which model runs the task';
   menuList.querySelectorAll('.opt').forEach((o) => o.classList.toggle('on', o.dataset.id === chosenModel));
 }
 
@@ -1734,6 +1749,10 @@ input.focus();
   const nvStatus = document.getElementById('nvStatus');
   const nvRemove = document.getElementById('nvDisconnect');
   const nvCatalog = document.getElementById('nvCatalog');
+  const nvCheck = document.getElementById('nvCheck');
+  const nvCheckRow = document.getElementById('nvCheckRow');
+  const nvCheckHint = document.getElementById('nvCheckHint');
+  const nvCheckStatus = document.getElementById('nvCheckStatus');
 
   const nvSay = (text, kind) => {
     nvStatus.textContent = text || '';
@@ -1780,6 +1799,9 @@ input.focus();
     nvRemove.hidden = !on;
     nvKey.value = '';
     nvKey.placeholder = on ? 'Saved — paste a new key to replace it' : 'nvapi-…';
+    // Only worth offering once there is a key to check it with.
+    if (nvCheckRow) nvCheckRow.hidden = !on;
+    if (nvCheckHint) nvCheckHint.hidden = !on;
   }
 
   nvSave.addEventListener('click', async () => {
@@ -1791,7 +1813,11 @@ input.focus();
       const r = await window.operator.nvidiaSetKey(key);
       if (!r || !r.ok) { nvSay((r && r.error) || 'That did not work.', 'bad'); return; }
       apply(r.status);
-      nvSay(`Saved — ${r.models} models available.`, 'ok');
+      // The key is saved either way; a warning means the test call did not get
+      // through, which is worth reading but not worth throwing the key away over.
+      if (r.warning) nvSay('Saved, but the test call failed — try running a task. ' + r.warning, 'warn');
+      else nvSay(`Saved — ${r.models} models listed. Run the check below to see which of them your key can actually run.`, 'ok');
+      if (nvCheckStatus) { nvCheckStatus.textContent = ''; nvCheckStatus.className = 'remote-status'; }
       await paintCatalog(true);
       // The picker is built from this list, so refresh it while it is closed.
       if (window.__reloadModels) window.__reloadModels();
@@ -1811,6 +1837,34 @@ input.focus();
     nvCatalog.hidden = true;
     if (window.__reloadModels) window.__reloadModels();
   });
+
+  // Finding out what the key can actually run. Slow, so it reports as it goes.
+  if (nvCheck && window.operator.onNvidiaProgress) {
+    window.operator.onNvidiaProgress((p) => {
+      if (!p || p.finished) return;
+      nvCheckStatus.textContent = `Checking… ${p.done} of ${p.total}`;
+      nvCheckStatus.className = 'remote-status';
+    });
+
+    nvCheck.addEventListener('click', async () => {
+      nvCheck.disabled = true;
+      nvCheckStatus.textContent = 'Checking…';
+      try {
+        const r = await window.operator.nvidiaSweep();
+        if (!r || !r.ok) {
+          nvCheckStatus.textContent = (r && r.error) || 'That did not work.';
+          nvCheckStatus.className = 'remote-status bad';
+          return;
+        }
+        nvCheckStatus.textContent = `${r.available} of ${r.checked} models run on your key. The rest are out of the picker.`;
+        nvCheckStatus.className = 'remote-status ok';
+        await paintCatalog(true);
+        if (window.__reloadModels) window.__reloadModels();
+      } finally {
+        nvCheck.disabled = false;
+      }
+    });
+  }
 
   const conn = document.getElementById('emailConnector');
   const sub = document.getElementById('emailSub');
@@ -2135,7 +2189,9 @@ input.focus();
     const isCode = m.dataset.mode === 'code';
     shell.hidden = isCode;
     codeView.hidden = !isCode;
-    if (isCode) { loadHistory(); loadModels(); loadBotChoices().then(paintBot); }
+    // Ask what is still running before painting the list, so a chat that has
+    // been building away while you were on the Agents side shows it.
+    if (isCode) { syncRunning().then(loadHistory); loadModels(); loadBotChoices().then(paintBot); }
   }));
 
   const newBtn = document.getElementById('codeNewChat');
@@ -2153,11 +2209,25 @@ input.focus();
   const menu = document.getElementById('codeMenu');
 
   let chat = null;
-  let busy = false;
+  // Which chats are mid-run, not whether "the coding side" is busy — several
+  // can be working at once and the buttons belong to whichever one you are
+  // looking at.
+  const running = new Set();
   let group = null;
   let models = [];
 
   const esc2 = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // The main process is the authority on what is running; the window may have
+  // been reloaded, or opened on the Agents side while a build carried on here.
+  async function syncRunning() {
+    try {
+      const ids = (await window.operator.codeRunningChats()) || [];
+      running.clear();
+      ids.forEach((id) => running.add(id));
+    } catch (_) { /* older preload; the events will fill it in */ }
+    paintBusy();
+  }
 
   async function loadHistory() {
     const list = await window.operator.codeChatsList();
@@ -2165,12 +2235,16 @@ input.focus();
     history.innerHTML = '';
     list.forEach((c) => {
       const row = document.createElement('div');
-      row.className = 'code-chat-row' + (chat && c.id === chat.id ? ' on' : '');
+      const working = running.has(c.id);
+      row.className = 'code-chat-row' + (chat && c.id === chat.id ? ' on' : '') + (working ? ' working' : '');
       row.innerHTML =
         '<button class="code-chat-open" type="button">' +
         '<span class="code-chat-title">' + esc2(c.title || 'New chat') + '</span>' +
         (c.cwdName ? '<span class="code-chat-folder">' + esc2(c.cwdName) + '</span>' : '') +
         '</button>' +
+        // A chat working away in the background says so here, since its own
+        // transcript is not on screen.
+        (working ? '<span class="code-chat-spin" title="Working"></span>' : '') +
         '<button class="code-chat-del" type="button" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>';
       row.querySelector('.code-chat-open').addEventListener('click', () => openChat(c.id));
       row.querySelector('.code-chat-del').addEventListener('click', async (e) => {
@@ -2190,6 +2264,7 @@ input.focus();
     paintModel();
     paintBot();
     renderChat();
+    paintBusy();
     loadHistory();
   }
 
@@ -2199,6 +2274,7 @@ input.focus();
     paintFolder();
     paintModel();
     paintBot();
+    paintBusy();
     loadHistory();
     input.focus();
   });
@@ -2216,25 +2292,64 @@ input.focus();
     if (r && r.ok) { chat.cwd = r.cwd; chat.cwdName = r.name; paintFolder(); loadHistory(); }
   });
 
+  // The same list the agent side offers — Claude through the Agent SDK, and
+  // every NIM model through the toolset code.js builds for them. A model that
+  // cannot call tools cannot edit files either, so it is flagged the same way.
+  const codeList = document.getElementById('codeMenuList');
+  const codeSearch = document.getElementById('codeMenuSearch');
+  let codeFilter = '';
+
   async function loadModels() {
     if (models.length) return;
     try {
       const info = await window.operator.listModels();
-      // The coding side is Claude Code itself, so only Claude belongs here —
-      // the NIM models in that list drive the computer, not this.
-      models = ((info && info.models) || []).filter((m) => m.vendor === 'claude');
-      menu.innerHTML = models.map((m) =>
-        '<button class="opt" type="button" role="option" data-id="' + m.id + '">' +
-        '<span class="opt-name">' + esc2(m.name) + '</span>' +
-        (m.note ? '<span class="opt-note">' + esc2(m.note) + '</span>' : '') + '</button>'
-      ).join('');
-      menu.querySelectorAll('.opt').forEach((o) => o.addEventListener('click', async () => {
-        const mid = o.dataset.id;
-        if (chat) { chat.model = mid; await window.operator.codeSetModel(chat.id, mid); }
-        paintModel();
-        hideMenu();
-      }));
+      models = (info && info.models) || [];
+      buildCodeMenu();
     } catch (_) {}
+  }
+
+  function buildCodeMenu() {
+    const shown = models.filter((m) => {
+      if (!codeFilter) return true;
+      const hay = [m.name, m.id, m.note, m.providerName, ...(m.tags || [])].join(' ').toLowerCase();
+      return codeFilter.split(/\s+/).every((w) => hay.includes(w));
+    });
+
+    if (!shown.length) {
+      codeList.innerHTML = '<div class="menu-empty">No model matches that.</div>';
+      return;
+    }
+
+    let group = null;
+    let html = '';
+    for (const m of shown) {
+      if (m.providerName !== group) {
+        group = m.providerName;
+        html += '<div class="menu-label' + (m.vendor === 'nvidia' ? ' via-nim' : '') + '">' + esc2(group) + '</div>';
+      }
+      const tags = (m.tags || []).map((t) =>
+        '<span class="tag' + (t === 'no tool calling' ? ' warn' : '') + '">' + esc2(t) + '</span>').join('');
+      // Same markup as the agent picker, so the two menus share their styling
+      // instead of drifting apart.
+      html += '<button class="opt" type="button" role="option" data-id="' + m.id + '">' +
+        '<span class="body"><span class="name">' + esc2(m.name) + '</span>' +
+        '<span class="note">' + esc2(m.note || '') + tags + '</span></span></button>';
+    }
+    codeList.innerHTML = html;
+
+    codeList.querySelectorAll('.opt').forEach((o) => o.addEventListener('click', async () => {
+      const mid = o.dataset.id;
+      if (chat) { chat.model = mid; await window.operator.codeSetModel(chat.id, mid); }
+      paintModel();
+      hideMenu();
+    }));
+  }
+
+  if (codeSearch) {
+    codeSearch.addEventListener('input', () => {
+      codeFilter = codeSearch.value.trim().toLowerCase();
+      buildCodeMenu();
+    });
   }
 
   function paintModel() {
@@ -2293,6 +2408,16 @@ input.focus();
     const open = menu.hidden;
     menu.hidden = !open;
     pickerBtn.setAttribute('aria-expanded', String(open));
+    if (open) {
+      // It opens upward, so its ceiling is the room above the button.
+      menu.style.maxHeight = Math.max(200, pickerBtn.getBoundingClientRect().top - 20) + 'px';
+      if (codeSearch) {
+        codeFilter = '';
+        codeSearch.value = '';
+        buildCodeMenu();
+        codeSearch.focus();
+      }
+    }
   });
   document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== pickerBtn) hideMenu(); });
 
@@ -2302,6 +2427,10 @@ input.focus();
   }
 
   function renderChat() {
+    // The old thread's nodes are about to go; anything still pointing into it
+    // would append to a detached element.
+    live = null;
+    group = null;
     thread.querySelectorAll('.turn, .csteps').forEach((n) => n.remove());
     const turns = (chat && chat.turns) || [];
     if (!turns.length) { if (intro) { if (!intro.isConnected) thread.appendChild(intro); intro.hidden = false; } return; }
@@ -2394,7 +2523,16 @@ input.focus();
     return row;
   }
 
-  function setBusy(on) { busy = on; runBtn.hidden = on; stopBtn.hidden = !on; }
+  const isBusy = () => Boolean(chat && running.has(chat.id));
+
+  // Run/stop always describe the chat on screen, so switching to one that is
+  // working shows Stop, and switching away shows Run again.
+  function paintBusy() {
+    const on = isBusy();
+    runBtn.hidden = on;
+    stopBtn.hidden = !on;
+    if (on) stopBtn.classList.remove('stopping');
+  }
 
   let live = null;      // the reply bubble currently streaming
 
@@ -2417,10 +2555,19 @@ input.focus();
   }
 
   window.operator.onCode((evt) => {
+    // Run state is tracked for every chat, including the ones you are not
+    // looking at — that is the whole point of letting them run at once.
+    if (evt.type === 'status' && evt.chatId) {
+      if (evt.text === 'running') running.add(evt.chatId);
+      else running.delete(evt.chatId);
+      paintBusy();
+      loadHistory();     // repaint the sidebar's working markers
+      return;
+    }
+
+    // Everything else is transcript, and belongs to the chat on screen.
     if (chat && evt.chatId && evt.chatId !== chat.id) return;
     switch (evt.type) {
-      case 'status': setBusy(evt.text === 'running'); if (evt.text === 'idle') loadHistory(); break;
-
       // the narration, streamed like Claude Code
       case 'say_start':
         live = addTurn('says live', '');
@@ -2443,20 +2590,22 @@ input.focus();
         if (live) { live.classList.remove('live'); live = null; }
         closeGroup();
         if (evt.text) addTurn('says', esc2(evt.text).replace(/\n/g, '<br>'));
-        setBusy(false);
+        if (evt.chatId) running.delete(evt.chatId);
+        paintBusy();
         break;
       case 'error':
         if (live) { live.classList.remove('live'); live = null; }
         closeGroup();
         addTurn('says', '<span style="color:var(--fail)">' + esc2(evt.text) + '</span>');
-        setBusy(false);
+        if (evt.chatId) running.delete(evt.chatId);
+        paintBusy();
         break;
     }
   });
 
   async function run() {
     const task = input.value.trim();
-    if (!task || busy) return;
+    if (!task || isBusy()) return;
     if (!chat) { chat = await window.operator.codeChatCreate(); loadHistory(); }
     if (!chat.cwd) {
       const r = await window.operator.codePickFolder(chat.id);
@@ -2465,12 +2614,37 @@ input.focus();
     }
     addTurn('you', esc2(task).replace(/\n/g, '<br>'));
     input.value = ''; input.style.height = 'auto';
-    setBusy(true);
-    await window.operator.codeRun(chat.id, task);
+
+    // Optimistic: the button flips before the main process answers, and this
+    // chat's id is what gets marked — not some global "busy".
+    running.add(chat.id);
+    paintBusy();
+    loadHistory();
+
+    const started = chat.id;
+    const r = await window.operator.codeRun(started, task);
+    if (r && r.ok === false) {
+      running.delete(started);
+      paintBusy();
+      if (chat && chat.id === started) {
+        addTurn('says', '<span style="color:var(--fail)">' + esc2(r.error) + '</span>');
+      }
+      loadHistory();
+    }
   }
 
   composer.addEventListener('submit', (e) => { e.preventDefault(); run(); });
-  stopBtn.addEventListener('click', () => window.operator.codeStop());
+  stopBtn.addEventListener('click', () => {
+    if (!chat || stopBtn.classList.contains('stopping')) return;
+    stopBtn.classList.add('stopping');
+    window.operator.codeStop(chat.id);
+    // Don't wait for the run to unwind to admit it is over.
+    running.delete(chat.id);
+    if (live) { live.classList.remove('live'); live = null; }
+    closeGroup();
+    paintBusy();
+    loadHistory();
+  });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
 })();

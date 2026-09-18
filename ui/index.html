@@ -79,7 +79,6 @@
           <button class="target-badge" id="targetBadge" type="button" title="Which computer Operator is using — click to change">
             <i></i><span id="targetBadgeText">This computer</span>
           </button>
-          <button class="pill stop" id="stopBtn" type="button" hidden>Stop</button>
         </header>
 
         <div class="split">
@@ -144,6 +143,9 @@
                     </div>
                   </div>
 
+                  <button type="button" class="round halt" id="stopBtn" title="Stop this task" aria-label="Stop" hidden>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="7.5" width="9" height="9" rx="1.6" fill="currentColor" stroke="none"/></svg><span class="halt-ring" aria-hidden="true"></span>
+                  </button>
                   <button type="submit" class="round send" id="runBtn" title="Run" aria-label="Run">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11.5 12 5.5l6 6" /></svg>
                   </button>
@@ -218,10 +220,18 @@
                   <span id="codePickerName">Sonnet 5</span>
                   <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
                 </button>
-                <div class="menu" id="codeMenu" role="listbox" aria-label="Model" hidden></div>
+                <div class="menu" id="codeMenu" hidden>
+                  <div class="menu-search">
+                    <svg class="mag" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                    <input id="codeMenuSearch" type="text" placeholder="Search models" spellcheck="false" autocomplete="off" aria-label="Search models" />
+                  </div>
+                  <div class="menu-list" id="codeMenuList" role="listbox" aria-label="Model"></div>
+                </div>
               </div>
 
-              <button type="button" class="pill stop" id="codeStop" hidden>Stop</button>
+              <button type="button" class="round halt" id="codeStop" title="Stop this chat" aria-label="Stop" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="7.5" width="9" height="9" rx="1.6" fill="currentColor" stroke="none"/></svg><span class="halt-ring" aria-hidden="true"></span>
+              </button>
               <button type="submit" class="round send" id="codeRun" title="Run" aria-label="Run">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11.5 12 5.5l6 6"/></svg>
               </button>
@@ -414,9 +424,15 @@
                     <button class="pill ghost" id="nvSave" type="button">Save key</button>
                     <span class="remote-status" id="nvStatus"></span>
                   </div>
-                  <p class="set-hint">Get one free at <a href="https://build.nvidia.com" target="_blank" rel="noreferrer">build.nvidia.com</a> — sign in, open any model and click <b>Get API Key</b>. It is stored only on this computer. Once it is saved, every model it can reach appears in the picker next to the send button.</p>
+                  <p class="set-hint">Get one free at <a href="https://build.nvidia.com" target="_blank" rel="noreferrer">build.nvidia.com</a> — sign in, open any model and click <b>Get API Key</b>. Paste the key or the whole <code>Bearer …</code> line, either works. It is stored only on this computer.</p>
 
                   <div class="nv-catalog" id="nvCatalog" hidden></div>
+
+                  <div class="remote-actions" id="nvCheckRow" hidden>
+                    <button class="pill ghost" id="nvCheck" type="button">Check which models run</button>
+                    <span class="remote-status" id="nvCheckStatus"></span>
+                  </div>
+                  <p class="set-hint" id="nvCheckHint" hidden>NVIDIA lists every model it has ever published, but only serves some of them to any given key. This tries each one and takes the dead ones out of the picker. It takes a minute or two.</p>
                 </div>
               </div>
             </div>

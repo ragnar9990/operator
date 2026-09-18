@@ -73,7 +73,8 @@ USING THE SCREEN:
 - list_windows is usually the fastest way to find something: it tells you every open window, which monitor's coordinates it sits at, and what has focus. Use it before screenshotting every monitor in turn. focus_window brings one to the front — always focus a window before sending it keystrokes.
 - Clicks, drags, scrolls and key presses return a fresh screenshot — look at it before the next step. Typing and plain mouse moves do not, to save time; screenshot yourself if you need to check them.
 - SPEED MATTERS MORE THAN ANYTHING ELSE HERE. Every separate tool call costs the user seconds of waiting, while the actions themselves take milliseconds. The waiting is almost entirely you, not the computer.
-- So plan two or three moves ahead and send them as ONE screen_do. Clicking a field, typing into it and pressing Enter is one screen_do with three steps, not three calls. Opening a menu and picking an item is one screen_do. Only fall back to single tools when you genuinely cannot predict the next step without looking.
+- So plan as far ahead as you reasonably can and send it as ONE screen_do (up to 20 steps). Clicking a field, typing into it and pressing Enter is one screen_do with three steps, not three calls. Opening a menu and picking an item is one screen_do. Filling a whole form is one screen_do. Only fall back to single tools when you genuinely cannot predict the next step without looking.
+- Measured on this machine: a click costs about 2ms and a screenshot about 80ms. Your own turn costs seconds. So the question is never "is this action cheap?" - it is "can I avoid another round trip?". Two extra steps in one screen_do are free; one extra look is not.
 - Don't re-look at a screen you have already seen and have not changed, and don't screenshot every monitor when list_windows would tell you where something is.
 - Prefer run_command outright when the job is really a file or settings job. Moving twenty files is one command; it is twenty minutes of clicking.
 - launch_app opens a program by name ("notepad", "calc", "explorer"), a file path, or a URL.
@@ -267,7 +268,7 @@ async function runTask(prompt, { userDataDir, onEvent, abortController, model, r
           amount: z.number().optional(),
           seconds: z.number().optional().describe('For wait.'),
           title: z.string().optional().describe('For focus: part of a window title.'),
-        })).min(1).max(12),
+        })).min(1).max(20),
         display,
       },
       async ({ steps, display: d }) => {
@@ -720,6 +721,14 @@ ${activeSkill.prompt}`;
       // talking about skills that have nothing to do with it. Operator's own
       // skills are injected into the system prompt above, not through the SDK.
       skills: [],
+      // The single biggest thing that makes driving a screen feel slow. `effort`
+      // defaults to 'high' — deep reasoning — and that runs before EVERY click,
+      // keystroke and screenshot. But this loop is perception plus a short
+      // decision, repeated; the thinking is nearly all wasted, and the user is
+      // sitting there watching the cursor not move. 'low' is minimal thinking
+      // and the fastest responses, which is exactly the right trade here.
+      // Pick a deeper model in the command bar when a task genuinely needs care.
+      effort: 'low',
       permissionMode: 'bypassPermissions',
       maxTurns: 150,
       abortController,

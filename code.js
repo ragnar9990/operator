@@ -2,8 +2,15 @@
 // SDK with its full built-in toolset (Read, Write, Edit, Bash, Grep, Glob, …),
 // pointed at a project folder. Where agent.js sandboxes the model to a browser
 // and a screen, this hands it a real codebase.
+//
+// A model from NVIDIA NIM can code here too. It cannot borrow Claude Code's
+// tools — it only has chat-completions — so it gets the same six tools rebuilt
+// in plain Node (code-tools.js), under the same names, and runs through the
+// same loop as the agent side. The transcript looks identical either way.
 
 const path = require('path');
+const nim = require('./nim');
+const { buildCodeTools } = require('./code-tools');
 
 const CODE_SYSTEM = `You are Operator's coding assistant. You work exactly like Claude Code: you have the user's real files, a shell, and search, all rooted at the current working folder. Be decisive and finish the task.
 
@@ -43,7 +50,40 @@ ${notes}`;
   return s;
 }
 
+// What a NIM model needs spelled out that Claude Code already knows: which
+// tools exist, where it is, and that "the folder" is a real place on Windows.
+function nimSystemFor(bot, cwd) {
+  return `${systemFor(bot)}
+
+YOUR TOOLS. You have exactly these, and they all work inside ${cwd}:
+- LS(path?) — list a folder. Start here when you do not know what is in the project.
+- Glob(pattern) — find files by name, e.g. "**/*.js".
+- Grep(pattern, glob?) — search file contents, with line numbers.
+- Read(file_path) — read a file. ALWAYS read a file before you edit it, so your old_string matches exactly.
+- Write(file_path, content) — write a whole file, creating folders as needed.
+- Edit(file_path, old_string, new_string) — replace an exact piece of text. The text must match the file character for character, indentation included.
+- Bash(command) — run ${process.platform === 'win32' ? 'a PowerShell command (this is Windows — PowerShell syntax, not bash)' : 'a shell command'} in the project folder.
+
+Paths are relative to the project folder. Do not try to reach outside it with the file tools.
+Call tools rather than describing what you would do, and keep going until the task is finished. When you are done, say in one or two sentences what you changed and how to run it.`;
+}
+
 async function runCode(prompt, { cwd, onEvent, abortController, resume, model, bot }) {
+  // A NIM model takes the same job through chat-completions, with the toolset
+  // built here instead of borrowed from the SDK.
+  if (nim.isNimModel(model)) {
+    return nim.runTask({
+      prompt,
+      model,
+      systemPrompt: nimSystemFor(bot, cwd),
+      tools: buildCodeTools(cwd),
+      onEvent: (evt) => onEvent(evt.type === 'tool' ? { ...evt, input: summarizeInput(evt.name, evt.input) } : evt),
+      abortController,
+      resume,
+      maxTurns: 120,
+    });
+  }
+
   const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
   const stream = query({

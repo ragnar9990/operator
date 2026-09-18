@@ -454,10 +454,15 @@ function Resolve-Display($d) {
     $idx
 }
 
-function Get-Scale([int]$idx) {
+# $maxW overrides the default only for the picture; click coordinates always
+# resolve against $MaxWidth (see ConvertTo-Physical), so what the agent measures
+# on its screenshot stays what it hits. 0 means native — no downscale at all.
+function Get-Scale([int]$idx, [int]$maxW = 0) {
+    if ($maxW -eq 0) { $maxW = $script:MaxWidth }
+    if ($maxW -lt 0) { return 1.0 }
     $w = $Displays[$idx - 1].width
-    if ($w -le $MaxWidth) { return 1.0 }
-    $MaxWidth / [double]$w
+    if ($w -le $maxW) { return 1.0 }
+    $maxW / [double]$w
 }
 
 # Scaled display coords -> physical virtual-desktop coords.
@@ -467,9 +472,9 @@ function ConvertTo-Physical([int]$idx, [double]$x, [double]$y) {
     @([int][math]::Round($d.left + $x / $s), [int][math]::Round($d.top + $y / $s))
 }
 
-function Get-Capture([int]$idx) {
+function Get-Capture([int]$idx, [int]$maxW = 0, [int]$quality = 0) {
     $d = $Displays[$idx - 1]
-    $s = Get-Scale $idx
+    $s = Get-Scale $idx $maxW
     $tw = [int][math]::Round($d.width * $s)
     $th = [int][math]::Round($d.height * $s)
 
@@ -514,7 +519,13 @@ function Get-Capture([int]$idx) {
     # quality-82 JPEG. The model is charged by dimensions either way, so this is
     # pure latency saved on encode and on the pipe, and text stays readable.
     $ms = New-Object System.IO.MemoryStream
-    $shot.Save($ms, $script:JpegCodec, $script:JpegParams)
+    $params = $script:JpegParams
+    if ($quality -gt 0 -and $quality -ne 82) {
+        $params = New-Object System.Drawing.Imaging.EncoderParameters(1)
+        $params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter(
+            [System.Drawing.Imaging.Encoder]::Quality, [int64]$quality)
+    }
+    $shot.Save($ms, $script:JpegCodec, $params)
     $shot.Dispose()
     $b64 = [Convert]::ToBase64String($ms.ToArray())
     $ms.Dispose()
@@ -560,7 +571,13 @@ while ($true) {
             "screenshot" {
                 $idx = Resolve-Display $req.display
                 $script:Current = $idx
-                $shot = Get-Capture $idx
+                # w/q are the watch view asking for a crisp full-size frame. The
+                # agent never sends them, so its picture and its click coordinates
+                # stay in the same 1280-wide space.
+                $reqW = if ($null -ne $req.w) { [int]$req.w } else { 0 }
+                $reqQ = if ($null -ne $req.q) { [int]$req.q } else { 0 }
+                if ($reqW -eq 0 -and $null -ne $req.w) { $reqW = -1 }   # 0 means native
+                $shot = Get-Capture $idx $reqW $reqQ
                 Reply @{ ok = $true; image = $shot.image; mime = $shot.mime
                          width = $shot.width; height = $shot.height
                          display = $idx; displays = $Displays.Count

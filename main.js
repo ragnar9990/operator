@@ -66,8 +66,19 @@ app.whenReady().then(() => {
   store.init(app.getPath('userData'));
 
   // The NVIDIA NIM key, if there is one, and the live list of what that key
-  // can reach. Both are cheap and neither blocks the window.
-  agent.nim.setKey(store.getNvidia().key);
+  // can reach. Both are cheap and neither blocks the window. A key saved before
+  // the paste-cleaning existed — "Bearer nvapi-…" straight out of NVIDIA's code
+  // sample — is repaired here rather than failing every task until it is typed
+  // in again.
+  const { key: saved, unavailable } = store.getNvidia();
+  const clean = agent.nim.cleanKey(saved);
+  if (clean !== saved) { store.setNvidia(clean); store.setNvidiaUnavailable(unavailable); }
+  agent.nim.setKey(clean);
+
+  // What NVIDIA would not serve last time stays out of the picker, and a model
+  // that 404s during a task joins it.
+  agent.nim.setUnavailable(unavailable);
+  agent.nim.onUnavailableChange((ids) => store.setNvidiaUnavailable(ids));
   agent.nim.refresh().catch(() => {});
 
   // Hand Operator another machine at launch:
@@ -122,9 +133,10 @@ const nvidiaStatus = () => {
 
 ipcMain.handle('nvidia:status', async () => nvidiaStatus());
 
-// Saving a key checks it first — a key that NVIDIA rejects is worse than no
-// key, because the picker would go on offering models that cannot run. An
-// empty key clears it.
+// Saving a key tries it, but never refuses to save it. NVIDIA's 403 means
+// "authorization failed" for a wrong key and for a model you simply have no
+// access to, so a failed probe is a warning, not a verdict — the key is the
+// user's and they can go and run a task with it. An empty key clears it.
 ipcMain.handle('nvidia:set', async (_e, key) => {
   if (!String(key || '').trim()) {
     store.setNvidia('');
@@ -132,13 +144,45 @@ ipcMain.handle('nvidia:set', async (_e, key) => {
     return { ok: true, status: nvidiaStatus(), models: 0 };
   }
 
-  const check = await agent.nim.testKey(key);
-  if (!check.ok) return { ok: false, error: check.error, status: nvidiaStatus() };
+  // Whatever they pasted, find the key in it — then check its SHAPE before
+  // writing anything. Whether NVIDIA likes a key is a judgement call worth
+  // overriding, but text that cannot be a key at all must never be allowed to
+  // overwrite one that is: that loses the real key with no way back.
+  const clean = agent.nim.cleanKey(key);
+  const problem = agent.nim.keyProblem(clean);
+  if (problem) return { ok: false, error: problem, status: nvidiaStatus() };
 
-  store.setNvidia(key);
+  store.setNvidia(clean);
   agent.nim.setKey(store.getNvidia().key);
   await agent.nim.refresh({ force: true });
-  return { ok: true, status: nvidiaStatus(), models: agent.nim.listModels().length };
+
+  const check = await agent.nim.testKey();
+  return {
+    ok: true,
+    status: nvidiaStatus(),
+    models: agent.nim.listModels().length,
+    warning: check.ok ? null : check.error,
+  };
+});
+
+// NVIDIA's published catalog is not a list of what your key can run — most of
+// it answers "not found for account". This tries every one of them, a token at
+// a time, so the picker can stop offering models that cannot work. It takes a
+// minute or two, hence the progress.
+let sweeping = null;
+ipcMain.handle('nvidia:sweep', async () => {
+  if (sweeping) return { ok: false, error: 'Already checking.' };
+  sweeping = new AbortController();
+  try {
+    const r = await agent.nim.sweep({
+      signal: sweeping.signal,
+      onProgress: (p) => send('nvidia-progress', p),
+    });
+    return r;
+  } finally {
+    sweeping = null;
+    send('nvidia-progress', { done: 0, total: 0, finished: true });
+  }
 });
 
 async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) {
@@ -168,7 +212,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   const skillIndex = store.listSkills().map((s) => ({ name: s.name, title: s.title }));
 
   const abortController = new AbortController();
-  running = { abortController, botId, chatId };
+  // A stopped run may still be unwinding when the next one starts, so each run
+  // carries a token and only ever tidies up after itself.
+  const token = {};
+  running = { abortController, botId, chatId, token };
   send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent), dryRun: Boolean(dryRun) });
 
   // Whether the agent got far enough to touch anything. If it did not, a retry
@@ -176,6 +223,9 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   let progressed = false;
 
   const onEvent = (evt) => {
+    // Once stopped, this run is over as far as the user is concerned. Whatever
+    // it emits while winding down goes nowhere.
+    if (abortController.signal.aborted) return;
     if (evt.type === 'session') {
       if (botId && chatId) store.setSession(botId, chatId, evt.id);
       return; // internal bookkeeping, not something the UI shows
@@ -304,9 +354,13 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   } catch (err) {
     onEvent({ type: 'error', text: String(err && err.message ? err.message : err) });
   } finally {
-    running = null;
     overlay.hide();          // the agent has stopped pointing at things
-    send('agent-event', { type: 'status', text: 'idle', botId, chatId });
+    // If Stop already cleared this — or a newer task has started since — leave
+    // it alone. Saying "idle" over the top of a live run would blank the UI.
+    if (running && running.token === token) {
+      running = null;
+      send('agent-event', { type: 'status', text: 'idle', botId, chatId });
+    }
   }
   return { ok: true };
 }
@@ -379,7 +433,15 @@ ipcMain.handle('remote:disconnect', async () => {
 
 /* ── code mode: ChatGPT-style history of coding conversations ─────── */
 
-let codeRunning = null;      // { abortController }
+// One run per chat, not one run for the whole app. Two coding chats point at
+// two different folders and have nothing to do with each other, so making one
+// wait for the other only ever gets in the way — start a build in one, carry on
+// in another, come back when it is done.
+//
+// The agent side stays deliberately single-file: there is one mouse, one
+// keyboard and one screen over there, and two agents grabbing at them at once
+// would fight. Files are not like that.
+const codeRuns = new Map();   // chatId -> { abortController }
 
 ipcMain.handle('codeChats:list', async () => store.listCodeChats());
 ipcMain.handle('codeChats:get', async (_e, id) => store.getCodeChat(id));
@@ -401,10 +463,7 @@ ipcMain.handle('codeChats:create', async () => {
   return store.createCodeChat({ model: agent.DEFAULT_MODEL, cwd: d.cwd, cwdName: d.name });
 });
 ipcMain.handle('codeChats:delete', async (_e, id) => { store.removeCodeChat(id); return { ok: true }; });
-// The coding side runs on Claude Code itself, so only a Claude model belongs
-// here — a NIM id would be handed to the SDK and rejected.
-ipcMain.handle('codeChats:setModel', async (_e, id, model) =>
-  store.saveCodeChat(id, { model: agent.isClaudeModel(model) ? model : agent.DEFAULT_MODEL }));
+ipcMain.handle('codeChats:setModel', async (_e, id, model) => store.saveCodeChat(id, { model }));
 
 // A chat is tied to a project folder. Pick one for this chat.
 ipcMain.handle('code:pickFolder', async (_e, id) => {
@@ -423,13 +482,16 @@ ipcMain.handle('codeChats:setBot', async (_e, id, botId) => store.saveCodeChat(i
 // One place that actually runs a coding turn, so both the UI and a bot asking
 // via message_code_chat drive the same machinery and land in the same history.
 async function runCodeTask(chatId, prompt) {
-  if (codeRunning) return { ok: false, error: 'The coding side is already working on something.' };
+  // Only this chat has to be free. Another chat working away is none of its
+  // business.
+  if (codeRuns.has(chatId)) return { ok: false, error: 'This chat is already working on something.' };
   const chat = store.getCodeChat(chatId);
   if (!chat) return { ok: false, error: 'No such code chat.' };
   if (!chat.cwd) return { ok: false, error: 'That code chat has no project folder yet.' };
 
   const abortController = new AbortController();
-  codeRunning = { abortController };
+  const run = { abortController };
+  codeRuns.set(chatId, run);
   send('code-event', { type: 'status', text: 'running', chatId });
 
   // Record the conversation as it happens so the sidebar history is real.
@@ -448,6 +510,9 @@ async function runCodeTask(chatId, prompt) {
       bot: chat.botId ? store.getBot(chat.botId) : null,
       abortController,
       onEvent: (evt) => {
+        // Stopped means stopped: nothing from a run on its way out reaches the
+        // transcript or the screen.
+        if (abortController.signal.aborted) return;
         if (evt.type === 'session') { store.saveCodeChat(chatId, { sessionId: evt.id }); return; }
         if (evt.type === 'assistant' || evt.type === 'say_end' || (evt.type === 'done' && evt.text)) {
           if (String(evt.text || '').trim()) { turns.push({ k: 'says', text: evt.text }); reply = evt.text; steps = null; }
@@ -465,12 +530,16 @@ async function runCodeTask(chatId, prompt) {
   } catch (err) {
     const msg = String(err && err.message ? err.message : err);
     send('code-event', { type: 'error', text: msg, chatId });
-    codeRunning = null;
-    send('code-event', { type: 'status', text: 'idle', chatId });
     return { ok: false, error: msg };
+  } finally {
+    // However this turn ended, this chat is free again — and only this one.
+    // Unless Stop already freed it and a new turn is under way, in which case
+    // this run has no business declaring anything.
+    if (codeRuns.get(chatId) === run) {
+      codeRuns.delete(chatId);
+      send('code-event', { type: 'status', text: 'idle', chatId });
+    }
   }
-  codeRunning = null;
-  send('code-event', { type: 'status', text: 'idle', chatId });
   return { ok: true, reply };
 }
 
@@ -488,10 +557,27 @@ function findCodeChat(ref) {
   return hit ? store.getCodeChat(hit.id) : null;
 }
 
-ipcMain.handle('code:stop', async () => {
-  if (codeRunning) codeRunning.abortController.abort();
+// Stop one chat's run. Without an id it stops all of them, which is what
+// quitting or a panic button wants.
+ipcMain.handle('code:stop', async (_e, chatId) => {
+  // Free the chat and call it idle straight away rather than waiting for a
+  // command or a model call already in flight to finish. The run keeps
+  // unwinding in the background with its events muted.
+  const halt = (id) => {
+    const run = codeRuns.get(id);
+    if (!run) return;
+    codeRuns.delete(id);
+    run.abortController.abort();
+    send('code-event', { type: 'status', text: 'idle', chatId: id });
+  };
+  if (chatId) halt(chatId);
+  else [...codeRuns.keys()].forEach(halt);
   return { ok: true };
 });
+
+// Which chats are mid-run — so the window can paint the right state when you
+// switch between them, or after a reload.
+ipcMain.handle('code:running', async () => [...codeRuns.keys()]);
 
 /* ── connectors ──────────────────────────────────────────────────── */
 
@@ -704,8 +790,20 @@ ipcMain.handle('browser:open', async (_e, url) => {
   }
 });
 
+// Stop means stop NOW. Aborting on its own is not enough: a tool already in
+// flight — a PowerShell command, a page load, a model that has not started
+// answering — keeps going until it finishes, and the old code waited for all of
+// that before admitting the task was over. So free the slot and say "idle" here,
+// and let the run unwind quietly in the background. Its events are dropped from
+// the moment it is aborted, so nothing it does on the way out reaches the
+// screen or the transcript.
 ipcMain.handle('stop-task', async () => {
-  if (running) running.abortController.abort();
+  if (!running) return { ok: true };
+  const { abortController, botId, chatId } = running;
+  running = null;
+  abortController.abort();
+  overlay.hide();
+  send('agent-event', { type: 'status', text: 'idle', botId, chatId });
   return { ok: true };
 });
 

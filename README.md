@@ -6,6 +6,72 @@ running shell commands, the same way a person would.
 
 The brain is **your Claude subscription**, used through the Claude Agent SDK — it
 runs off your existing Claude Code login, so there's no separate API key or billing.
+Or it can be **any model on NVIDIA NIM** — see below.
+
+## Choosing a brain
+
+The picker next to the send button says which model runs the next task. It has a
+search box, because with NVIDIA connected there are around a hundred of them;
+type three letters of a name, a vendor or a tag ("vision", "reasoning", "code")
+and press Enter to take the top match.
+
+**Claude** is there by default and needs nothing set up.
+
+**NVIDIA NIM** adds everyone else. NVIDIA hosts every other vendor's weights
+behind one OpenAI-compatible endpoint and one API key, so a single key gets you
+Meta's Llama, Google's Gemma, Mistral, DeepSeek, Qwen, Microsoft's Phi, IBM
+Granite, Moonshot's Kimi, Z.ai's GLM, OpenAI's open weights, and NVIDIA's own
+Nemotron family — grouped in the picker by whose model it is.
+
+Get a free key at [build.nvidia.com](https://build.nvidia.com) — sign in, open
+any model, click **Get API Key** — and paste it into **Settings → Models**. Paste
+the key, the whole `Bearer …` line or even the curl sample; it takes the key out
+of whatever you give it. It is stored only on this computer, and the panel lists
+how many models and vendors it can reach. You can also set it as
+`NVIDIA_API_KEY` in the environment instead.
+
+Anything that cannot be a key is refused rather than saved, so a stray paste
+can never overwrite a working one. Whether NVIDIA *likes* the key is a different
+question: that comes back as a warning, because a refusal there often means the
+model it tried is gated rather than that the key is wrong.
+
+The catalog is read live from NVIDIA, not hardcoded, so a model they publish
+tomorrow appears in the picker without an update here.
+
+**Check which models run.** NVIDIA's catalog lists everything it has ever
+published — around 60 chat models — but it only *serves* a fraction of them to
+any given key; the rest answer "not found for account". The button in Settings →
+Models tries each one with a single token and takes the dead ones out of the
+picker, which takes a minute or two. A model that starts answering 404 during a
+task removes itself the same way.
+
+Two things to know when you pick one:
+
+- **Not every open model can call tools**, and a model that cannot call tools
+  cannot touch the computer — it can only talk. Those are marked *no tool
+  calling* in the picker, and Operator says so plainly instead of letting one
+  narrate work it never did.
+- **Not every model can see.** Models marked *sees the screen* get the
+  screenshots; the rest are told they are blind and steered to the tools that
+  return text — `browser_read_text`, `list_windows`, `run_command` — which is
+  enough for a great deal of work.
+
+Claude remains the default.
+
+**Coding chats run independently.** Each one has its own folder and its own
+run, so you can set a build going in one, switch to another and get on with
+something else — a working chat shows a dot in the sidebar, Stop always belongs
+to the chat you are looking at, and stopping one leaves the rest alone. Only a
+second prompt into the *same* chat waits, because one conversation cannot have
+two turns in flight. (The agent side is deliberately still one-at-a-time: there
+is one mouse and one screen over there to fight over.)
+
+**The coding side takes these models too.** Claude codes through Claude Code's
+own toolset; a NIM model has no such thing, so it gets `Read`, `Write`, `Edit`,
+`Bash`, `Grep`, `Glob` and `LS` rebuilt in plain Node and rooted at the chat's
+project folder. Same tool names, same transcript, same steps in the sidebar —
+only the brain changes. The file tools refuse to touch anything outside the
+project folder; the shell is a shell, so it can still go where you send it.
 
 ## Talking to it
 
@@ -139,8 +205,18 @@ npm run dist     # produces dist\Operator Setup <version>.exe
 | `whisper.js` | Hearing — runs whisper.cpp's server so large-v3 stays loaded on the GPU |
 | `ui/mic.js` | Capture and voice-activity detection: finds where a sentence ends |
 | `speech.js` + `speech-helper.ps1` | Speaking — the Windows SAPI voice |
-| `agent.js` | The brain — Claude Agent SDK, holding both toolsets |
+| `agent.js` | The brain — builds the tools and the prompt, then hands them to Claude or to NIM |
+| `nim.js` | The other brain — NVIDIA's catalog, and the tool-calling loop that drives it |
+| `code.js` | The coding side — Claude Code's own toolset, or NIM with the one below |
+| `code-tools.js` | Read/Write/Edit/Bash/Grep/Glob/LS in plain Node, for models that bring none |
 | `ui/` | Front end (command box + activity log + live view) |
+
+`agent.js` builds the toolset and the system prompt once and only then decides
+who is driving, so the two brains always have identical hands and the UI cannot
+tell them apart: `nim.js` emits the same events as the Agent SDK does. Chat
+completions are stateless, so a NIM conversation is kept in memory here and
+resumed by id — which lasts as long as the app is open, and starts a fresh
+thread when it doesn't.
 
 Desktop input goes through `SendInput` with Unicode scan codes, so typing works
 whatever the keyboard layout, and the helper marks itself DPI-aware before it

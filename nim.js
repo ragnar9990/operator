@@ -194,8 +194,11 @@ let fetchedAt = 0;
 async function refresh({ force = false } = {}) {
   if (!force && fetchedAt && Date.now() - fetchedAt < 30 * 60 * 1000) return catalog;
   try {
+    // The catalog is public, so a key is optional here — and a malformed one
+    // would throw while building the header and silently cost us the live list.
+    const sendKey = apiKey && !keyProblem(apiKey);
     const res = await fetch(`${BASE}/models`, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      headers: sendKey ? { Authorization: `Bearer ${apiKey}` } : {},
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
@@ -211,43 +214,168 @@ async function refresh({ force = false } = {}) {
   return catalog;
 }
 
-const listModels = () => catalog;
+/* ── what this key can actually run ──────────────────────────────────
+   GET /v1/models is NVIDIA's whole published list, not a list of what is
+   being served to you: most of it answers 404 "Not found for account <id>".
+   Offering a model that cannot run is worse than not offering it, so the
+   dead ones are remembered and dropped from the picker. */
+
+let unavailable = new Set();
+let onUnavailable = null;
+
+const setUnavailable = (ids) => { unavailable = new Set(ids || []); };
+const listUnavailable = () => [...unavailable];
+const onUnavailableChange = (cb) => { onUnavailable = cb; };
+
+// A 404 mid-task is the same answer as a 404 during the sweep, so a model that
+// goes away between sweeps takes itself out of the list.
+function markUnavailable(bare) {
+  if (!bare || unavailable.has(bare)) return;
+  unavailable.add(bare);
+  if (onUnavailable) onUnavailable([...unavailable]);
+}
+
+const listModels = () => catalog.filter((m) => !unavailable.has(m.modelId));
+
+// One token at every model in the catalog, eight at a time, to find out which
+// ones this key can reach. Only a 404 is disqualifying: a timeout is a cold
+// model, a 503 is a busy one, and both of those work once they wake up.
+async function sweep({ onProgress, signal } = {}) {
+  if (!apiKey) return { ok: false, error: 'No NVIDIA API key.' };
+  await refresh({ force: true });
+
+  const queue = catalog.map((m) => m.modelId);
+  const total = queue.length;
+  const dead = [];
+  let done = 0;
+
+  const worker = async () => {
+    while (queue.length) {
+      if (signal?.aborted) return;
+      const id = queue.shift();
+      const r = await ping(id, apiKey, 25000);
+      if (r.status === 404) dead.push(id);
+      done += 1;
+      if (onProgress) onProgress({ done, total, model: id });
+    }
+  };
+  await Promise.all(Array.from({ length: 8 }, worker));
+  if (signal?.aborted) return { ok: false, error: 'stopped' };
+
+  setUnavailable(dead);
+  if (onUnavailable) onUnavailable(dead);
+  return { ok: true, checked: total, available: total - dead.length, unavailable: dead.length };
+}
 
 /* ── the key ─────────────────────────────────────────────────────────
    Held in memory for the process; store.js owns the copy on disk. */
 
-let apiKey = process.env.NVIDIA_API_KEY || process.env.OPERATOR_NIM_KEY || '';
+// What people actually paste is whatever was on their clipboard after visiting
+// build.nvidia.com: often the whole header out of the code sample — `Bearer
+// nvapi-…`, sometimes quoted, sometimes with the zero-width junk a web copy
+// drags along. Sending that verbatim gets a 401 that reads like a bad key, so
+// take the key out of it instead of blaming them for it.
+function cleanKey(raw) {
+  let k = String(raw || '')
+    .replace(/[​-‍﻿]/g, '')          // zero-width junk from a web copy
+    .replace(/[  -   　]/g, ' ')  // exotic spaces
+    .replace(/[‐-―−]/g, '-')         // a smart dash where a hyphen belongs
+    .trim();
 
-const setKey = (k) => { apiKey = String(k || '').trim(); };
+  // If the key is somewhere inside what they pasted — a curl command, a code
+  // sample, a sentence — take it out of there rather than failing on the rest.
+  const found = k.match(/nvapi-[A-Za-z0-9_-]{20,}/);
+  if (found) return found[0];
+
+  k = k.replace(/^authorization\s*[:=]\s*/i, '');   // the whole header line
+  k = k.replace(/^["'`]+|["'`]+$/g, '');            // "nvapi-…"
+  k = k.replace(/^bearer\s+/i, '');                 // Bearer nvapi-…
+  k = k.replace(/^["'`]+|["'`]+$/g, '');            // "Bearer nvapi-…"
+  return k.replace(/\s+/g, '');                     // no key has a space in it
+}
+
+// NVIDIA answers 401 "Authentication failed" when a token is not even shaped
+// like one of theirs, and 403 when it is but isn't valid. Catching the shape
+// here turns the first case into a sentence that says what to do.
+function keyProblem(k) {
+  if (!k) return 'Paste a key first.';
+  if (!/^nvapi-/i.test(k)) {
+    return 'That is not an NVIDIA key — theirs start with "nvapi-". On build.nvidia.com, open any model, click Get API Key and copy the key itself.';
+  }
+  if (k.length < 40) return 'That key looks cut short — copy the whole thing, not just the visible part.';
+  if (k.length > 200) return 'That is far too long to be a key — it looks like a whole block of text was pasted.';
+  // Everything after the prefix is base64url. Anything else would also make an
+  // HTTP header that cannot be built at all, which throws somewhere useless.
+  const odd = [...k].findIndex((c) => !/[A-Za-z0-9_-]/.test(c));
+  if (odd !== -1) {
+    return `That key has a character in it that no NVIDIA key has (${JSON.stringify(k[odd])} at position ${odd + 1}) — copy it again straight from build.nvidia.com.`;
+  }
+  return null;
+}
+
+let apiKey = cleanKey(process.env.NVIDIA_API_KEY || process.env.OPERATOR_NIM_KEY || '');
+
+const setKey = (k) => { apiKey = cleanKey(k); };
 const hasKey = () => Boolean(apiKey);
 
-// Prove a key works by spending one token on the smallest model going, rather
-// than by its shape — nvapi- keys and NGC keys both exist, and only the server
-// knows which are live.
+// Spend one token to see whether a key is live.
+//
+// The catch: NVIDIA answers 403 "Authorization failed" both for a key that is
+// wrong AND for a model that key has no access to — and plenty of models on
+// NIM are gated, previews, or on another tier. So one refusal proves nothing.
+// Try several ordinary chat models and only call the key bad if not one of
+// them will talk to it.
+async function ping(modelId, key, ms = 15000) {
+  try {
+    const res = await fetchIn(`${BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelId, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1, stream: false }),
+    }, null, ms);
+    // Anything but a refusal means the key got through: 400 is the model being
+    // fussy about the request, 429 is it being busy, and 404 is NVIDIA saying
+    // "not found for account <yours>" — which it could only say having worked
+    // out whose account it is. Only 401/403 are actually about the key.
+    if (res.ok || res.status === 400 || res.status === 404 || res.status === 429) {
+      return { ok: true, status: res.status };
+    }
+    const detail = (await res.text()).slice(0, 200).replace(/\s+/g, ' ');
+    return { ok: false, status: res.status, error: `${modelId} → ${res.status} ${detail}` };
+  } catch (err) {
+    return { ok: false, network: true, status: 0, error: err.message };
+  }
+}
+
 async function testKey(key) {
-  const k = String(key || apiKey || '').trim();
-  if (!k) return { ok: false, error: 'No API key yet.' };
+  const k = cleanKey(key || apiKey);
+  const problem = keyProblem(k);
+  if (problem) return { ok: false, error: problem };
 
   await refresh({ force: true });
-  const small = catalog.find((m) => /nano|mini|small|8b|7b|4b|flash|lite/i.test(m.modelId)) || catalog[0];
-  if (!small) return { ok: false, error: 'Could not reach the NVIDIA model catalog.' };
+  if (!catalog.length) return { ok: false, error: 'Could not reach the NVIDIA model catalog.' };
 
-  try {
-    const res = await fetch(`${BASE}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${k}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: small.modelId, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1, stream: false }),
-    });
-    if (res.status === 401 || res.status === 403) return { ok: false, error: 'NVIDIA rejected that key.' };
-    if (!res.ok && res.status !== 400 && res.status !== 429) {
-      return { ok: false, error: `NVIDIA said ${res.status}: ${(await res.text()).slice(0, 160)}` };
-    }
-    // 400 here means the key is fine and that one model was fussy; 429 means
-    // the key is fine and busy. Either way it authenticated.
-    return { ok: true, models: catalog.length };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  // Prefer a plain, small, generally-available instruct model; push the
+  // specialised and gated ones (vision, reasoning, safety, preview) to the back.
+  const rank = (m) => {
+    let s = 0;
+    if (/instruct|-it$|chat/i.test(m.modelId)) s -= 3;
+    if (/nano|mini|small|lite|flash|[-/]([3-9]|1[0-2])b\b/i.test(m.modelId)) s -= 1;
+    if (m.vision) s += 2;
+    if (/reason|omni|cosmos|guard|safety|translate|parse|preview|ultra/i.test(m.modelId)) s += 3;
+    return s;
+  };
+  const candidates = [...catalog].sort((a, b) => rank(a) - rank(b)).slice(0, 4);
+
+  // All four at once: one cold model must not make saving a key take a minute.
+  const results = await Promise.all(candidates.map((m) => ping(m.modelId, k)));
+
+  const good = results.find((r) => r.ok);
+  if (good) return { ok: true, models: catalog.length, model: candidates[results.indexOf(good)].modelId };
+  if (results.every((r) => r.network)) return { ok: false, error: `Could not reach NVIDIA: ${results[0].error}` };
+  return {
+    ok: false,
+    error: `NVIDIA would not accept that key on any of ${candidates.length} models. Last answer: ${(results.filter((r) => !r.network).pop() || results[0]).error}`,
+  };
 }
 
 /* ── tools, in OpenAI's shape ────────────────────────────────────── */
@@ -319,37 +447,104 @@ async function* sse(res) {
   const reader = res.body.getReader();
   const decode = new TextDecoder();
   let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decode.decode(value, { stream: true });
-    let nl;
-    while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line.startsWith('data:')) continue;
-      const payload = line.slice(5).trim();
-      if (payload === '[DONE]') return;
-      try { yield JSON.parse(payload); } catch (_) { /* keep-alive or partial */ }
+  // Whoever stops reading — Stop, or a finished turn — hangs up the socket
+  // rather than leaving the model generating into nothing.
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decode.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') return;
+        try { yield JSON.parse(payload); } catch (_) { /* keep-alive or partial */ }
+      }
     }
+  } finally {
+    try { await reader.cancel(); } catch (_) {}
   }
 }
 
-async function post(body, signal) {
+// Not every model listed is actually being served: some are cold, some are
+// retired endpoints that simply never answer. Without a deadline the app sits
+// there with the dots spinning forever, so give the connection one.
+//
+// The clock stops the moment the headers land, not when the body ends — a
+// model thinking for two minutes is fine, a model that never says hello is not.
+// How long to wait for NVIDIA to start answering.
+//
+// This has to be generous. A big model that nobody has used recently is not
+// running yet, and NVIDIA does not send the response headers until it is
+// loaded and generating — so on a cold start the whole load sits inside
+// "time to first byte". Kimi K3 and the other very large MoE models routinely
+// take a minute or more the first time; the second request lands in seconds
+// because the model is warm by then. A deadline short enough to feel tidy just
+// turns "slow" into "broken".
+const CONNECT_MS = Number(process.env.OPERATOR_NIM_TIMEOUT || 150000);
+
+// When to admit out loud that we are still waiting, rather than looking frozen.
+const SLOW_MS = 15000;
+
+async function fetchIn(url, opts, signal, ms = CONNECT_MS, onSlow) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  const slow = onSlow ? setTimeout(() => onSlow(Math.round(SLOW_MS / 1000)), SLOW_MS) : null;
+  const relay = () => ctl.abort();
+  if (signal) signal.addEventListener('abort', relay, { once: true });
+  try {
+      return await fetch(url, { ...opts, signal: ctl.signal });
+    } catch (err) {
+      if (ctl.signal.aborted && !(signal && signal.aborted)) {
+        const e = new Error(`NVIDIA did not start answering within ${Math.round(ms / 1000)}s.`);
+        e.status = 504;
+        e.timeout = true;
+        throw e;
+      }
+      throw err;
+  } finally {
+    clearTimeout(timer);
+    if (slow) clearTimeout(slow);
+    if (signal) signal.removeEventListener('abort', relay);
+  }
+}
+
+async function post(body, signal, onSlow) {
   if (!apiKey) throw new Error('No NVIDIA API key. Add one in Settings → Models.');
-  const res = await fetch(`${BASE}/chat/completions`, {
+  // A key with a stray character in it cannot even be put in a header — fetch
+  // throws a ByteString error from deep inside undici, which tells nobody
+  // anything. Say what is actually wrong instead.
+  const bad = keyProblem(apiKey);
+  if (bad) throw new Error(`The saved NVIDIA key is not usable: ${bad}`);
+  const res = await fetchIn(`${BASE}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      Accept: body.stream ? 'text/event-stream' : 'application/json',
+    },
     body: JSON.stringify(body),
-    signal,
-  });
+  }, signal, CONNECT_MS, onSlow);
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.text()).slice(0, 400); } catch (_) {}
+    // A model that answers 404 is not being served to this key, whatever the
+    // published catalog says. Take it out of the picker rather than letting it
+    // waste the next attempt too.
+    if (res.status === 404) markUnavailable(body.model);
+
+    // 403 is NVIDIA's answer both to a wrong key and to a model your account
+    // cannot reach, and plenty on NIM are gated — so don't blame the key when
+    // it might be the model.
     const err = new Error(
       res.status === 401 || res.status === 403
-        ? 'NVIDIA rejected the API key. Check it in Settings → Models.'
-        : `NVIDIA NIM error ${res.status}: ${detail || res.statusText}`
+        ? `NVIDIA refused that (${res.status}). Either the key is wrong, or your account has no access to ${body.model} — try another model, or check the key in Settings → Models.`
+        : res.status === 404
+          ? `NVIDIA is not serving ${body.model} to your account. It has been taken out of the model menu — pick another one.`
+          : `NVIDIA NIM error ${res.status}: ${detail || res.statusText}`
     );
     err.status = res.status;
     err.detail = detail;
@@ -399,21 +594,31 @@ function thinkFilter() {
 
 const threads = new Map();
 const MAX_HISTORY = 60;
+const MAX_THREADS = 40;
 const newSessionId = () => 'nim-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+// Map keeps insertion order, so the oldest conversation is the first key. A
+// week of chats should not sit in memory for the sake of a resume nobody is
+// going to ask for.
+function keepThread(id, history) {
+  threads.delete(id);
+  threads.set(id, history);
+  while (threads.size > MAX_THREADS) threads.delete(threads.keys().next().value);
+}
 
 /* ── the loop ────────────────────────────────────────────────────────
    Same contract as agent.js runTask: it takes the built tools and system
    prompt, and emits the same events, so the UI cannot tell which brain is
    driving. */
 
-async function runTask({ prompt, model, systemPrompt, tools, onEvent, abortController, resume, maxTurns = 40 }) {
+async function runTask({ prompt, model, systemPrompt, tools, onEvent, abortController, resume, maxTurns = 80 }) {
   const info = describe(bareId(model));
   const spec = toOpenAITools(tools);
   const byName = new Map(tools.map((t) => [t.name, t]));
 
   const sessionId = (resume && threads.has(resume)) ? resume : newSessionId();
   const history = threads.get(sessionId) || [];
-  threads.set(sessionId, history);
+  keepThread(sessionId, history);
   onEvent({ type: 'session', id: sessionId });
 
   let sys = systemPrompt;
@@ -430,10 +635,14 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
   let said = '';
   let turns = 0;
 
-  // Some open models on NIM have no function calling at all. One says so up
-  // front rather than letting the user watch it narrate what it would have
-  // done; one only found out when NVIDIA rejects the request drops the tools
-  // and carries on as a plain chat.
+  // Some open models on NIM have no function calling at all, and a model that
+  // cannot call tools cannot touch the computer. Where that is known from the
+  // family, say so before the run rather than letting the user watch it narrate
+  // work it never did; where it only turns up as a 400, drop the tools and
+  // carry on as a plain chat.
+  let warned = false;     // "it is still waking up", said at most once
+  let retried = false;    // one extra go after a cold-start timeout
+
   let toolsOff = !info.tools;
   if (toolsOff) {
     onEvent({ type: 'assistant', text: `${info.name} has no tool calling, so it can talk but it cannot touch the computer. Pick another model to have work done.` });
@@ -441,28 +650,63 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
 
   const send = async () => {
     const body = {
+      // The system prompt is not optional, so it is pinned outside the window
+      // rather than being the first thing a long conversation drops.
+      messages: [history[0], ...history.slice(1).slice(1 - MAX_HISTORY)],
       model: info.modelId,
-      messages: history.slice(-MAX_HISTORY),
       temperature: 0.2,
       max_tokens: 4096,
       stream: true,
     };
     if (!toolsOff && spec.length) { body.tools = spec; body.tool_choice = 'auto'; }
+
+    // Said once per run, the first time a request takes long enough to look
+    // like nothing is happening.
+    const notice = () => {
+      if (warned) return;
+      warned = true;
+      onEvent({ type: 'assistant', text: `${info.name} is not loaded on NVIDIA's side yet — waiting for it to start up. The first reply from a large model can take a minute or two; after that it is quick.` });
+    };
+
     try {
-      return await post(body, abortController?.signal);
+      return await post(body, abortController?.signal, notice);
     } catch (err) {
+      // A cold model that timed out has, by timing out, asked NVIDIA to load
+      // it. The second request usually lands on a warm one, so it is worth
+      // exactly one more try before giving up.
+      if (err.timeout && !retried) {
+        retried = true;
+        onEvent({ type: 'assistant', text: `Still waiting on ${info.name}. NVIDIA should have it loaded by now — trying once more.` });
+        return post(body, abortController?.signal, notice);
+      }
       if (toolsOff || !body.tools || err.status !== 400 || !/tool|function/i.test(err.detail || '')) throw err;
       toolsOff = true;
       onEvent({ type: 'assistant', text: `${info.name} will not take tools, so it cannot drive the computer — answering as a plain chat instead.` });
       delete body.tools; delete body.tool_choice;
-      return post(body, abortController?.signal);
+      return post(body, abortController?.signal, notice);
     }
   };
 
   while (turns++ < maxTurns) {
     if (abortController?.signal.aborted) return;
 
-    const res = await send();
+    let res;
+    try {
+      res = await send();
+    } catch (err) {
+      // A model that will not wake up twice in a row is not going to on the
+      // third go either. Say which models are known to answer quickly rather
+      // than leaving "try another one" as the only advice.
+      if (!err.timeout) throw err;
+      const quick = catalog
+        .filter((m) => !unavailable.has(m.modelId) && /flash|nano|lite|mini|small|8b|12b|30b/i.test(m.modelId))
+        .slice(0, 3).map((m) => m.name);
+      throw new Error(
+        `${info.name} never started answering, after two tries and ${Math.round(CONNECT_MS / 1000)}s each. ` +
+        `NVIDIA does not appear to have capacity for it right now — this is about the model, not your key.` +
+        (quick.length ? ` Something smaller will answer straight away: ${quick.join(', ')}.` : '')
+      );
+    }
 
     let text = '';
     let open = false;
@@ -509,7 +753,7 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
 
     history.push({
       role: 'assistant',
-      content: text || null,
+      content: text || '',
       tool_calls: wanted.map((c, i) => ({
         id: c.id || `call_${turns}_${i}`,
         type: 'function',
@@ -537,11 +781,16 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
 
       let result;
       try {
-        result = await t.handler(args, {});
+        // The signal goes to the tool, not just around it: a tool that can stop
+        // itself — a shell command, a fetch — should, rather than running on
+        // after the user has already moved on.
+        result = await t.handler(args, { signal: abortController?.signal });
       } catch (err) {
         history.push({ role: 'tool', tool_call_id: callId, content: `That failed: ${err && err.message ? err.message : err}` });
         continue;
       }
+
+      if (abortController?.signal.aborted) return;
 
       const parts = (result && result.content) || [];
       let body = parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
@@ -582,10 +831,25 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
 // Keep the system prompt and the recent thread; drop the middle. Cutting at a
 // tool message would orphan it from its assistant turn, so cut past those.
 function trim(history) {
+  forgetOldScreens(history);
   if (history.length <= MAX_HISTORY) return;
   let cut = history.length - MAX_HISTORY + 1;
   while (cut < history.length && history[cut].role === 'tool') cut++;
   history.splice(1, cut - 1);
+}
+
+// Only the screen as it is now is worth anything, and every old screenshot is
+// ~170KB of base64 that would be re-uploaded on every single turn. Keep the
+// latest one and replace the rest with a line saying it was there.
+function forgetOldScreens(history) {
+  let seen = false;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (!Array.isArray(m.content)) continue;
+    if (!m.content.some((p) => p.type === 'image_url')) continue;
+    if (!seen) { seen = true; continue; }
+    m.content = [{ type: 'text', text: '(an earlier screenshot, no longer shown)' }];
+  }
 }
 
 /* ── one-shot ────────────────────────────────────────────────────────
@@ -608,5 +872,6 @@ async function ask({ model, system, message, abortController }) {
 module.exports = {
   PREFIX, BASE, PROVIDERS, PROVIDER_ORDER,
   isNimModel, bareId, describe, listModels, refresh,
-  setKey, hasKey, testKey, runTask, ask,
+  setKey, hasKey, cleanKey, keyProblem, testKey, runTask, ask,
+  sweep, setUnavailable, listUnavailable, onUnavailableChange, markUnavailable,
 };

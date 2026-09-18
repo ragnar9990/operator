@@ -36,6 +36,16 @@
 
   // Whether the fake NVIDIA key is saved, for the Models settings tab.
   let NVIDIA = { configured: false, hint: '' };
+  const NVIDIA_PROGRESS = [];
+
+  // Code chats, and which of them are mid-run — a Set, because more than one
+  // can be, which is the thing worth exercising.
+  let CODE = [
+    { id: 'cc1', title: 'Tetris', cwd: 'C:/demo/tetris', cwdName: 'tetris', model: null, botId: null, turns: [] },
+    { id: 'cc2', title: 'Landing page', cwd: 'C:/demo/site', cwdName: 'site', model: null, botId: null, turns: [] },
+  ];
+  const CODE_RUNS = new Set();
+  const CODE_LISTENERS = [];
 
   let BOTS = load();
   put(BOTS);
@@ -145,12 +155,87 @@
       ],
     }),
 
+    /* ── the coding side ──────────────────────────────────────────
+       Enough of it to exercise the real renderer: several chats, each able
+       to run at the same time, each emitting the same events main.js does. */
+    codeChatsList: async () => CODE.map((c) => ({ id: c.id, title: c.title, cwd: c.cwd, cwdName: c.cwdName, model: c.model, botId: c.botId })),
+    codeChatGet: async (id) => CODE.find((c) => c.id === id) || null,
+    codeChatCreate: async () => {
+      const c = { id: uid('cc'), title: 'New chat', cwd: 'C:/demo', cwdName: 'demo', model: null, botId: null, turns: [] };
+      CODE.unshift(c);
+      return c;
+    },
+    codeChatDelete: async (id) => { CODE = CODE.filter((c) => c.id !== id); CODE_RUNS.delete(id); return { ok: true }; },
+    codeSetModel: async (id, model) => { const c = CODE.find((x) => x.id === id); if (c) c.model = model; return c; },
+    codeSetBot: async (id, botId) => { const c = CODE.find((x) => x.id === id); if (c) c.botId = botId; return c; },
+    codePickFolder: async () => ({ ok: true, cwd: 'C:/demo', name: 'demo' }),
+    codeRunningChats: async () => [...CODE_RUNS],
+
+    codeRun: async (chatId, prompt) => {
+      if (CODE_RUNS.has(chatId)) return { ok: false, error: 'This chat is already working on something.' };
+      CODE_RUNS.add(chatId);
+      const say = (e) => CODE_LISTENERS.forEach((cb) => cb({ ...e, chatId }));
+      say({ type: 'status', text: 'running' });
+
+      // A slow run, so two of them can visibly overlap.
+      (async () => {
+        const step = (ms) => new Promise((r) => setTimeout(r, ms));
+        await step(500);
+        if (!CODE_RUNS.has(chatId)) return;
+        say({ type: 'tool', name: 'LS', input: {} });
+        await step(900);
+        if (!CODE_RUNS.has(chatId)) return;
+        say({ type: 'tool', name: 'Read', input: { file: 'app.js' } });
+        await step(900);
+        if (!CODE_RUNS.has(chatId)) return;
+        say({ type: 'say_start' });
+        for (const word of ('Finished: ' + prompt).split(' ')) {
+          await step(90);
+          if (!CODE_RUNS.has(chatId)) return;
+          say({ type: 'say_delta', text: word + ' ' });
+        }
+        say({ type: 'say_end', text: 'Finished: ' + prompt });
+        say({ type: 'done', text: null });
+        CODE_RUNS.delete(chatId);
+        say({ type: 'status', text: 'idle' });
+      })();
+
+      return { ok: true };
+    },
+
+    codeStop: async (chatId) => {
+      const ids = chatId ? [chatId] : [...CODE_RUNS];
+      ids.forEach((id) => {
+        CODE_RUNS.delete(id);
+        CODE_LISTENERS.forEach((cb) => cb({ type: 'status', text: 'idle', chatId: id }));
+      });
+      return { ok: true };
+    },
+    onCode: (cb) => CODE_LISTENERS.push(cb),
+
     nvidiaStatus: async () => NVIDIA,
+    // The sweep that finds out which models a key can actually run. Here it
+    // just pretends a third of them are not served, after a short delay.
+    nvidiaSweep: async () => {
+      const total = 61;
+      for (let done = 1; done <= total; done += 7) {
+        NVIDIA_PROGRESS.forEach((cb) => cb({ done, total }));
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      NVIDIA_PROGRESS.forEach((cb) => cb({ done: 0, total: 0, finished: true }));
+      return { ok: true, checked: total, available: 40, unavailable: 21 };
+    },
+    onNvidiaProgress: (cb) => NVIDIA_PROGRESS.push(cb),
+    // The real handler saves the key whatever the test call says, because a
+    // 403 from NVIDIA may be about the model, not the key. Type a key
+    // containing "bad" here to see that warning path.
     nvidiaSetKey: async (key) => {
       if (!key) { NVIDIA = { configured: false, hint: '' }; return { ok: true, status: NVIDIA, models: 0 }; }
-      if (!/^nvapi-/.test(key)) return { ok: false, error: 'NVIDIA rejected that key.', status: NVIDIA };
       NVIDIA = { configured: true, hint: '…' + key.slice(-4) };
-      return { ok: true, status: NVIDIA, models: 61 };
+      const warning = /bad/.test(key)
+        ? 'NVIDIA would not accept that key on any of 4 models. Last answer: meta/llama-3.2-11b-vision-instruct → 403 {"status":403,"title":"Forbidden","detail":"Authorization failed"}'
+        : null;
+      return { ok: true, status: NVIDIA, models: 61, warning };
     },
 
     listBots: async () => BOTS.map(card),

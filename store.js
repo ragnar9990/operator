@@ -162,7 +162,16 @@ function setGoogle({ clientId, clientSecret }) {
 
 function getNvidia() {
   const n = settings.nvidia || {};
-  return { key: n.key || '' };
+  return { key: n.key || '', unavailable: n.unavailable || [] };
+}
+
+// Which models NVIDIA will not serve this key — found by trying them, and
+// worth keeping so the picker is honest from the moment the app opens.
+function setNvidiaUnavailable(ids) {
+  if (!settings.nvidia) return { ok: false };
+  settings.nvidia.unavailable = Array.isArray(ids) ? ids : [];
+  flushSettings();
+  return { ok: true };
 }
 
 // What the settings panel is allowed to know: that there is a key, and just
@@ -174,7 +183,9 @@ function nvidiaStatus() {
 
 function setNvidia(key) {
   const k = String(key || '').trim();
-  if (k) settings.nvidia = { key: k, at: Date.now() };
+  // A new key may reach a different set of models, so what the last one could
+  // not run says nothing about this one.
+  if (k) settings.nvidia = { key: k, at: Date.now(), unavailable: [] };
   else delete settings.nvidia;
   flushSettings();
   return nvidiaStatus();
@@ -538,6 +549,6 @@ module.exports = {
   listChats, getChat, createChat, saveChat, removeChat,
   sessionOf, setSession, forgetSession,
   listConnectors, getConnector, setConnector, removeConnector, getGoogle, setGoogle,
-  getNvidia, setNvidia, nvidiaStatus,
+  getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,
 };

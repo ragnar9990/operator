@@ -152,6 +152,18 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 .chats-empty { padding: 6px 10px; color: var(--ink-4); font-size: 13px; }
 
+/* A coding chat working in the background, while you read another one. */
+.code-chat-spin {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: breathe 1.7s ease-in-out infinite;
+}
+.code-chat-row.working .code-chat-title { color: var(--ink); }
+
 .mark {
   flex: none;
   display: grid;
@@ -612,6 +624,49 @@ body:not(.started) .thread { flex: 0 1 auto; overflow: visible; padding-bottom: 
 
 .opt .tick { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--accent); opacity: 0; }
 .opt.on .tick { opacity: 1; }
+
+/* ── stop ─────────────────────────────────────────────────────────────
+   Stop takes the send button's place while a task runs, on both sides of
+   the app, so it is always exactly where your hand already is. A live ring
+   breathes around it to say the run is still going; pressing it swaps to a
+   flat, quiet state at once, because the click has already taken effect. */
+
+.round.halt {
+  position: relative;
+  background: rgba(244, 104, 95, 0.16);
+  color: var(--fail);
+  transition: background 0.15s, color 0.15s, transform 0.12s;
+}
+.round.halt svg { width: 20px; height: 20px; }
+.round.halt:hover { background: rgba(244, 104, 95, 0.26); }
+.round.halt:active { transform: scale(0.94); }
+
+.halt-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(244, 104, 95, 0.55);
+  animation: halt-pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes halt-pulse {
+  0%   { transform: scale(0.94); opacity: 0.8; }
+  70%  { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+/* Clicked: the ring stops, the colour drains, and it stops inviting a second
+   press — the run is already over as far as the window is concerned. */
+.round.halt.stopping {
+  background: var(--raise-hi);
+  color: var(--ink-4);
+  cursor: default;
+}
+.round.halt.stopping .halt-ring { animation: none; opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .halt-ring { animation: none; opacity: 0.55; }
+}
 
 .send { background: var(--accent); color: var(--on-accent); }
 .send:hover:not(:disabled) { background: #46adff; }
@@ -1191,10 +1246,16 @@ body.started .intro { display: none; }
 .target.active .target-dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 
 .remote-form { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 2px; }
-.remote-actions { display: flex; align-items: center; gap: 12px; }
+/* The status can be a whole sentence from NVIDIA, so it wraps under itself
+   rather than stretching the row. */
+.remote-actions { display: flex; align-items: flex-start; gap: 12px; }
+.remote-actions .pill { flex: none; }
+.remote-actions .remote-status { flex: 1; min-width: 0; padding-top: 8px; line-height: 1.45; overflow-wrap: anywhere; }
 .remote-status { font-size: 12px; color: var(--ink-3); }
 .remote-status.ok { color: #46d17f; }
 .remote-status.bad { color: var(--fail); }
+/* Saved, but something about it is worth reading — not a failure. */
+.remote-status.warn { color: #e0a33a; }
 
 .pill.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line-max); padding: 8px 16px; border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px; }
 .pill.ghost:hover { background: var(--raise); }
