@@ -1554,6 +1554,25 @@ body.rehearsing #input { border-color: rgba(41, 159, 255, 0.35); }
   font-size: 11px; white-space: nowrap;
 }
 
+/* the verdict of the second pass — see verify.js */
+.check {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 11px;
+  background: var(--raise);
+  font-size: 13px; letter-spacing: -0.2px;
+}
+.check svg { flex: none; width: 15px; height: 15px; margin-top: 1px; color: var(--ink-4); }
+.check-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.check b { color: var(--ink-2); font-weight: 500; }
+.check i { font-style: normal; color: var(--ink-3); line-height: 1.45; }
+
+.check.pass svg { color: var(--accent); }
+/* the one the feature exists for: never quiet about it */
+.check.fail { border-color: rgba(244, 104, 95, 0.4); background: rgba(244, 104, 95, 0.08); }
+.check.fail svg, .check.fail b { color: var(--fail); }
+.check.fail i { color: var(--ink-2); }
+
 .plan-foot { display: flex; align-items: center; gap: 12px; padding: 0 14px 14px; }
 .plan-warn { flex: 1; min-width: 0; color: var(--fail); font-size: 12px; line-height: 1.45; }
 .plan-foot .pill.solid { margin-left: auto; height: auto; }

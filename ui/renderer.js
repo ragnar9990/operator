@@ -90,6 +90,23 @@ function startRun() {
   ticker = setInterval(() => { elapsedEl.textContent = clock(Date.now() - startedAt); }, 500);
 }
 
+// The check at the end of a run lands after the reply, and what it finds can
+// send the agent back to work. So the run is not over yet: put the UI back to
+// working without restarting the clock or zeroing the actions it already did.
+function resumeRun() {
+  if (busy) return;
+  busy = true;
+  document.body.classList.add('working');
+  runBtn.disabled = true;
+  runBtn.hidden = true;
+  stopBtn.hidden = false;
+  railState.classList.add('on');
+  railState.title = 'Running';
+  setLive('Live', true);
+  if (!ticker) ticker = setInterval(() => { elapsedEl.textContent = clock(Date.now() - startedAt); }, 500);
+  showDots();
+}
+
 function endRun() {
   busy = false;
   document.body.classList.remove('working');
@@ -482,6 +499,7 @@ function replay(turns) {
     else if (t.k === 'says') turn('says', nl2br(t.text));
     else if (t.k === 'error') turn('', errorCard(t.title, t.fix, t.text));
     else if (t.k === 'note') turn('', noteCard(t.text));
+    else if (t.k === 'check') turn('', checkCard(t));
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'steps') {
       const g = openGroup();
@@ -619,6 +637,22 @@ function noteCard(text) {
   return '<div class="event"><svg viewBox="0 0 24 24" aria-hidden="true">' +
     '<path d="M12 3.5 14.6 9l6 .9-4.3 4.2 1 6-5.3-2.8L6.7 20l1-6L3.4 9.9l6-.9Z"/></svg>' +
     '<span>Remembered <b>' + esc(text) + '</b></span></div>';
+}
+
+// The verdict of the second pass. A pass is deliberately quiet — one line you
+// can skim past. A fail is the whole reason the feature exists, so it is loud,
+// and it sits above whatever the agent does next to fix it.
+function checkCard(v) {
+  const state = v.ok === true ? 'pass' : v.ok === false ? 'fail' : 'unsure';
+  const head = v.ok === true ? 'Checked — the goal was met'
+    : v.ok === false ? 'Checked — the goal was not met'
+    : 'Checked — could not tell';
+  const icon = v.ok === true ? '<path d="m5 12.4 4.6 4.6L19 7"/>'
+    : v.ok === false ? '<path d="M12 3.2 2.4 20.4h19.2Z"/><path d="M12 9.4v4.6"/><circle cx="12" cy="17.3" r="1"/>'
+    : '<circle cx="12" cy="12" r="9"/><path d="M9.7 9.5a2.4 2.4 0 1 1 2.9 3.1v1.3"/><circle cx="12.4" cy="17.2" r="1"/>';
+  return '<div class="check ' + state + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + icon + '</svg>' +
+    '<span class="check-text"><b>' + head + '</b>' +
+    (v.why ? '<i>' + esc(v.why) + '</i>' : '') + '</span></div>';
 }
 
 function routineCard(name) {
@@ -1062,6 +1096,24 @@ window.operator.onEvent((evt) => {
       hideDots();
       addPlanStep(evt);
       showDots();
+      break;
+
+    // ── the check on the work ───────────────────────────────────
+    // `done` has already ended the run visually by the time this arrives, so
+    // the UI goes back to work while the second pass looks at what happened.
+    case 'verify_start':
+      closeGroup();
+      resumeRun();
+      break;
+
+    case 'verify':
+      closeGroup();
+      hideDots();
+      turn('', checkCard(evt));
+      rec({ k: 'check', ok: evt.ok, why: evt.why });
+      // A failed check sends the agent back for another go; anything else is
+      // the end of the run, and `status: idle` is about to close it properly.
+      if (evt.ok === false) showDots();
       break;
 
     // text is null when the result just repeats what was already said
@@ -2840,6 +2892,19 @@ input.focus();
   document.querySelectorAll('#settingsTabs .tab').forEach((t) => {
     if (t.dataset.tab === 'audit') t.addEventListener('click', () => refreshAudit());
   });
+
+  // The check on the work lives in the same panel, because it is the same
+  // question: what did it actually do? Kept in prefs rather than localStorage
+  // so it follows the profile — main.js reads it at the end of every run.
+  const verifyOn = document.getElementById('verifyOn');
+  if (verifyOn && window.operator.prefsGet) {
+    window.operator.prefsGet()
+      .then((p) => { verifyOn.checked = !p || p.verify !== false; })
+      .catch(() => { verifyOn.checked = true; });
+    verifyOn.addEventListener('change', () => {
+      window.operator.prefsSet({ verify: verifyOn.checked }).catch(() => {});
+    });
+  }
 })();
 
 

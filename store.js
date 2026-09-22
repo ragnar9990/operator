@@ -90,7 +90,9 @@ function listConnectors() {
 // the profile; the renderer also mirrors it to localStorage so the theme is on
 // screen before the first paint instead of flashing the default first.
 
-const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', motion: 'on' };
+// `verify` is on by default: an agent that reports work it did not do is worse
+// than a slow one, and the check costs about a cent. See verify.js.
+const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', motion: 'on', verify: true };
 
 function getPrefs() {
   return { ...PREF_DEFAULTS, ...(settings.prefs || {}) };

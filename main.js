@@ -12,6 +12,7 @@ const overlay = require('./overlay');
 const agent = require('./agent');
 const store = require('./store');
 const audit = require('./audit');
+const verify = require('./verify');
 const errors = require('./errors');
 const phone = require('./phone');
 const email = require('./email');
@@ -251,6 +252,14 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   // is free; if it did, a retry would do the same work to the machine twice.
   let progressed = false;
 
+  // What the check at the end gets to look at: everything the agent actually
+  // did, the last thing it said about it, and which hands it used — so the
+  // check only asks for evidence this run already paid for.
+  const acts = [];
+  let lastReply = null;
+  let usedScreen = false;
+  let usedBrowser = false;
+
   const onEvent = (evt) => {
     // A finished tool call. Recorded before the stop check below, and on
     // purpose: a tool already running when Stop was pressed still did its
@@ -258,6 +267,9 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     // user cut the run short is the one you would most want to find.
     // Bookkeeping only — the transcript drew this step when it was asked for.
     if (evt.type === 'tool_done') {
+      acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
+      if (/^(screen_|launch_app|focus_window|list_windows)/.test(evt.name)) usedScreen = true;
+      if (evt.name.startsWith('browser_')) usedBrowser = true;
       audit.write({
         botId: botId || null,
         botName: (bot && bot.name) || null,
@@ -292,6 +304,9 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       return;
     }
     if (evt.type === 'tool' || evt.type === 'say_start' || evt.type === 'assistant') progressed = true;
+    // The claim the check is testing. `done` repeats the closing line as null
+    // when it has already been said, so the last non-empty one is the right one.
+    if (evt.text && (evt.type === 'say_end' || evt.type === 'assistant' || evt.type === 'done')) lastReply = evt.text;
     if (record) record(evt);
     send('agent-event', { ...evt, botId, chatId });
   };
@@ -376,8 +391,11 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     },
   };
 
-  const go = (resume) =>
-    agent.runTask(prompt, {
+  // `again` is a follow-up turn on the same session — the check sending the run
+  // back to fix something. It is not the user's message, so the /skill that was
+  // invoked for this turn does not apply to it.
+  const go = (resume, again) =>
+    agent.runTask(again || prompt, {
       userDataDir: profileDir(),
       abortController,
       model: model || (bot && bot.model) || undefined,
@@ -391,11 +409,65 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       codeChats,
       email: emailApi,
       alwaysSkills,
-      activeSkill,
+      activeSkill: again ? null : activeSkill,
       skillIndex,
       dryRun,
       onEvent,
     });
+
+  // The run does not get to mark its own homework. Once it thinks it is
+  // finished, a second cheap model (verify.js) looks at the goal, what was
+  // actually done and the screen as it is now, and says whether the goal was
+  // met. On "no" the critique goes straight back into the same session as a
+  // follow-up turn — bounded, so a stubborn task cannot loop the machine.
+  const VERIFY_RETRIES = 1;
+
+  async function checkTheWork() {
+    // A run that did nothing has nothing to check — which is also how ordinary
+    // conversation avoids paying for this at all.
+    if (store.getPrefs().verify === false) return;
+    if (!acts.length || abortController.signal.aborted) return;
+
+    for (let tries = 0; ; tries++) {
+      onEvent({ type: 'verify_start' });
+      const v = await verify.check({
+        goal: prompt, actions: acts, reply: lastReply, model,
+        dryRun, usedScreen, usedBrowser, abortController,
+      });
+      if (abortController.signal.aborted) return;
+
+      audit.write({
+        botId: botId || null,
+        botName: (bot && bot.name) || null,
+        chatId: chatId || null,
+        taskId,
+        mode: 'agent',
+        tool: 'verify',
+        text: v.ok === true ? `Checked: the goal was met — ${v.why}`
+          : v.ok === false ? 'Checked: the goal was NOT met'
+          : 'Checked: could not tell',
+        args: { goal: prompt, steps: acts.length, retry: tries },
+        ok: v.ok === true,
+        error: v.ok === true ? null : v.why,
+        ms: v.ms,
+        computer: computerLabel(),
+        model: v.model,
+        dryRun: Boolean(dryRun),
+      });
+      onEvent({ type: 'verify', ok: v.ok, why: v.why, model: v.model, ms: v.ms, cost: v.cost });
+
+      // Met, or no honest verdict either way — either way, stop here. An
+      // "unsure" must never send the agent back to redo work that was fine.
+      if (v.ok !== false) return;
+      if (tries >= VERIFY_RETRIES) return;      // out of retries; the verdict stands
+
+      // Same conversation, not a new one: the agent has to see its own work to
+      // fix it. Read the session back rather than reusing the one this task
+      // started with — the run may have been handed a fresh one along the way.
+      await go(botId && chatId ? store.sessionOf(botId, chatId) : null, verify.critique(v.why));
+      if (abortController.signal.aborted) return;
+    }
+  }
 
   try {
     const resume = botId && chatId ? store.sessionOf(botId, chatId) : null;
@@ -409,6 +481,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       store.forgetSession(botId, chatId);
       await go(null);
     }
+    await checkTheWork();
   } catch (err) {
     // Raw SDK and Node failures mean nothing to someone who has just installed
     // this. errors.js turns the common ones into a sentence plus the fix, and
