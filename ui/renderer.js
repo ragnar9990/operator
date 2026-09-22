@@ -385,14 +385,20 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     await window.operator.saveChat(bot.id, chat.id, { title: chat.title, turns: chat.turns });
-    listChats();
-    loadBots();
+    // The rail is painted from the roster now, not from a separate fetch, so
+    // it has to be reloaded before repainting — otherwise an agent keeps the
+    // name it had before the first thing you asked it.
+    await loadBots();
+    await paintRail();
   }, 400);
 }
 
+// An agent is its thread, so asking for the agent is asking for the thread.
+// It is made on demand rather than at creation, which is what keeps a freshly
+// made agent out of the way until you actually say something to it.
 async function ensureChat() {
   if (chat) return chat;
-  const made = await window.operator.createChat(bot.id);
+  const made = await window.operator.agentThread(bot.id);
   chat = { id: made.id, title: made.title, turns: [] };
   return chat;
 }
@@ -413,12 +419,53 @@ async function loadBots(select) {
   paintFaces();
 }
 
+/* ── what a row in the rail is ───────────────────────────────────────
+ * One conversation: an agent, and the thread it is. Normally that is one row
+ * per agent. A routine writes each run into a thread of its own, so an agent
+ * can pick up extras — those show up in the list below as conversations in
+ * their own right rather than vanishing underneath the agent that owns them.
+ */
+
+const pinnedAgents = () => bots.filter((b) => b.pinned);
+
+// Everything that is not pinned, newest first, plus any extra threads a pinned
+// agent has collected. Sorted by the thread, not the agent: the list reads as a
+// history of conversations, so the one you touched last belongs at the top.
+function looseRows() {
+  const rows = [];
+  for (const b of bots) {
+    if (b.pinned) for (const t of b.threads.slice(1)) rows.push({ bot: b, thread: t });
+    else if (!b.threads.length) rows.push({ bot: b, thread: null });
+    else for (const t of b.threads) rows.push({ bot: b, thread: t });
+  }
+  return rows.sort((a, z) => ((z.thread && z.thread.updatedAt) || 0) - ((a.thread && a.thread.updatedAt) || 0));
+}
+
+const isOpen = (row) =>
+  Boolean(bot && row.bot.id === bot.id &&
+    ((chat && row.thread && chat.id === row.thread.id) || (!chat && !row.thread)));
+
+// Both lists in one call. Which row is highlighted depends on the open thread,
+// so painting one without the other leaves a stale selection in the other.
+const paintRail = () => { paintRoster(); return listChats(); };
+
 function paintRoster() {
   rosterEl.textContent = '';
-  for (const b of bots) {
+  const rows = pinnedAgents().map((b) => ({ bot: b, thread: b.threads[0] || null }));
+
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.className = 'chats-empty';
+    p.textContent = 'None pinned.';
+    rosterEl.appendChild(p);
+    return;
+  }
+
+  for (const r of rows) {
+    const b = r.bot;
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'bot-row' + (bot && b.id === bot.id ? ' on' : '');
+    row.className = 'bot-row' + (isOpen(r) ? ' on' : '');
     row.dataset.id = b.id;
 
     row.appendChild(Avatar.el(b.face, 26, 'idle'));
@@ -427,25 +474,46 @@ function paintRoster() {
     text.className = 'bot-text';
     const name = document.createElement('span');
     name.className = 'bot-name';
-    name.textContent = b.name;
+    const label = document.createElement('span');
+    label.className = 'bot-label';
+    label.textContent = b.name;
+    name.appendChild(label);
+    if (b.role) {
+      const tag = document.createElement('span');
+      tag.className = 'role-tag is-' + b.role;
+      tag.textContent = b.role === 'coordinator' ? 'coord' : 'main';
+      name.appendChild(tag);
+    }
     const line = document.createElement('span');
     line.className = 'bot-line';
     line.textContent = b.lastLine || b.title || 'Nothing yet';
     text.append(name, line);
 
     row.appendChild(text);
-    row.addEventListener('click', () => switchBot(b.id));
+    row.addEventListener('click', () => openAgent(b.id, r.thread && r.thread.id));
     rosterEl.appendChild(row);
   }
 }
 
-async function switchBot(botId) {
-  if (bot && bot.id === botId) return;
+// Open a conversation: which agent is talking, and which of its threads.
+async function openAgent(botId, threadId) {
+  if (bot && bot.id === botId && chat && chat.id === threadId) return;
   if (busy) window.operator.stopTask();
+
   chat = null;
   clearThread();
   await loadBots(botId);
-  await listChats();
+
+  if (threadId) {
+    const full = await window.operator.getChat(botId, threadId);
+    if (full) {
+      chat = { id: full.id, title: full.title, turns: full.turns || [] };
+      if (chat.turns.length) document.body.classList.add('started');
+      replay(chat.turns);
+    }
+  }
+
+  await paintRail();
   input.focus();
 }
 
@@ -453,10 +521,12 @@ async function switchBot(botId) {
 
 const BIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V5.5h5V7M6.5 7l.8 12h9.4l.8-12"/></svg>';
 
+// The agents that are not pinned. Reads like a history — each row is one
+// conversation, most recent at the top — which is why it is painted from the
+// whole roster rather than from whichever agent happens to be selected.
 async function listChats() {
-  if (!bot) return;
-  chatsFor.textContent = 'Chats';
-  const rows = await window.operator.listChats(bot.id);
+  chatsFor.textContent = 'Agents';
+  const rows = looseRows();
   chatsEl.textContent = '';
 
   if (!rows.length) {
@@ -468,23 +538,29 @@ async function listChats() {
   }
 
   for (const r of rows) {
+    const label = (r.thread && r.thread.title !== 'New chat' ? r.thread.title : r.bot.name) || 'New agent';
+
     const row = document.createElement('div');
-    row.className = 'chat-row' + (chat && chat.id === r.id ? ' on' : '');
+    row.className = 'chat-row' + (isOpen(r) ? ' on' : '');
 
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'chat-open';
-    open.textContent = r.title;
-    open.title = r.title;
-    open.addEventListener('click', () => openChat(r.id));
+    open.appendChild(Avatar.el(r.bot.face, 18, 'idle'));
+    const name = document.createElement('span');
+    name.className = 'chat-name';
+    name.textContent = label;
+    open.appendChild(name);
+    open.title = label;
+    open.addEventListener('click', () => openAgent(r.bot.id, r.thread && r.thread.id));
 
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'chat-del';
-    del.title = 'Delete chat';
-    del.setAttribute('aria-label', 'Delete ' + r.title);
+    del.title = 'Delete agent';
+    del.setAttribute('aria-label', 'Delete ' + label);
     del.innerHTML = BIN;
-    del.addEventListener('click', (e) => { e.stopPropagation(); removeChat(r.id); });
+    del.addEventListener('click', (e) => { e.stopPropagation(); removeRow(r); });
 
     row.append(open, del);
     chatsEl.appendChild(row);
@@ -543,48 +619,55 @@ async function adopt(botId, chatId) {
   loadBots();
 }
 
-async function openChat(id) {
-  if (chat && chat.id === id) return;
-  if (busy) window.operator.stopTask();
+// Deleting a row deletes the conversation it stands for. For an ordinary agent
+// that is the agent itself; for a routine's run sitting under a pinned agent it
+// is only that thread, because the agent it belongs to is one you chose to keep.
+async function removeRow(r) {
+  const mine = isOpen(r);
+  if (r.bot.pinned && r.thread) await window.operator.deleteChat(r.bot.id, r.thread.id);
+  else await window.operator.deleteBot(r.bot.id);
 
-  const full = await window.operator.getChat(bot.id, id);
-  if (!full) { listChats(); return; }
+  if (!mine) {
+    await loadBots(bot && bot.id);
+    await paintRail();
+    return;
+  }
 
-  clearThread();
-  chat = { id: full.id, title: full.title, turns: full.turns || [] };
-  if (chat.turns.length) document.body.classList.add('started');
-  replay(chat.turns);
-  listChats();
-  input.focus();
-}
-
-async function removeChat(id) {
-  await window.operator.deleteChat(bot.id, id);
-  if (chat && chat.id === id) { chat = null; clearThread(); }
-  listChats();
-  loadBots();
-}
-
-function newChat() {
-  if (busy) window.operator.stopTask();
+  // The one you were reading has gone. Land on another rather than leaving the
+  // composer pointed at an agent that no longer exists.
   chat = null;
   clearThread();
+  await loadBots();
+  const next = pinnedAgents().map((b) => ({ bot: b, thread: b.threads[0] || null }))[0] || looseRows()[0];
+  if (next) await openAgent(next.bot.id, next.thread && next.thread.id);
+  else await paintRail();
+}
+
+// New agent: its own persona, its own memory, its own thread. This is the one
+// that used to be "New chat", and the difference is the point — a conversation
+// here is a thing you can give a name, a face and standing instructions.
+// A new agent arrives with its thread already on it, so it has to be opened
+// through openAgent — selecting the agent alone would leave the rail with
+// nothing highlighted and the composer pointing at a thread it never loaded.
+async function makeAgent(spec) {
+  if (busy) window.operator.stopTask();
+  const made = await window.operator.createAgent(spec);
+  if (!made) return null;
   input.value = '';
   resize();
-  listChats();
-  input.focus();
+  await openAgent(made.id, made.threads.length ? made.threads[0].id : null);
+  return made;
 }
+
+const newChat = () => makeAgent({ name: 'New agent', title: '' });
 
 newChatBtn.addEventListener('click', newChat);
 
+// The + above the rail makes one that stays: pinned to the top, badged main
+// until you say otherwise in its panel.
 newBotBtn.addEventListener('click', async () => {
-  const made = await window.operator.createBot({ name: 'New bot', title: '' });
-  if (!made) return;
-  chat = null;
-  clearThread();
-  await loadBots(made.id);
-  await listChats();
-  openSheet(true);
+  const made = await makeAgent({ name: 'New agent', title: '', pinned: true, role: 'main' });
+  if (made) openSheet(true);
 });
 
 /* the rail opens and closes */
@@ -617,6 +700,7 @@ const fName = document.getElementById('fName');
 const fTitle = document.getElementById('fTitle');
 const fPersona = document.getElementById('fPersona');
 const fModel = document.getElementById('fModel');
+const fRole = document.getElementById('fRole');
 const fFaces = document.getElementById('fFaces');
 const fMemory = document.getElementById('fMemory');
 const fRoutines = document.getElementById('fRoutines');
@@ -694,6 +778,8 @@ async function paintSheet() {
   fName.value = full.name;
   fTitle.value = full.title || '';
   fPersona.value = full.persona || '';
+  // Unpinned agents have no role, so the empty option is "in the list".
+  fRole.value = full.pinned ? (full.role || 'main') : '';
 
   // model: the app default, or one pinned to this bot
   fModel.textContent = '';
@@ -893,13 +979,18 @@ const pushField = async () => {
     title: fTitle.value,
     persona: fPersona.value,
     model: fModel.value || null,
+    pinned: Boolean(fRole.value),
+    role: fRole.value || null,
   });
   await loadBots(bot.id);
-  sheetTitle.textContent = fName.value.trim() || 'Bot';
+  // Pinning moves it between the two lists, so both have to be repainted.
+  await paintRail();
+  sheetTitle.textContent = fName.value.trim() || 'Agent';
 };
 
 [fName, fTitle, fPersona].forEach((el) => el.addEventListener('change', pushField));
 fModel.addEventListener('change', pushField);
+fRole.addEventListener('change', pushField);
 
 document.getElementById('memForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -941,11 +1032,11 @@ document.getElementById('deleteBot').addEventListener('click', async () => {
   clearThread();
   bot = null;
   await loadBots();
-  await listChats();
+  await paintRail();
 });
 
 // A routine that fired while you were elsewhere changes the roster under you.
-window.operator.onBotsChanged(() => { loadBots(); listChats(); });
+window.operator.onBotsChanged(() => { loadBots().then(paintRail); });
 
 
 /* ── "it is working" dots ────────────────────────────────────────── */
@@ -1161,8 +1252,17 @@ async function run(override) {
 
   await ensureChat();
   turn('you', '<span>' + youHtml(task) + '</span>');
-  // the first thing you ask becomes the chat's name
-  if (!chat.turns.length) chat.title = task.replace(/\s+/g, ' ').slice(0, 70);
+  // The first thing you ask becomes its name. An agent is its conversation, so
+  // that names both — but only while the agent is still called what it was born
+  // called, or a task would rename an agent you had deliberately named yourself.
+  if (!chat.turns.length) {
+    chat.title = task.replace(/\s+/g, ' ').slice(0, 70);
+    if (bot.name === 'New agent' || bot.name === 'New bot') {
+      await window.operator.updateBot(bot.id, { name: chat.title.slice(0, 40) });
+      bot.name = chat.title.slice(0, 40);
+      paintFaces();
+    }
+  }
   rec({ k: 'you', text: task });
 
   // Remembered so the plan card's "Run it for real" can replay the same task.
@@ -1553,7 +1653,10 @@ input.focus();
 (async () => {
   setRail(recall(RAIL_OPEN) === '1');
   await loadBots();
-  await listChats();
+  // An agent is its conversation, so opening the app opens the one you left
+  // rather than an empty box with the transcript a click away.
+  if (bot && bot.threads && bot.threads.length) await openAgent(bot.id, bot.threads[0].id);
+  else await paintRail();
   input.focus();
 })();
 

@@ -30,7 +30,11 @@
       const v = JSON.parse(sessionStorage.getItem(KEY));
       if (Array.isArray(v) && v.length) return v;
     } catch { /* fall through */ }
-    return [blank('Operator', 'Runs this computer')];
+    // The seed agent is pinned, so the preview shows both lists rather than an
+    // empty "Always on" section.
+    const seed = blank('Operator', 'Runs this computer');
+    seed.pinned = true; seed.role = 'main';
+    return [seed];
   }
   function put(v) { try { sessionStorage.setItem(KEY, JSON.stringify(v)); } catch { /* fine */ } }
 
@@ -64,6 +68,8 @@
     id: b.id, name: b.name, title: b.title, face: b.face, model: b.model, persona: b.persona,
     memoryCount: b.memory.length, routineCount: b.routines.filter((r) => !r.paused).length,
     skillCount: b.skills.length, updatedAt: b.updatedAt, lastLine: lastLine(b),
+    pinned: Boolean(b.pinned), role: b.role || null,
+    threads: b.chats.map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt })),
   });
   const sync = () => put(BOTS);
 
@@ -332,7 +338,21 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       if (patch.persona != null) b.persona = String(patch.persona);
       if ('model' in patch) b.model = patch.model || null;
       if (patch.face) b.face = patch.face;
+      if ('pinned' in patch) b.pinned = Boolean(patch.pinned);
+      if ('role' in patch) b.role = patch.role || null;
+      if (!b.pinned) b.role = null;
       b.updatedAt = Date.now(); sync(); return card(b);
+    },
+    createAgent: async (spec) => {
+      const b = blank((spec && spec.name) || 'New agent', (spec && spec.title) || '');
+      if (spec && spec.pinned) { b.pinned = true; b.role = spec.role || 'main'; }
+      b.chats.unshift({ id: uid('c'), title: 'New chat', turns: [], updatedAt: Date.now() });
+      BOTS.unshift(b); sync(); return card(b);
+    },
+    agentThread: async (id) => {
+      const b = find(id); if (!b) return null;
+      if (!b.chats.length) b.chats.unshift({ id: uid('c'), title: 'New chat', turns: [], updatedAt: Date.now() });
+      sync(); return b.chats[0];
     },
     deleteBot: async (id) => { BOTS = BOTS.filter((b) => b.id !== id); if (!BOTS.length) BOTS = [blank('Operator', 'Runs this computer')]; sync(); return { ok: true }; },
     rememberNote: async (id, text) => { const b = find(id); if (!b) return null; const n = { id: uid('m'), text, at: Date.now() }; b.memory.unshift(n); sync(); return n; },

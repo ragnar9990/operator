@@ -10,7 +10,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const MAX_BOTS = 50;        // the roster stops being scannable long before this
+// An agent is a bot with exactly one thread, so the ceiling that used to be
+// "how many personas can you keep track of" is now "how many conversations do
+// you keep", which is a much bigger number. The rail scrolls; 50 did not.
+const MAX_BOTS = 500;
 const MAX_CHATS_PER_BOT = 80;
 
 let file = null;
@@ -61,7 +64,45 @@ function init(userDataDir) {
   if (!Array.isArray(settings.codeChats)) settings.codeChats = [];
 
   if (!bots.length) bots = [adopt()];
+  toAgents();
   flush();
+}
+
+// One-time: turn "bots, each owning a pile of chats" into "agents, each being
+// one conversation". Every bot that existed was something you kept, so it stays
+// pinned at the top; every chat underneath it becomes an agent of its own,
+// wearing that bot's face and persona. Nothing is thrown away, and it runs once
+// — the flag is what stops a later chat being split off again.
+function toAgents() {
+  if (settings.agentsMigrated) return;
+
+  const made = [];
+  for (const b of bots) {
+    if (b.pinned === undefined) b.pinned = true;
+    if (b.role === undefined) b.role = b.pinned ? 'main' : null;
+
+    // chats[0] is the newest — the bot keeps that one and hands over the rest.
+    const rest = b.chats.slice(1);
+    b.chats = b.chats.slice(0, 1);
+
+    for (const c of rest) {
+      const agent = blank(b.name, b.title);
+      agent.face = b.face;
+      agent.persona = b.persona;
+      agent.model = b.model;
+      agent.name = (c.title && c.title !== 'New chat' ? c.title : b.name).slice(0, 40);
+      agent.title = '';
+      agent.chats = [c];
+      agent.updatedAt = c.updatedAt || Date.now();
+      // Memory and routines stay with the pinned agent they were set up on:
+      // copying them would fire the same routine once per split-off thread.
+      made.push(agent);
+    }
+  }
+
+  bots.push(...made);
+  settings.agentsMigrated = true;
+  flushSettings();
 }
 
 /* ── connectors (email, and more later) ──────────────────────────── */
@@ -243,6 +284,11 @@ function blank(name, title) {
     skills: [],
     routines: [],
     chats: [],
+    // Where it sits in the rail. A pinned agent is one you keep — it stays at
+    // the top whatever else you start. `role` is what the badge says; it is a
+    // label, not behaviour, and nothing in the agent loop reads it.
+    pinned: false,
+    role: null,        // 'coordinator' | 'main' | null
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -255,6 +301,37 @@ function flush() {
   } catch (err) {
     console.error('could not save bots:', err.message);
   }
+}
+
+/* ── agents ──────────────────────────────────────────────────────────
+ * An agent is a bot with exactly one thread. It used to be that a bot owned a
+ * list of chats and you picked one; now the thing in the rail IS the
+ * conversation, the way it is in ChatGPT, and the persona, memory and routines
+ * ride along with it. The storage shape did not change — a bot still has a
+ * `chats` array — it just never has more than one entry in it any more. That
+ * keeps every function below, and the session code, working untouched.
+ */
+
+const ROLES = ['coordinator', 'main'];
+
+// The agent's one thread, made on demand. An agent that has never been spoken
+// to has no thread yet, which is what keeps a freshly made one out of the way
+// until it is actually used.
+function threadOf(botId) {
+  const b = find(botId);
+  if (!b) return null;
+  if (!b.chats.length) return createChat(botId);
+  return b.chats[0];
+}
+
+// A new agent, thread and all. Two calls collapsed into one because from here
+// on you cannot have the one without the other.
+function createAgent(spec = {}) {
+  const made = createBot(spec);
+  if (!made) return null;
+  const thread = createChat(made.id);
+  if (spec.pinned) updateBot(made.id, { pinned: true, role: spec.role || 'main' });
+  return { ...card(find(made.id)), threadId: thread.id };
 }
 
 /* ── bots ────────────────────────────────────────────────────────── */
@@ -272,6 +349,14 @@ const card = (b) => ({
   skillCount: b.skills.length,
   updatedAt: b.updatedAt,
   lastLine: lastLine(b),
+  pinned: Boolean(b.pinned),
+  role: b.role || null,
+  // An agent is one thread, so this is normally a list of one — enough for the
+  // rail to open it without a second round trip, and null until it has been
+  // spoken to (threadOf makes it on demand). It can still run to more than one:
+  // a routine writes its run into a thread of its own, and the rail shows those
+  // as agents in their own right rather than hiding them.
+  threads: b.chats.map(chatCard),
 });
 
 function lastLine(b) {
@@ -308,6 +393,11 @@ function updateBot(botId, patch = {}) {
   if (typeof patch.persona === 'string') b.persona = patch.persona.slice(0, 4000);
   if ('model' in patch) b.model = patch.model || null;
   if (patch.face) b.face = patch.face;
+  if ('pinned' in patch) b.pinned = Boolean(patch.pinned);
+  // Only a pinned agent wears a badge, so unpinning takes the role with it
+  // rather than leaving a coordinator hidden down the list.
+  if ('role' in patch) b.role = ROLES.includes(patch.role) ? patch.role : null;
+  if (!b.pinned) b.role = null;
   b.updatedAt = Date.now();
   flush();
   return card(b);
@@ -561,6 +651,7 @@ function forgetSession(botId, chatId) {
 module.exports = {
   init, faceFor,
   listBots, getBot, createBot, updateBot, deleteBot,
+  createAgent, threadOf,
   remember, forget,
   listSkills, getSkill, getSkillByName, createSkill, updateSkill, deleteSkill,
   attachSkill, removeSkill, skillsForBot,

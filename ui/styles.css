@@ -163,6 +163,39 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 .chats-empty { padding: 6px 10px; color: var(--ink-4); font-size: 13px; }
 
+/* A row in the lower list is a whole agent now, not a chat under one, so it
+   carries the face that is about to do the work. */
+.chat-open { display: flex; align-items: center; gap: 8px; }
+.chat-open > svg { flex: none; }
+.chat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* What a pinned agent is called at the top. A label, not a capability —
+   coordinator and main behave identically, and the UI says so. */
+/* The name truncates; the badge does not. Without this the ellipsis eats the
+   badge on any agent with a long name. Scoped to the row because .bot-name is
+   set to display:block further down, and that rule would otherwise win on
+   order alone. */
+.bot-row .bot-name { display: flex; align-items: center; }
+.bot-row .bot-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* What a pinned agent is called at the top. A label, not a capability —
+   coordinator and main behave identically, and the UI says so.
+   The modifier is `is-*`: a bare `.main` would collide with the main pane's
+   own class, which is flex:1, and stretch the badge across the row. */
+.role-tag {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: var(--raise-hi);
+  color: var(--ink-4);
+}
+.role-tag.is-coordinator { background: rgba(41, 159, 255, 0.16); color: var(--accent); }
+
 /* A coding chat working in the background, while you read another one. */
 .code-chat-spin {
   flex: none;

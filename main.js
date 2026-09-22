@@ -835,6 +835,10 @@ ipcMain.handle('connectors:disconnect', async (_e, id) => {
 ipcMain.handle('bots:list', async () => store.listBots());
 ipcMain.handle('bots:get', async (_e, id) => store.getBot(id));
 ipcMain.handle('bots:create', async (_e, spec) => store.createBot(spec || {}));
+// An agent is a bot and its one thread, so the rail never has to make the two
+// separately and risk ending up with a bot that has nothing to open.
+ipcMain.handle('agents:create', async (_e, spec) => store.createAgent(spec || {}));
+ipcMain.handle('agents:thread', async (_e, id) => store.threadOf(id));
 ipcMain.handle('bots:update', async (_e, id, patch) => store.updateBot(id, patch || {}));
 ipcMain.handle('bots:delete', async (_e, id) => { store.deleteBot(id); return { ok: true }; });
 ipcMain.handle('bots:forget', async (_e, id, noteId) => { store.forget(id, noteId); return { ok: true }; });

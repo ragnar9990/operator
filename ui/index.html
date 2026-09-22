@@ -78,12 +78,12 @@
         </div>
 
         <div class="rail-list" id="railList">
-          <div class="rail-head">Bots</div>
+          <div class="rail-head" id="pinnedHead">Always on</div>
           <div class="roster" id="roster"></div>
 
           <div class="rail-head chats-head">
-            <span id="chatsFor">Chats</span>
-            <button class="mini" id="newChatBtn" type="button" title="New chat">New</button>
+            <span id="chatsFor">Agents</span>
+            <button class="mini" id="newChatBtn" type="button" title="New agent">New</button>
           </div>
           <div class="chats" id="chats"></div>
         </div>
@@ -298,6 +298,16 @@
           <label class="field">
             <span>Model</span>
             <select id="fModel"></select>
+          </label>
+
+          <label class="field">
+            <span>Where it lives</span>
+            <select id="fRole">
+              <option value="">In the list — an ordinary agent</option>
+              <option value="main">Always on — main</option>
+              <option value="coordinator">Always on — coordinator</option>
+            </select>
+            <p class="field-hint">An always-on agent is pinned to the top of the rail and never scrolls away with the rest. Coordinator and main are labels for your own benefit — both behave the same.</p>
           </label>
 
           <div class="field">

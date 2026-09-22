@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('operator', {
   listBots: () => ipcRenderer.invoke('bots:list'),
   getBot: (id) => ipcRenderer.invoke('bots:get', id),
   createBot: (spec) => ipcRenderer.invoke('bots:create', spec),
+  // an agent: a bot and the one thread it is
+  createAgent: (spec) => ipcRenderer.invoke('agents:create', spec),
+  agentThread: (id) => ipcRenderer.invoke('agents:thread', id),
   updateBot: (id, patch) => ipcRenderer.invoke('bots:update', id, patch),
   deleteBot: (id) => ipcRenderer.invoke('bots:delete', id),
   forgetNote: (id, noteId) => ipcRenderer.invoke('bots:forget', id, noteId),
