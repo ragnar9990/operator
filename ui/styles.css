@@ -90,28 +90,39 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .rail-list { display: none; flex: 1; min-height: 0; flex-direction: column; margin-top: 14px; }
 .rail.open .rail-list { display: flex; }
 
+/* ONE scroller for the whole rail, not one per section. Capping each section
+   and letting it scroll on its own looks tidy until all three are full: the
+   caps add up, and the list at the bottom — the one you actually live in —
+   gets whatever is left, which was 11% of the rail with a full roster and a
+   few workspaces. Stacked and scrolled together, nothing squeezes anything. */
+.rail-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(252, 252, 252, 0.14) transparent;
+}
+.rail-list::-webkit-scrollbar { width: 8px; }
+.rail-list::-webkit-scrollbar-track { background: transparent; }
+.rail-list::-webkit-scrollbar-thumb {
+  background: rgba(252, 252, 252, 0.14);
+  border-radius: 9999px;
+  border: 2px solid var(--bg);
+}
+
+/* The headings stay put as you scroll past them, so a long rail never leaves
+   you wondering which section you are looking at. */
 .rail-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   flex: none;
-  padding: 0 8px 8px;
+  padding: 6px 8px 8px;
+  background: var(--bg);
   color: var(--ink-4);
   font-size: 12px;
   letter-spacing: -0.1px;
 }
 
-.chats {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(252, 252, 252, 0.14) transparent;
-}
-.chats::-webkit-scrollbar { width: 8px; }
-.chats::-webkit-scrollbar-track { background: transparent; }
-.chats::-webkit-scrollbar-thumb {
-  background: rgba(252, 252, 252, 0.14);
-  border-radius: 9999px;
-  border: 2px solid var(--bg);
-}
+.chats { flex: none; }
 
 .chat-row {
   -webkit-app-region: no-drag;
@@ -162,6 +173,73 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .chat-del:hover { color: var(--fail); background: rgba(244, 104, 95, 0.12); }
 
 .chats-empty { padding: 6px 10px; color: var(--ink-4); font-size: 13px; }
+
+/* ── workspaces: named folders of agents ───────────────────────────── */
+
+.spaces { flex: none; margin-bottom: 4px; }
+
+.space-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border-radius: 9px;
+  transition: background 0.13s;
+}
+.space-head:hover { background: var(--raise-hi); }
+
+.space-open {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+  text-align: left;
+  cursor: pointer;
+}
+.space-open > svg {
+  flex: none;
+  width: 13px; height: 13px;
+  color: var(--ink-4);
+  transition: transform 0.15s;
+  transform: rotate(90deg);
+}
+.space.shut .space-open > svg { transform: rotate(0deg); }
+.space-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-count { flex: none; color: var(--ink-4); font-size: 11.5px; font-weight: 400; }
+
+/* Renaming happens in place, so the input has to sit exactly where the name did
+   or the row jumps as you start typing. */
+.space-rename {
+  flex: 1; min-width: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.space-rename:focus { outline: none; }
+
+.space-body { padding-left: 12px; border-left: 1px solid var(--line); margin: 1px 0 4px 15px; }
+.space-empty { padding: 5px 8px; font-size: 12px; }
+
+/* Where a dragged agent would land. */
+.space-head.drop, .rail-head.drop {
+  background: rgba(41, 159, 255, 0.16);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.rail-head.drop { border-radius: 9px; }
+.chat-row.lifting { opacity: 0.45; }
+.chat-row[draggable="true"] .chat-open { cursor: pointer; }
 
 /* A row in the lower list is a whole agent now, not a chat under one, so it
    carries the face that is about to do the work. */
@@ -892,13 +970,9 @@ body.started .intro { display: none; }
 
 /* ── the roster ──────────────────────────────────────────────────── */
 
-/* Sizes to its content, capped so a long pinned list cannot squeeze out the one
-   below it. The cap is the smaller share on purpose: the agents list is the one
-   you scroll through, the pinned list is the one you already know by heart. */
-.roster { flex: none; max-height: 38%; overflow-y: auto; margin-bottom: 4px; }
-.roster::-webkit-scrollbar { width: 8px; }
-.roster::-webkit-scrollbar-track { background: transparent; }
-.roster::-webkit-scrollbar-thumb { background: rgba(252,252,252,.14); border-radius: 9999px; border: 2px solid var(--bg); }
+/* Sizes to its content. No cap and no scroller of its own — the rail scrolls
+   as one, so a long pinned list simply pushes the rest down the page. */
+.roster { flex: none; margin-bottom: 4px; }
 
 .bot-row {
   -webkit-app-region: no-drag;

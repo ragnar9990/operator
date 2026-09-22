@@ -62,6 +62,7 @@ function init(userDataDir) {
   }
   if (!settings.connectors) settings.connectors = {};
   if (!Array.isArray(settings.codeChats)) settings.codeChats = [];
+  if (!Array.isArray(settings.workspaces)) settings.workspaces = [];
 
   if (!bots.length) bots = [adopt()];
   toAgents();
@@ -289,6 +290,7 @@ function blank(name, title) {
     // label, not behaviour, and nothing in the agent loop reads it.
     pinned: false,
     role: null,        // 'coordinator' | 'main' | null
+    workspaceId: null, // which folder it is filed in, if any
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -313,6 +315,65 @@ function flush() {
  */
 
 const ROLES = ['coordinator', 'main'];
+
+/* ── workspaces ──────────────────────────────────────────────────────
+ * A named folder of agents. Membership lives on the agent as a single
+ * `workspaceId` rather than as a list of ids on the workspace, so there is
+ * only ever one copy of the truth — a list on both sides is a sync bug
+ * waiting for the first delete.
+ *
+ * A workspace is filing, not scope. It does not isolate anything: agents in
+ * one can still message agents in another, and the UI must not suggest
+ * otherwise. Pinned agents stay in "Always on" whatever folder they are in,
+ * and get their folder back when unpinned.
+ */
+
+const wsCard = (w) => ({
+  id: w.id,
+  name: w.name,
+  collapsed: Boolean(w.collapsed),
+  count: bots.filter((b) => b.workspaceId === w.id).length,
+});
+
+function listWorkspaces() { return (settings.workspaces || []).map(wsCard); }
+
+function createWorkspace(name) {
+  const w = { id: id('w'), name: String(name || 'New workspace').trim().slice(0, 40) || 'New workspace', collapsed: false, createdAt: Date.now() };
+  settings.workspaces.push(w);
+  flushSettings();
+  return wsCard(w);
+}
+
+function updateWorkspace(wsId, patch = {}) {
+  const w = (settings.workspaces || []).find((x) => x.id === wsId);
+  if (!w) return null;
+  if (typeof patch.name === 'string' && patch.name.trim()) w.name = patch.name.trim().slice(0, 40);
+  if ('collapsed' in patch) w.collapsed = Boolean(patch.collapsed);
+  flushSettings();
+  return wsCard(w);
+}
+
+// Deleting the folder must never delete what is filed in it. The agents come
+// back out to the main list; only the folder goes.
+function deleteWorkspace(wsId) {
+  settings.workspaces = (settings.workspaces || []).filter((w) => w.id !== wsId);
+  let moved = 0;
+  for (const b of bots) if (b.workspaceId === wsId) { b.workspaceId = null; moved++; }
+  flushSettings();
+  if (moved) flush();
+  return { ok: true, freed: moved };
+}
+
+// null takes an agent back out to the main list.
+function setAgentWorkspace(botId, wsId) {
+  const b = find(botId);
+  if (!b) return null;
+  const real = wsId && (settings.workspaces || []).some((w) => w.id === wsId);
+  b.workspaceId = real ? wsId : null;
+  b.updatedAt = Date.now();
+  flush();
+  return card(b);
+}
 
 // The agent's one thread, made on demand. An agent that has never been spoken
 // to has no thread yet, which is what keeps a freshly made one out of the way
@@ -351,6 +412,7 @@ const card = (b) => ({
   lastLine: lastLine(b),
   pinned: Boolean(b.pinned),
   role: b.role || null,
+  workspaceId: b.workspaceId || null,
   // An agent is one thread, so this is normally a list of one — enough for the
   // rail to open it without a second round trip, and null until it has been
   // spoken to (threadOf makes it on demand). It can still run to more than one:
@@ -398,6 +460,10 @@ function updateBot(botId, patch = {}) {
   // rather than leaving a coordinator hidden down the list.
   if ('role' in patch) b.role = ROLES.includes(patch.role) ? patch.role : null;
   if (!b.pinned) b.role = null;
+  if ('workspaceId' in patch) {
+    const real = patch.workspaceId && (settings.workspaces || []).some((w) => w.id === patch.workspaceId);
+    b.workspaceId = real ? patch.workspaceId : null;
+  }
   b.updatedAt = Date.now();
   flush();
   return card(b);
@@ -652,6 +718,7 @@ module.exports = {
   init, faceFor,
   listBots, getBot, createBot, updateBot, deleteBot,
   createAgent, threadOf,
+  listWorkspaces, createWorkspace, updateWorkspace, deleteWorkspace, setAgentWorkspace,
   remember, forget,
   listSkills, getSkill, getSkillByName, createSkill, updateSkill, deleteSkill,
   attachSkill, removeSkill, skillsForBot,

@@ -839,6 +839,14 @@ ipcMain.handle('bots:create', async (_e, spec) => store.createBot(spec || {}));
 // separately and risk ending up with a bot that has nothing to open.
 ipcMain.handle('agents:create', async (_e, spec) => store.createAgent(spec || {}));
 ipcMain.handle('agents:thread', async (_e, id) => store.threadOf(id));
+
+// Workspaces — named folders of agents. Filing only: nothing here scopes what
+// an agent can reach, and the UI must not imply that it does.
+ipcMain.handle('workspaces:list', async () => store.listWorkspaces());
+ipcMain.handle('workspaces:create', async (_e, name) => store.createWorkspace(name));
+ipcMain.handle('workspaces:update', async (_e, id, patch) => store.updateWorkspace(id, patch || {}));
+ipcMain.handle('workspaces:delete', async (_e, id) => store.deleteWorkspace(id));
+ipcMain.handle('workspaces:file', async (_e, botId, wsId) => store.setAgentWorkspace(botId, wsId));
 ipcMain.handle('bots:update', async (_e, id, patch) => store.updateBot(id, patch || {}));
 ipcMain.handle('bots:delete', async (_e, id) => { store.deleteBot(id); return { ok: true }; });
 ipcMain.handle('bots:forget', async (_e, id, noteId) => { store.forget(id, noteId); return { ok: true }; });

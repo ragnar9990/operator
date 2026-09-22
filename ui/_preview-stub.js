@@ -68,10 +68,14 @@
     id: b.id, name: b.name, title: b.title, face: b.face, model: b.model, persona: b.persona,
     memoryCount: b.memory.length, routineCount: b.routines.filter((r) => !r.paused).length,
     skillCount: b.skills.length, updatedAt: b.updatedAt, lastLine: lastLine(b),
-    pinned: Boolean(b.pinned), role: b.role || null,
+    pinned: Boolean(b.pinned), role: b.role || null, workspaceId: b.workspaceId || null,
     threads: b.chats.map((c) => ({ id: c.id, title: c.title, updatedAt: c.updatedAt })),
   });
   const sync = () => put(BOTS);
+
+  const WS_KEY = 'preview.workspaces';
+  let WS = (() => { try { return JSON.parse(sessionStorage.getItem(WS_KEY)) || []; } catch { return []; } })();
+  const putWS = () => { try { sessionStorage.setItem(WS_KEY, JSON.stringify(WS)); } catch { /* fine */ } };
 
 
 /* A week of agent history for the Audit panel. Values here are already redacted,
@@ -341,7 +345,30 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       if ('pinned' in patch) b.pinned = Boolean(patch.pinned);
       if ('role' in patch) b.role = patch.role || null;
       if (!b.pinned) b.role = null;
+      if ('workspaceId' in patch) b.workspaceId = patch.workspaceId || null;
       b.updatedAt = Date.now(); sync(); return card(b);
+    },
+    listWorkspaces: async () => WS.map((w) => ({ ...w, count: BOTS.filter((b) => b.workspaceId === w.id).length })),
+    createWorkspace: async (name) => {
+      const w = { id: uid('w'), name: String(name || 'New workspace').slice(0, 40), collapsed: false };
+      WS.push(w); putWS(); return { ...w, count: 0 };
+    },
+    updateWorkspace: async (id, patch) => {
+      const w = WS.find((x) => x.id === id); if (!w) return null;
+      if (patch.name != null && String(patch.name).trim()) w.name = String(patch.name).trim().slice(0, 40);
+      if ('collapsed' in patch) w.collapsed = Boolean(patch.collapsed);
+      putWS(); return { ...w, count: BOTS.filter((b) => b.workspaceId === w.id).length };
+    },
+    deleteWorkspace: async (id) => {
+      WS = WS.filter((w) => w.id !== id);
+      let freed = 0;
+      for (const b of BOTS) if (b.workspaceId === id) { b.workspaceId = null; freed++; }
+      putWS(); sync(); return { ok: true, freed };
+    },
+    fileAgent: async (botId, wsId) => {
+      const b = find(botId); if (!b) return null;
+      b.workspaceId = wsId && WS.some((w) => w.id === wsId) ? wsId : null;
+      sync(); return card(b);
     },
     createAgent: async (spec) => {
       const b = blank((spec && spec.name) || 'New agent', (spec && spec.title) || '');

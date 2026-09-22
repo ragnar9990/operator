@@ -34,6 +34,13 @@ contextBridge.exposeInMainWorld('operator', {
   // an agent: a bot and the one thread it is
   createAgent: (spec) => ipcRenderer.invoke('agents:create', spec),
   agentThread: (id) => ipcRenderer.invoke('agents:thread', id),
+
+  // workspaces: named folders you file agents into
+  listWorkspaces: () => ipcRenderer.invoke('workspaces:list'),
+  createWorkspace: (name) => ipcRenderer.invoke('workspaces:create', name),
+  updateWorkspace: (id, patch) => ipcRenderer.invoke('workspaces:update', id, patch),
+  deleteWorkspace: (id) => ipcRenderer.invoke('workspaces:delete', id),
+  fileAgent: (botId, wsId) => ipcRenderer.invoke('workspaces:file', botId, wsId),
   updateBot: (id, patch) => ipcRenderer.invoke('bots:update', id, patch),
   deleteBot: (id) => ipcRenderer.invoke('bots:delete', id),
   forgetNote: (id, noteId) => ipcRenderer.invoke('bots:forget', id, noteId),

@@ -82,6 +82,12 @@
           <div class="roster" id="roster"></div>
 
           <div class="rail-head chats-head">
+            <span>Workspaces</span>
+            <button class="mini" id="newWsBtn" type="button" title="New workspace">New</button>
+          </div>
+          <div class="spaces" id="spaces"></div>
+
+          <div class="rail-head chats-head" id="agentsHead">
             <span id="chatsFor">Agents</span>
             <button class="mini" id="newChatBtn" type="button" title="New agent">New</button>
           </div>
@@ -298,6 +304,12 @@
           <label class="field">
             <span>Model</span>
             <select id="fModel"></select>
+          </label>
+
+          <label class="field">
+            <span>Workspace</span>
+            <select id="fWorkspace"></select>
+            <p class="field-hint">Filing only. A workspace groups agents in the rail — it does not wall them off from each other or from anything on this computer.</p>
           </label>
 
           <label class="field">

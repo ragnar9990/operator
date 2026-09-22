@@ -326,6 +326,9 @@ const newBotBtn = document.getElementById('newBotBtn');
 const newChatBtn = document.getElementById('newChatBtn');
 const rosterEl = document.getElementById('roster');
 const chatsEl = document.getElementById('chats');
+const spacesEl = document.getElementById('spaces');
+const newWsBtn = document.getElementById('newWsBtn');
+const agentsHead = document.getElementById('agentsHead');
 const chatsFor = document.getElementById('chatsFor');
 const whoBtn = document.getElementById('whoBtn');
 const whoFace = document.getElementById('whoFace');
@@ -428,12 +431,11 @@ async function loadBots(select) {
 
 const pinnedAgents = () => bots.filter((b) => b.pinned);
 
-// Everything that is not pinned, newest first, plus any extra threads a pinned
-// agent has collected. Sorted by the thread, not the agent: the list reads as a
-// history of conversations, so the one you touched last belongs at the top.
-function looseRows() {
+// Sorted by the thread, not the agent: the rail reads as a history of
+// conversations, so the one you touched last belongs at the top.
+function rowsOf(list) {
   const rows = [];
-  for (const b of bots) {
+  for (const b of list) {
     if (b.pinned) for (const t of b.threads.slice(1)) rows.push({ bot: b, thread: t });
     else if (!b.threads.length) rows.push({ bot: b, thread: null });
     else for (const t of b.threads) rows.push({ bot: b, thread: t });
@@ -441,13 +443,18 @@ function looseRows() {
   return rows.sort((a, z) => ((z.thread && z.thread.updatedAt) || 0) - ((a.thread && a.thread.updatedAt) || 0));
 }
 
+// The main list is what is left over: not filed in a workspace, plus any extra
+// threads a pinned agent has collected from its routines.
+const looseRows = () => rowsOf(bots.filter((b) => !b.workspaceId));
+const rowsIn = (wsId) => rowsOf(bots.filter((b) => b.workspaceId === wsId));
+
 const isOpen = (row) =>
   Boolean(bot && row.bot.id === bot.id &&
     ((chat && row.thread && chat.id === row.thread.id) || (!chat && !row.thread)));
 
-// Both lists in one call. Which row is highlighted depends on the open thread,
-// so painting one without the other leaves a stale selection in the other.
-const paintRail = () => { paintRoster(); return listChats(); };
+// All three lists in one call. Which row is highlighted depends on the open
+// thread, so painting one without the others leaves a stale selection behind.
+const paintRail = () => { paintRoster(); paintSpaces(); return listChats(); };
 
 function paintRoster() {
   rosterEl.textContent = '';
@@ -521,6 +528,203 @@ async function openAgent(botId, threadId) {
 
 const BIN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V5.5h5V7M6.5 7l.8 12h9.4l.8-12"/></svg>';
 
+/* ── workspaces ──────────────────────────────────────────────────────
+ * Named folders of agents. Filing, not scope: a workspace groups rows in the
+ * rail and nothing else — it does not wall an agent off from the machine, the
+ * connectors or the other agents, and the panel says so rather than implying a
+ * boundary that is not there.
+ *
+ * You file an agent by dragging its row onto a workspace, or from its own
+ * panel. Dropping one on the Agents heading takes it back out.
+ */
+
+// Its own chevron: the steps-group CARET carries rotation styles tied to that
+// widget's aria-expanded, which is not how a workspace opens.
+const SPACE_CARET = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
+
+let spaces = [];
+
+async function loadSpaces() {
+  spaces = await window.operator.listWorkspaces();
+  return spaces;
+}
+
+function paintSpaces() {
+  if (!spacesEl) return;
+  spacesEl.textContent = '';
+
+  if (!spaces.length) {
+    const p = document.createElement('p');
+    p.className = 'chats-empty';
+    p.textContent = 'None yet — New makes one.';
+    spacesEl.appendChild(p);
+    return;
+  }
+
+  for (const w of spaces) {
+    const wrap = document.createElement('div');
+    wrap.className = 'space' + (w.collapsed ? ' shut' : '');
+
+    const head = document.createElement('div');
+    head.className = 'space-head';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'space-open';
+    toggle.innerHTML = SPACE_CARET;
+    const name = document.createElement('span');
+    name.className = 'space-name';
+    name.textContent = w.name;
+    const count = document.createElement('span');
+    count.className = 'space-count';
+    count.textContent = w.count;
+    toggle.append(name, count);
+    toggle.title = w.name + ' — double-click to rename';
+    toggle.addEventListener('click', () => setCollapsed(w, !w.collapsed));
+    toggle.addEventListener('dblclick', (e) => { e.preventDefault(); renameSpace(w, name); });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'chat-del';
+    del.title = 'Delete workspace — the agents in it stay';
+    del.setAttribute('aria-label', 'Delete workspace ' + w.name);
+    del.innerHTML = BIN;
+    del.addEventListener('click', (e) => { e.stopPropagation(); removeSpace(w); });
+
+    head.append(toggle, del);
+    dropInto(head, w.id);
+    wrap.appendChild(head);
+
+    if (!w.collapsed) {
+      const body = document.createElement('div');
+      body.className = 'space-body';
+      const rows = rowsIn(w.id);
+      if (!rows.length) {
+        const empty = document.createElement('p');
+        empty.className = 'chats-empty space-empty';
+        empty.textContent = 'Drag an agent in.';
+        body.appendChild(empty);
+      } else {
+        for (const r of rows) body.appendChild(agentRow(r));
+      }
+      wrap.appendChild(body);
+    }
+
+    spacesEl.appendChild(wrap);
+  }
+}
+
+async function setCollapsed(w, collapsed) {
+  w.collapsed = collapsed;               // paint now, persist behind it
+  paintSpaces();
+  await window.operator.updateWorkspace(w.id, { collapsed });
+  await loadSpaces();
+}
+
+// Swaps the name for an input in place. Enter or clicking away keeps it,
+// Escape puts it back — nothing is written until one of those happens.
+function renameSpace(w, nameEl) {
+  const box = document.createElement('input');
+  box.type = 'text';
+  box.className = 'space-rename';
+  box.value = w.name;
+  box.maxLength = 40;
+  nameEl.replaceWith(box);
+  box.focus();
+  box.select();
+
+  let done = false;
+  const finish = async (keep) => {
+    if (done) return;
+    done = true;
+    const next = box.value.trim();
+    if (keep && next && next !== w.name) await window.operator.updateWorkspace(w.id, { name: next });
+    await loadSpaces();
+    paintSpaces();
+  };
+  box.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  box.addEventListener('blur', () => finish(true));
+  // The caret sits inside the toggle button, so a click in the box would
+  // collapse the workspace underneath the thing being typed into.
+  box.addEventListener('click', (e) => e.stopPropagation());
+  box.addEventListener('dblclick', (e) => e.stopPropagation());
+}
+
+// The folder goes; what was in it drops back into the list below, which is the
+// feedback — no dialog, because nothing was destroyed.
+async function removeSpace(w) {
+  await window.operator.deleteWorkspace(w.id);
+  await loadSpaces();
+  await loadBots(bot && bot.id);
+  await paintRail();
+}
+
+/* dragging an agent into a folder */
+
+let dragging = null;   // the agent id in flight
+
+function dropInto(el, wsId) {
+  el.addEventListener('dragover', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop'));
+  el.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    el.classList.remove('drop');
+    const id = dragging || e.dataTransfer.getData('text/plain');
+    dragging = null;
+    if (!id) return;
+    await window.operator.fileAgent(id, wsId);
+    await loadSpaces();
+    await loadBots(bot && bot.id);
+    await paintRail();
+  });
+}
+
+// One agent row, used by the main list and inside a workspace.
+function agentRow(r) {
+  const label = (r.thread && r.thread.title !== 'New chat' ? r.thread.title : r.bot.name) || 'New agent';
+
+  const row = document.createElement('div');
+  row.className = 'chat-row' + (isOpen(r) ? ' on' : '');
+  row.draggable = true;
+  row.addEventListener('dragstart', (e) => {
+    dragging = r.bot.id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', r.bot.id);
+    row.classList.add('lifting');
+  });
+  row.addEventListener('dragend', () => { dragging = null; row.classList.remove('lifting'); });
+
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'chat-open';
+  open.appendChild(Avatar.el(r.bot.face, 18, 'idle'));
+  const name = document.createElement('span');
+  name.className = 'chat-name';
+  name.textContent = label;
+  open.appendChild(name);
+  open.title = label;
+  open.addEventListener('click', () => openAgent(r.bot.id, r.thread && r.thread.id));
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'chat-del';
+  del.title = 'Delete agent';
+  del.setAttribute('aria-label', 'Delete ' + label);
+  del.innerHTML = BIN;
+  del.addEventListener('click', (e) => { e.stopPropagation(); removeRow(r); });
+
+  row.append(open, del);
+  return row;
+}
+
 // The agents that are not pinned. Reads like a history — each row is one
 // conversation, most recent at the top — which is why it is painted from the
 // whole roster rather than from whichever agent happens to be selected.
@@ -537,34 +741,7 @@ async function listChats() {
     return;
   }
 
-  for (const r of rows) {
-    const label = (r.thread && r.thread.title !== 'New chat' ? r.thread.title : r.bot.name) || 'New agent';
-
-    const row = document.createElement('div');
-    row.className = 'chat-row' + (isOpen(r) ? ' on' : '');
-
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.className = 'chat-open';
-    open.appendChild(Avatar.el(r.bot.face, 18, 'idle'));
-    const name = document.createElement('span');
-    name.className = 'chat-name';
-    name.textContent = label;
-    open.appendChild(name);
-    open.title = label;
-    open.addEventListener('click', () => openAgent(r.bot.id, r.thread && r.thread.id));
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'chat-del';
-    del.title = 'Delete agent';
-    del.setAttribute('aria-label', 'Delete ' + label);
-    del.innerHTML = BIN;
-    del.addEventListener('click', (e) => { e.stopPropagation(); removeRow(r); });
-
-    row.append(open, del);
-    chatsEl.appendChild(row);
-  }
+  for (const r of rows) chatsEl.appendChild(agentRow(r));
 }
 
 // Replays a stored transcript. Screenshots are not kept, so the computer pane
@@ -663,6 +840,23 @@ const newChat = () => makeAgent({ name: 'New agent', title: '' });
 
 newChatBtn.addEventListener('click', newChat);
 
+// A workspace is born named and immediately editable — being made to find the
+// rename afterwards is how folders end up called "New workspace" forever.
+if (newWsBtn) {
+  newWsBtn.addEventListener('click', async () => {
+    const made = await window.operator.createWorkspace('New workspace');
+    await loadSpaces();
+    paintSpaces();
+    const row = [...spacesEl.querySelectorAll('.space')].find((el, i) => spaces[i] && spaces[i].id === made.id);
+    const w = spaces.find((x) => x.id === made.id);
+    const nameEl = row && row.querySelector('.space-name');
+    if (w && nameEl) renameSpace(w, nameEl);
+  });
+}
+
+// Dropping an agent on the Agents heading takes it back out of its folder.
+if (agentsHead) dropInto(agentsHead, null);
+
 // The + above the rail makes one that stays: pinned to the top, badged main
 // until you say otherwise in its panel.
 newBotBtn.addEventListener('click', async () => {
@@ -701,6 +895,7 @@ const fTitle = document.getElementById('fTitle');
 const fPersona = document.getElementById('fPersona');
 const fModel = document.getElementById('fModel');
 const fRole = document.getElementById('fRole');
+const fWorkspace = document.getElementById('fWorkspace');
 const fFaces = document.getElementById('fFaces');
 const fMemory = document.getElementById('fMemory');
 const fRoutines = document.getElementById('fRoutines');
@@ -780,6 +975,20 @@ async function paintSheet() {
   fPersona.value = full.persona || '';
   // Unpinned agents have no role, so the empty option is "in the list".
   fRole.value = full.pinned ? (full.role || 'main') : '';
+
+  // The same filing you get by dragging the row, for when dragging is awkward.
+  fWorkspace.textContent = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = 'None — in the main list';
+  fWorkspace.appendChild(none);
+  for (const w of spaces) {
+    const o = document.createElement('option');
+    o.value = w.id;
+    o.textContent = w.name;
+    fWorkspace.appendChild(o);
+  }
+  fWorkspace.value = full.workspaceId || '';
 
   // model: the app default, or one pinned to this bot
   fModel.textContent = '';
@@ -981,6 +1190,7 @@ const pushField = async () => {
     model: fModel.value || null,
     pinned: Boolean(fRole.value),
     role: fRole.value || null,
+    workspaceId: fWorkspace.value || null,
   });
   await loadBots(bot.id);
   // Pinning moves it between the two lists, so both have to be repainted.
@@ -991,6 +1201,7 @@ const pushField = async () => {
 [fName, fTitle, fPersona].forEach((el) => el.addEventListener('change', pushField));
 fModel.addEventListener('change', pushField);
 fRole.addEventListener('change', pushField);
+fWorkspace.addEventListener('change', pushField);
 
 document.getElementById('memForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1652,6 +1863,7 @@ input.focus();
 
 (async () => {
   setRail(recall(RAIL_OPEN) === '1');
+  await loadSpaces();
   await loadBots();
   // An agent is its conversation, so opening the app opens the one you left
   // rather than an empty box with the transcript a click away.
