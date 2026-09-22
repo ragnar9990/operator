@@ -236,7 +236,12 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .rail-btn svg { width: 18px; height: 18px; }
 .rail-btn:hover { background: var(--raise-hi); color: var(--ink); }
 
+/* The spacer pushes the running dot to the bottom when the rail is shut and
+   there is no list to fill it. Open, the list is what fills the rail — leaving
+   both at flex:1 splits the space in half and strands the agents in a short box
+   with a hole underneath. */
 .rail-spacer { flex: 1; }
+.rail.open .rail-spacer { flex: none; }
 
 /* where running shows when the computer pane is closed */
 .rail-state { width: 34px; height: 34px; display: grid; place-items: center; }
@@ -887,7 +892,10 @@ body.started .intro { display: none; }
 
 /* ── the roster ──────────────────────────────────────────────────── */
 
-.roster { flex: none; max-height: 46%; overflow-y: auto; margin-bottom: 4px; }
+/* Sizes to its content, capped so a long pinned list cannot squeeze out the one
+   below it. The cap is the smaller share on purpose: the agents list is the one
+   you scroll through, the pinned list is the one you already know by heart. */
+.roster { flex: none; max-height: 38%; overflow-y: auto; margin-bottom: 4px; }
 .roster::-webkit-scrollbar { width: 8px; }
 .roster::-webkit-scrollbar-track { background: transparent; }
 .roster::-webkit-scrollbar-thumb { background: rgba(252,252,252,.14); border-radius: 9999px; border: 2px solid var(--bg); }
