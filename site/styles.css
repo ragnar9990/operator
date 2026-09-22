@@ -1,0 +1,398 @@
+/* Operator — product site.
+
+   The palette is the app's own, so the site and the thing it sells are plainly
+   the same object. Archivo carries the voice, set expanded and heavy at the top
+   of the page like lettering stamped on a machine; IBM Plex Mono appears only
+   inside the product screenshots, where the machine is speaking for itself.
+
+   The one flourish — the lit ring — is not applied by this stylesheet at all.
+   It is already inside the screenshots, because it is part of the app. That is
+   the whole idea: the product supplies its own colour, and the page around it
+   stays quiet. */
+
+:root {
+  --ink: #131211;          /* page */
+  --lift: #1a1918;         /* alternating band, so sections read as separate */
+  --panel: #0e0d0d;        /* recessed cards */
+
+  --raise: rgba(252, 252, 252, 0.045);
+  --raise-hi: rgba(252, 252, 252, 0.085);
+
+  --line: rgba(252, 252, 252, 0.08);
+  --line-hi: rgba(252, 252, 252, 0.14);
+  --line-max: rgba(252, 252, 252, 0.24);
+
+  --bone: #fcfcfc;
+  --ash: #b4b2af;          /* lifted from the app's grey: on a page of prose,
+                              the app's #9e9e9e reads as murky */
+  --ash-2: #8b8987;
+
+  --signal: #299fff;
+  --signal-hi: #4cb2ff;
+  --on-signal: #041016;
+
+  --sans: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  --gut: clamp(20px, 5vw, 56px);
+  --col: 1060px;
+  --col-wide: 1240px;
+  --nav-h: 62px;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--nav-h) + 12px); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+  font-variation-settings: "wdth" 100;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; font-variation-settings: "wdth" 108; }
+p { margin: 0; }
+ul, ol, dl, dd { margin: 0; padding: 0; }
+li { list-style: none; }
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 5px; }
+
+.skip {
+  position: absolute; left: -9999px; top: 0; z-index: 99;
+  padding: 10px 16px; background: var(--signal); color: var(--on-signal);
+  text-decoration: none;
+}
+.skip:focus { left: 0; }
+
+.wrap { max-width: var(--col); margin: 0 auto; padding-inline: var(--gut); }
+.wrap-wide { max-width: var(--col-wide); }
+
+/* ── nav ────────────────────────────────────────────────────────────
+   Sticky, with the price in the button. Someone who decides halfway down the
+   page should not have to hunt for where to buy. */
+
+.nav {
+  position: sticky; top: 0; z-index: 30;
+  height: var(--nav-h);
+  display: flex; align-items: center;
+  background: rgba(19, 18, 17, 0.86);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.nav-in {
+  width: 100%; max-width: var(--col-wide); margin: 0 auto;
+  padding-inline: var(--gut);
+  display: flex; align-items: center; gap: 28px;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 9px;
+  font-weight: 700; font-size: 16.5px; letter-spacing: -0.02em;
+  font-variation-settings: "wdth" 112;
+  text-decoration: none;
+}
+.brand-mark {
+  width: 27px; height: 27px; display: grid; place-items: center;
+  border-radius: 7px; background: var(--raise-hi);
+}
+.brand-mark svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+
+.nav-links { margin-left: auto; display: flex; gap: 26px; }
+.nav-links a {
+  font-size: 14.5px; color: var(--ash); text-decoration: none;
+  transition: color 0.15s;
+}
+.nav-links a:hover { color: var(--bone); }
+@media (max-width: 820px) { .nav-links { display: none; } .nav-in { gap: 16px; } .btn-sm { margin-left: auto; } }
+
+/* ── buttons ────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 12px 22px;
+  border: 1px solid transparent; border-radius: 10px;
+  background: var(--signal); color: var(--on-signal);
+  font: inherit; font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.btn:hover { background: var(--signal-hi); }
+.btn-lg { padding: 15px 28px; font-size: 16px; }
+.btn-sm { padding: 9px 16px; font-size: 14px; border-radius: 9px; }
+.btn-block { width: 100%; }
+
+.btn-ghost { background: transparent; border-color: var(--line-max); color: var(--bone); }
+.btn-ghost:hover { background: var(--raise); border-color: var(--bone); }
+
+/* ── hero ───────────────────────────────────────────────────────────
+   Copy first at a readable measure, then the product at full width. v1 put the
+   app in a half-column beside the text and it was too small to read — which for
+   a paid desktop app is the whole pitch thrown away. */
+
+.hero { padding-top: clamp(52px, 8vw, 92px); }
+
+.kicker { font-size: 13.5px; color: var(--ash-2); letter-spacing: 0.01em; }
+
+.hero h1 {
+  margin-top: 16px;
+  font-size: clamp(2.6rem, 6.6vw, 4.6rem);
+  line-height: 0.97;
+  font-weight: 800;
+  font-variation-settings: "wdth" 116;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.lead {
+  margin-top: 22px;
+  max-width: 56ch;
+  font-size: clamp(1.06rem, 1.7vw, 1.22rem);
+  line-height: 1.55;
+  color: var(--ash);
+}
+
+.cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+
+.under { margin-top: 14px; font-size: 13.5px; color: var(--ash-2); }
+.under-c { text-align: center; }
+
+/* ── product shots ──────────────────────────────────────────────────
+   Framed and dropped on a shadow so they read as the application rather than as
+   flat artwork pasted into the page. */
+
+.shot {
+  margin: 0;
+  border: 1px solid var(--line-hi);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 30px 70px -24px rgba(0, 0, 0, 0.85),
+              0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.shot-hero { margin-top: clamp(38px, 6vw, 64px); }
+
+/* On a phone a 1440px-wide application squeezed to 335px is unreadable, which
+   makes the screenshot decoration rather than evidence. Let it keep a legible
+   width and be swiped instead — the page itself never scrolls sideways. */
+@media (max-width: 720px) {
+  .shot { overflow-x: auto; overscroll-behavior-x: contain; }
+  .shot img { min-width: 660px; }
+  .shot::-webkit-scrollbar { height: 8px; }
+  .shot::-webkit-scrollbar-thumb { background: var(--line-max); border-radius: 99px; }
+  .shot::-webkit-scrollbar-track { background: transparent; }
+}
+
+/* ── bands ──────────────────────────────────────────────────────────
+   Alternating ground. v1 ran every section on the same black and the page
+   turned into one long undifferentiated column. */
+
+.band { padding: clamp(66px, 9vw, 116px) 0; }
+.band-lift { background: var(--lift); }
+
+.band h2 {
+  font-size: clamp(1.8rem, 3.6vw, 2.75rem);
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.032em;
+  /* balance stops a short heading stranding its last word on a line of its own;
+     the measure is generous enough that two lines is the most it ever needs. */
+  max-width: 26ch;
+  text-wrap: balance;
+}
+.band-lead {
+  margin-top: 16px;
+  max-width: 58ch;
+  font-size: 1.06rem;
+  color: var(--ash);
+}
+
+/* ── the screen viewer ──────────────────────────────────────────── */
+
+.viewer { margin-top: clamp(30px, 4vw, 44px); }
+
+.viewer-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 18px; }
+.vtab {
+  padding: 9px 16px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: transparent; color: var(--ash);
+  font: inherit; font-size: 14px; cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.vtab:hover { color: var(--bone); border-color: var(--line-hi); }
+.vtab.is-on { color: var(--bone); background: var(--raise-hi); border-color: var(--line-max); }
+
+.viewer-cap { margin-top: 16px; font-size: 14.5px; color: var(--ash); max-width: 62ch; }
+
+/* ── what it reaches ────────────────────────────────────────────── */
+
+.split { margin-top: clamp(28px, 4vw, 40px); display: grid; gap: clamp(26px, 4vw, 52px); }
+@media (min-width: 880px) { .split { grid-template-columns: 1.25fr 0.75fr; } }
+
+.split-lead { font-size: 1.06rem; color: var(--ash); max-width: 52ch; }
+
+.does { margin-top: 24px; display: flex; flex-direction: column; gap: 14px; }
+.does li {
+  padding-left: 18px; position: relative;
+  font-size: 15.5px; color: var(--ash);
+  max-width: 54ch;
+}
+.does li::before {
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--signal);
+}
+.does b { color: var(--bone); font-weight: 600; }
+
+.pull {
+  font-size: clamp(1.1rem, 1.9vw, 1.32rem);
+  line-height: 1.45;
+  letter-spacing: -0.015em;
+  color: var(--bone);
+  border-left: 2px solid var(--signal);
+  padding-left: 20px;
+  align-self: center;
+}
+
+/* ── safety ─────────────────────────────────────────────────────── */
+
+.safe { margin-top: clamp(32px, 4vw, 48px); display: grid; gap: 26px; }
+@media (min-width: 820px) { .safe { grid-template-columns: repeat(3, 1fr); gap: 34px; } }
+
+.safe h3 {
+  font-size: 1.1rem; font-weight: 650; letter-spacing: -0.02em;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line-hi);
+}
+.safe p { margin-top: 13px; font-size: 14.8px; color: var(--ash); }
+
+.audit {
+  margin-top: clamp(44px, 6vw, 72px);
+  display: grid; gap: clamp(26px, 4vw, 44px);
+  align-items: center;
+}
+@media (min-width: 880px) { .audit { grid-template-columns: 0.85fr 1.15fr; } }
+.audit h3 {
+  font-size: clamp(1.3rem, 2.3vw, 1.7rem);
+  font-weight: 700; letter-spacing: -0.025em; line-height: 1.15;
+}
+.audit p { margin-top: 14px; font-size: 15.2px; color: var(--ash); max-width: 46ch; }
+.shot-audit { border-radius: 12px; }
+
+/* ── price ──────────────────────────────────────────────────────── */
+
+.price { margin-top: clamp(32px, 4vw, 46px); display: grid; gap: 26px; align-items: start; }
+@media (min-width: 880px) { .price { grid-template-columns: 1.05fr 0.95fr; gap: 44px; } }
+
+.card-buy {
+  padding: clamp(26px, 3.4vw, 36px);
+  border: 1px solid var(--line-max);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.figure {
+  display: flex; align-items: baseline;
+  font-size: clamp(3.4rem, 7vw, 4.6rem);
+  font-weight: 800; font-variation-settings: "wdth" 114;
+  letter-spacing: -0.05em; line-height: 1;
+}
+.cur { font-size: 0.4em; font-weight: 650; transform: translateY(-0.78em); }
+.once {
+  font-size: 0.19em; font-weight: 500; color: var(--ash-2);
+  letter-spacing: 0; margin-left: 11px; transform: translateY(-0.5em);
+}
+
+.ticks { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
+.ticks li {
+  position: relative; padding-left: 26px;
+  font-size: 15px; color: var(--ash);
+}
+.ticks li::before {
+  content: ""; position: absolute; left: 0; top: 0.34em;
+  width: 15px; height: 15px;
+  background: var(--signal);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.card-buy .btn { margin-top: 28px; }
+
+.card-early { padding-top: 6px; }
+.card-early h3 { font-size: 1.24rem; font-weight: 650; letter-spacing: -0.022em; }
+.card-early > p { margin-top: 12px; font-size: 15px; color: var(--ash); max-width: 42ch; }
+
+.early { margin-top: 22px; }
+.early-label { display: block; font-size: 13.5px; color: var(--ash); margin-bottom: 8px; }
+.early-row { display: flex; gap: 9px; flex-wrap: wrap; }
+.early input {
+  flex: 1; min-width: 200px;
+  padding: 12px 15px;
+  border: 1px solid var(--line-hi); border-radius: 10px;
+  background: var(--raise); color: var(--bone);
+  font: inherit; font-size: 15px;
+}
+.early input::placeholder { color: var(--ash-2); }
+.early input:focus { outline: none; border-color: var(--signal); }
+.early-msg { margin-top: 12px; font-size: 13.5px; color: var(--ash-2); min-height: 1.3em; }
+.early-msg.is-bad { color: #f4685f; }
+
+/* ── needs + faq ────────────────────────────────────────────────── */
+
+.needs { margin-top: clamp(28px, 4vw, 40px); border-top: 1px solid var(--line); }
+.needs > div { padding: 22px 0; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+@media (min-width: 720px) {
+  .needs > div { grid-template-columns: 230px 1fr; gap: 30px; align-items: baseline; }
+}
+.needs dt { font-size: 15.5px; font-weight: 600; letter-spacing: -0.014em; }
+.needs dd { font-size: 15px; color: var(--ash); max-width: 58ch; }
+
+.faq { margin-top: clamp(44px, 6vw, 68px); }
+.faq details { border-bottom: 1px solid var(--line); }
+.faq summary {
+  padding: 19px 0;
+  font-size: 16.5px; font-weight: 550; letter-spacing: -0.015em;
+  cursor: pointer; list-style: none;
+  display: flex; justify-content: space-between; gap: 20px; align-items: center;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: ""; flex: none;
+  width: 10px; height: 10px;
+  border-right: 1.6px solid var(--ash-2); border-bottom: 1.6px solid var(--ash-2);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.18s;
+}
+.faq details[open] summary::after { transform: rotate(225deg) translate(-2px, -2px); }
+.faq details p { padding-bottom: 21px; font-size: 15px; color: var(--ash); max-width: 66ch; }
+
+/* ── closing ask ────────────────────────────────────────────────── */
+
+.close {
+  padding: clamp(72px, 10vw, 128px) 0;
+  text-align: center;
+  border-top: 1px solid var(--line);
+  background: var(--lift);
+}
+.close h2 {
+  font-size: clamp(1.9rem, 4.2vw, 3rem);
+  font-weight: 800; font-variation-settings: "wdth" 112;
+  letter-spacing: -0.035em; line-height: 1.05;
+  max-width: 18ch; margin-inline: auto;
+}
+.close .btn { margin-top: 30px; }
+
+/* ── footer ─────────────────────────────────────────────────────── */
+
+.foot { padding: 42px 0 58px; border-top: 1px solid var(--line); }
+.foot-name { font-weight: 700; font-variation-settings: "wdth" 112; letter-spacing: -0.02em; }
+.foot-line { margin-top: 6px; font-size: 14.5px; color: var(--ash); }
+.foot-legal { margin-top: 18px; font-size: 12.5px; color: var(--ash-2); max-width: 62ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; }
+}

@@ -23,7 +23,9 @@
       "!dist/**",
       "!build-icon.js",
       "!ui/_preview*",
-      "!ui-preview.js"
+      "!ui-preview.js",
+      "!bench.js",
+      "!site/**"
     ],
     "win": {
       "target": "nsis",

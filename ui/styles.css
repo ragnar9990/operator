@@ -18,6 +18,17 @@
   --ink-4: #6f6e6c;
 
   --accent: #299fff;
+
+  /* The lit edge. One hue per stop, walked in order around the window and
+     around a hovered button, starting and ending on the accent so the loop
+     closes without a seam. */
+  --lit-1: #1fa8ff;
+  --lit-2: #8b5cff;
+  --lit-3: #ff3dd1;
+  --lit-4: #ff7a2b;
+  --lit-5: #ffe14d;
+  --lit-6: #2bffb0;
+  --lit-7: #16e0ff;
   --on-accent: #050505;
   --fail: #f4685f;
 
@@ -932,6 +943,12 @@ body.started .intro { display: none; }
 .sheet-card {
   position: relative;
   width: min(560px, calc(100vw - 48px));
+}
+
+/* Settings carries a sidebar, so it needs more width than the bot sheet. */
+#settingsSheet .sheet-card {
+  width: min(880px, calc(100vw - 48px));
+  max-height: min(88vh, 820px);
   max-height: min(86vh, 760px);
   display: flex;
   flex-direction: column;
@@ -958,6 +975,11 @@ body.started .intro { display: none; }
   min-height: 0;
   overflow-y: auto;
   padding: 16px;
+}
+
+#settingsSheet .sheet-body { padding: 20px 24px 26px; }
+
+.sheet-body {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -1215,7 +1237,12 @@ body.started .intro { display: none; }
 /* ── settings: pick the computer ───────────────────────────────────── */
 
 .set-section { display: flex; flex-direction: column; gap: 10px; }
-.set-label { font-size: 12px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+.set-label {
+  font-size: 13.5px; font-weight: 550; color: var(--ink);
+  letter-spacing: -0.15px; margin-bottom: 2px;
+}
+/* Anything after the first heading in a section starts a new group. */
+.set-label:not(:first-child) { margin-top: 24px; }
 
 .target {
   display: flex;
@@ -1261,7 +1288,7 @@ body.started .intro { display: none; }
 .pill.ghost:hover { background: var(--raise); }
 .pill.ghost:disabled { opacity: .5; cursor: default; }
 
-.set-hint { font-size: 11.5px; color: var(--ink-4); line-height: 1.5; margin: 4px 0 0; }
+.set-hint { font-size: 12px; color: var(--ink-4); line-height: 1.55; margin: 2px 0 10px; max-width: 62ch; }
 .set-hint code { font-family: var(--mono); color: var(--ink-3); }
 
 /* A small badge in the topbar showing the current computer. */
@@ -1310,14 +1337,34 @@ body.started .intro { display: none; }
 
 /* ── settings tabs + connectors ────────────────────────────────────── */
 
-.tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--line); }
-.tab {
-  padding: 11px 14px; border: 0; background: transparent; color: var(--ink-3);
-  font: inherit; font-size: 14px; cursor: pointer; position: relative;
-  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s;
+/* Settings is a sidebar, not a tab strip: six sections do not fit across a
+   dialog, and a vertical list has room for the next one. */
+.settings-split { flex: 1; min-height: 0; display: flex; }
+
+.tabs {
+  flex: none;
+  width: 186px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
 }
-.tab:hover { color: var(--ink-2); }
-.tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+.tab {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px;
+  border: 0; border-radius: 9px;
+  background: transparent; color: var(--ink-3);
+  font: inherit; font-size: 13.5px; text-align: left;
+  cursor: pointer; position: relative;
+  transition: color .14s, background .14s;
+}
+.tab svg { width: 17px; height: 17px; flex: none; stroke-width: 1.5; opacity: .85; }
+.tab:hover { color: var(--ink-2); background: var(--raise); }
+.tab.active { color: var(--ink); background: var(--raise-hi); }
+.tab.active svg { color: var(--accent); opacity: 1; }
 
 .tab-panel[hidden] { display: none; }
 
@@ -1636,4 +1683,391 @@ html, body { display: flex; flex-direction: column; }
 .code-main .controls .left .heard {
   font-family: var(--mono); font-size: 11px; color: var(--ink-4);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px;
+}
+
+/* ── Settings → Audit ──────────────────────────────────────────────── */
+
+.audit-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.audit-filters select,
+.audit-filters input {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px;
+}
+.audit-filters input[type="search"] { flex: 1; min-width: 140px; }
+.audit-filters select:focus,
+.audit-filters input:focus { outline: none; border-color: var(--line-max); }
+
+.audit-bar { display: flex; align-items: center; gap: 8px; }
+.audit-count { font-size: 11.5px; color: var(--ink-4); margin-right: auto; }
+
+.audit-list { display: flex; flex-direction: column; gap: 1px; }
+.audit-empty { font-size: 12.5px; color: var(--ink-4); padding: 18px 2px; }
+
+/* One row per action. Clicking it opens the full record underneath. */
+.audit-row {
+  display: grid; grid-template-columns: 66px 8px 1fr auto auto;
+  align-items: baseline; gap: 10px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  font-size: 12.5px; color: var(--ink-2); text-align: left;
+  background: transparent; border: 0; font-family: inherit; width: 100%;
+}
+.audit-row:hover { background: var(--raise); }
+.audit-row.open { background: var(--raise); }
+.audit-time { font-family: var(--mono); font-size: 11px; color: var(--ink-4); white-space: nowrap; }
+.audit-what { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-tool { font-family: var(--mono); font-size: 11px; color: var(--ink-4); }
+.audit-ms { font-family: var(--mono); font-size: 11px; color: var(--ink-4); }
+
+/* Outcome is a dot, not a word — a column of words is unreadable at a glance.
+   Only a failure gets colour: the whole reason to scan this list is to find one.
+   Blue is not used here; in this UI it means "live", and the log is the past. */
+.audit-dot { width: 6px; height: 6px; border-radius: 50%; align-self: center; }
+.audit-dot.ok { background: var(--line-max); }
+.audit-dot.err { background: var(--fail); }
+.audit-dot.dry { background: transparent; box-shadow: inset 0 0 0 1px var(--line-max); }
+.audit-dot.unknown { background: var(--line); }
+
+.audit-detail {
+  margin: 2px 0 8px; padding: 10px 12px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  white-space: pre-wrap; word-break: break-word;
+}
+.audit-more { align-self: flex-start; }
+.audit-warn { font-size: 11.5px; color: var(--fail); }
+
+
+/* ─────────────────────────── the lit edge ───────────────────────────
+   A conic gradient can only be animated smoothly if its angle is a real
+   registered property — interpolating a bare custom property would step
+   instead of sweep. Everything below turns that one rotating gradient into a
+   hairline: the element is painted edge to edge, then masked so only its
+   padding ring survives. */
+
+@property --lit-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* Paint only the outer ring of a box: fill the whole thing, then punch out the
+   content box so just the padding is left. */
+.composer::before,
+.composer::after,
+.pill::after, .round::after, .chip::after, .mode::after, .rail-btn::after,
+.picker-btn::after, .dry-toggle::after, .target::after, .mini::after,
+.solid-btn::after, .gbtn::after, .conn-more::after, .folder-btn::after,
+.code-new::after, .danger::after, .expand::after {
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+
+@keyframes lit-sweep { to { --lit-angle: 360deg; } }
+
+
+/* Buttons: one bright arc travelling the perimeter rather than the whole ring
+   lighting up, so it reads as a line going round instead of a glow. The long
+   transparent stretch is what leaves a gap for it to travel through.
+   Tabs are left out on purpose — they already say "active" with a bottom rule,
+   and a line running round one would argue with it. */
+.pill, .round, .chip, .mode, .rail-btn, .picker-btn, .dry-toggle, .target,
+.mini, .solid-btn, .gbtn, .conn-more, .folder-btn, .code-new, .danger, .expand {
+  position: relative;
+}
+
+.pill::after, .round::after, .chip::after, .mode::after, .rail-btn::after,
+.picker-btn::after, .dry-toggle::after, .target::after, .mini::after,
+.solid-btn::after, .gbtn::after, .conn-more::after, .folder-btn::after,
+.code-new::after, .danger::after, .expand::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--lit-angle),
+    transparent 0deg,
+    var(--lit-1) 18deg,
+    var(--lit-3) 42deg,
+    var(--lit-4) 66deg,
+    transparent 92deg,
+    transparent 360deg);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+
+.pill:hover:not(:disabled)::after, .round:hover:not(:disabled)::after,
+.chip:hover:not(:disabled)::after, .mode:hover:not(:disabled)::after,
+.rail-btn:hover:not(:disabled)::after, .picker-btn:hover:not(:disabled)::after,
+.dry-toggle:hover:not(:disabled)::after, .target:hover:not(:disabled)::after,
+.mini:hover:not(:disabled)::after, .solid-btn:hover:not(:disabled)::after,
+.gbtn:hover:not(:disabled)::after, .conn-more:hover:not(:disabled)::after,
+.folder-btn:hover:not(:disabled)::after, .code-new:hover:not(:disabled)::after,
+.danger:hover:not(:disabled)::after, .expand:hover:not(:disabled)::after {
+  opacity: 1;
+  animation: lit-sweep 1.6s linear infinite;
+}
+
+/* A disabled button is not offering anything, so it does not light up. */
+.pill:disabled::after, .round:disabled::after, .mini:disabled::after,
+.solid-btn:disabled::after { content: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pill:hover::after, .round:hover::after, .chip:hover::after, .mode:hover::after,
+  .rail-btn:hover::after, .picker-btn:hover::after, .dry-toggle:hover::after,
+  .target:hover::after, .mini:hover::after, .solid-btn:hover::after,
+  .gbtn:hover::after, .conn-more:hover::after, .folder-btn:hover::after,
+  .code-new:hover::after, .danger:hover::after, .expand:hover::after { animation: none; }
+}
+
+/* ── our own window buttons ─────────────────────────────────────────
+   The native overlay used to paint this corner, and painted over the lit edge
+   with it. Drawn here instead so the line can run the whole way round. */
+
+.winctl {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  align-items: stretch;
+  -webkit-app-region: no-drag;
+}
+
+.winctl-btn {
+  width: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.12s, color 0.12s;
+}
+.winctl-btn svg { width: 12px; height: 12px; stroke-width: 1.2; }
+.winctl-btn:hover { background: var(--raise-hi); color: var(--ink); }
+.winctl-btn.danger-hover:hover { background: #c4322b; color: #fff; }
+
+/* The strip has to clear the buttons, or a centred title sits under them. */
+.modebar { position: relative; }
+
+/* ── the composer's halo ────────────────────────────────────────────
+   The window used to carry the lit ring; this carries it instead, because the
+   composer is the thing you are actually looking at — and unlike a border round
+   the window, it can mean something.
+
+   Two layers make the neon: ::before is the same ring blurred out into a bloom,
+   ::after is the hard line on top. A single sharp line reads as a border; the
+   bloom underneath is what makes it glow. */
+
+.composer { position: relative; }
+
+.composer::before,
+.composer::after {
+  content: '';
+  position: absolute;
+  border-radius: inherit;
+  background: conic-gradient(from var(--lit-angle),
+    var(--lit-1), var(--lit-2), var(--lit-3), var(--lit-4),
+    var(--lit-5), var(--lit-6), var(--lit-7), var(--lit-1));
+  animation: lit-sweep 5s linear infinite;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+/* the bloom */
+.composer::before {
+  inset: -2px;
+  padding: 3px;
+  filter: blur(8px);
+  opacity: 0.6;
+}
+
+/* the line itself */
+.composer::after {
+  inset: -1px;
+  padding: 1.5px;
+  opacity: 0.9;
+}
+
+.composer:focus-within::before { opacity: 0.85; }
+.composer:focus-within::after { opacity: 1; }
+
+/* Working. Faster, and the bloom opens up — the same sweep, turned up. */
+body.working .composer::before,
+body.working .composer::after {
+  animation-duration: 1.8s;
+  opacity: 1;
+}
+body.working .composer::before { filter: blur(11px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .composer::before,
+  .composer::after { animation: none; }
+}
+
+/* ── themes ─────────────────────────────────────────────────────────
+   Every theme is the same token block with different values, which is the only
+   reason this is cheap: nothing below :root knows which theme is on. The
+   default (warm) lives in :root, so it needs no override here. */
+
+:root[data-theme="cool"] {
+  --bg: #0f1113;
+  --panel: #0a0c0d;
+  --raise: rgba(248, 250, 252, 0.05);
+  --raise-hi: rgba(248, 250, 252, 0.09);
+  --line: rgba(248, 250, 252, 0.07);
+  --line-hi: rgba(248, 250, 252, 0.11);
+  --line-max: rgba(248, 250, 252, 0.18);
+  --ink: #f6f8fa;
+  --ink-2: #a2abb4;
+  --ink-3: #868f98;
+  --ink-4: #6d757d;
+}
+
+:root[data-theme="midnight"] {
+  --bg: #0c1020;
+  --panel: #080b17;
+  --raise: rgba(226, 232, 255, 0.055);
+  --raise-hi: rgba(226, 232, 255, 0.1);
+  --line: rgba(226, 232, 255, 0.08);
+  --line-hi: rgba(226, 232, 255, 0.13);
+  --line-max: rgba(226, 232, 255, 0.2);
+  --ink: #eef1ff;
+  --ink-2: #a3aac9;
+  --ink-3: #888fb0;
+  --ink-4: #6f7697;
+}
+
+/* Light needs the raised surfaces to darken rather than lighten, which is the
+   one thing a dark palette cannot express by changing values alone. */
+:root[data-theme="light"] {
+  --bg: #f7f7f6;
+  --panel: #ffffff;
+  --raise: rgba(16, 16, 18, 0.04);
+  --raise-hi: rgba(16, 16, 18, 0.08);
+  --line: rgba(16, 16, 18, 0.1);
+  --line-hi: rgba(16, 16, 18, 0.16);
+  --line-max: rgba(16, 16, 18, 0.28);
+  --ink: #16181a;
+  --ink-2: #4d5257;
+  --ink-3: #676d73;
+  --ink-4: #838a91;
+  --on-accent: #ffffff;
+}
+
+/* ── accent ─────────────────────────────────────────────────────── */
+
+:root[data-accent="violet"] { --accent: #8b5cff; }
+:root[data-accent="green"]  { --accent: #22c07a; }
+:root[data-accent="pink"]   { --accent: #ff4ea8; }
+:root[data-accent="amber"]  { --accent: #f0a12e; --on-accent: #1a1204; }
+
+/* ── glow ───────────────────────────────────────────────────────────
+   "subtle" keeps the colour but drops the bloom, which is what most of the
+   brightness comes from. "off" removes both rings entirely rather than making
+   them transparent, so nothing is painted or animated at all. */
+
+:root[data-glow="subtle"] .composer::before { opacity: 0; }
+:root[data-glow="subtle"] .composer::after { opacity: 0.5; }
+:root[data-glow="subtle"] body.working .composer::after { opacity: 0.8; }
+:root[data-glow="subtle"] body.working .composer::before { opacity: 0; }
+
+:root[data-glow="off"] .composer::before,
+:root[data-glow="off"] .composer::after { content: none; }
+
+/* Buttons keep their travelling line on "subtle" and lose it on "off". */
+:root[data-glow="off"] .pill::after, :root[data-glow="off"] .round::after,
+:root[data-glow="off"] .chip::after, :root[data-glow="off"] .mode::after,
+:root[data-glow="off"] .rail-btn::after, :root[data-glow="off"] .picker-btn::after,
+:root[data-glow="off"] .dry-toggle::after, :root[data-glow="off"] .target::after,
+:root[data-glow="off"] .mini::after, :root[data-glow="off"] .solid-btn::after,
+:root[data-glow="off"] .gbtn::after, :root[data-glow="off"] .conn-more::after,
+:root[data-glow="off"] .folder-btn::after, :root[data-glow="off"] .code-new::after,
+:root[data-glow="off"] .danger::after, :root[data-glow="off"] .expand::after { content: none; }
+
+/* ── motion ─────────────────────────────────────────────────────────
+   The colours stay; only the sweeping stops. Same thing the OS setting does,
+   which is why that still wins on its own. */
+
+:root[data-motion="off"] .composer::before,
+:root[data-motion="off"] .composer::after { animation: none; }
+:root[data-motion="off"] *:hover::after { animation: none !important; }
+
+/* ── Settings → Appearance ──────────────────────────────────────── */
+
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.swatch {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 12px 8px 9px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: transparent; color: var(--ink-2);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+.swatch:hover { color: var(--ink); border-color: var(--line-hi); background: var(--raise); }
+.swatch[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); background: var(--raise); }
+
+/* A theme is three surfaces, so the chip shows three. */
+.swatch-chip {
+  width: 26px; height: 18px; border-radius: 5px; flex: none;
+  border: 1px solid var(--line-hi);
+  background: linear-gradient(135deg, var(--a) 0 46%, var(--b) 46% 72%, var(--c) 72% 100%);
+}
+.swatch-dot {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  background: var(--a); border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* segmented control */
+/* align-self, because the section around it is a flex column and inline-flex
+   alone would still be stretched to the full width. */
+.seg {
+  display: inline-flex; align-self: flex-start;
+  border: 1px solid var(--line); border-radius: 9px; overflow: hidden;
+}
+.seg-btn {
+  padding: 7px 15px; border: 0; background: transparent; color: var(--ink-3);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  border-right: 1px solid var(--line);
+  transition: background 0.14s, color 0.14s;
+}
+.seg-btn:last-child { border-right: 0; }
+.seg-btn:hover { color: var(--ink-2); background: var(--raise); }
+.seg-btn[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); }
+
+/* ── provider marks ─────────────────────────────────────────────────
+   A brand mark is a real logo, not a line icon: it carries its own colours, so
+   it has to opt out of the fill:none / stroke:currentColor every other icon in
+   here inherits. Which one shows is driven by data-provider on the connector. */
+
+.conn-ic svg.brand { fill: initial; stroke: none; width: 21px; height: 21px; }
+.conn-ic .brand { display: none; }
+
+.connector[data-provider="gmail"] .conn-ic .ic-generic { display: none; }
+.connector[data-provider="gmail"] .conn-ic .ic-gmail { display: block; }
+
+/* The logo brings the colour, so the tinted tile behind it would only argue
+   with it — keep that one neutral. */
+.connector[data-provider="gmail"] .conn-ic,
+.connector.on[data-provider="gmail"] .conn-ic {
+  background: var(--raise-hi);
+  color: var(--ink-2);
+}
+
+/* An error says what to do about it, so it needs room for a second line. */
+.error-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.error-more { margin-top: 2px; }
+.error-more summary {
+  font-size: 12px; color: var(--ink-4); cursor: pointer; list-style: none;
+}
+.error-more summary::-webkit-details-marker { display: none; }
+.error-more summary:hover { color: var(--ink-3); }
+.error-more p {
+  margin: 7px 0 0;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+  color: var(--ink-4); white-space: pre-wrap; word-break: break-word;
 }

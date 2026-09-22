@@ -76,6 +76,7 @@ function startRun() {
   actionCount = 0;
   actionsEl.textContent = '0 actions';
   document.body.classList.add('started');
+  document.body.classList.add('working');   // lights the composer
   runBtn.disabled = true;
   runBtn.hidden = true;
   stopBtn.hidden = false;
@@ -91,6 +92,7 @@ function startRun() {
 
 function endRun() {
   busy = false;
+  document.body.classList.remove('working');
   hideDots();
   if (live) { live.el.classList.remove('live'); live = null; }
   runBtn.disabled = false;
@@ -478,7 +480,7 @@ function replay(turns) {
   for (const t of turns) {
     if (t.k === 'you') turn('you', '<span>' + youHtml(t.text) + '</span>');
     else if (t.k === 'says') turn('says', nl2br(t.text));
-    else if (t.k === 'error') turn('', '<div class="error"><b>Stopped</b><span>' + esc(t.text) + '</span></div>');
+    else if (t.k === 'error') turn('', errorCard(t.title, t.fix, t.text));
     else if (t.k === 'note') turn('', noteCard(t.text));
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'steps') {
@@ -488,6 +490,17 @@ function replay(turns) {
     }
   }
   thread.scrollTop = thread.scrollHeight;
+}
+
+// A failure the user can act on: what went wrong, then the one thing that
+// fixes it, with the technical detail folded away rather than thrown out.
+function errorCard(title, fix, detail) {
+  const head = '<b>' + esc(title || 'Stopped') + '</b>';
+  const body = fix ? '<span>' + esc(fix) + '</span>' : '<span>' + esc(detail || '') + '</span>';
+  const more = fix && detail && detail !== title
+    ? '<details class="error-more"><summary>Details</summary><p>' + esc(detail) + '</p></details>'
+    : '';
+  return '<div class="error">' + head + '<div class="error-body">' + body + more + '</div></div>';
 }
 
 function clearThread() {
@@ -1061,8 +1074,8 @@ window.operator.onEvent((evt) => {
 
     case 'error':
       closeGroup();
-      turn('', '<div class="error"><b>Stopped</b><span>' + esc(evt.text) + '</span></div>');
-      rec({ k: 'error', text: evt.text });
+      turn('', errorCard(evt.title, evt.fix, evt.text));
+      rec({ k: 'error', text: evt.text, title: evt.title, fix: evt.fix });
       finishPlan();
       endRun();
       break;
@@ -1914,6 +1927,9 @@ input.focus();
       disconnectBtn.hidden = !connected;
       accountBox.hidden = !connected;
       signinBox.hidden = connected;
+      // Drives which provider mark the header shows. Unknown providers fall
+      // back to the generic envelope rather than guessing at a logo.
+      conn.dataset.provider = connected && em.provider ? em.provider.toLowerCase() : '';
       if (connected) {
         sub.textContent = em.provider ? em.provider : 'Connected';
         acctEmail.textContent = em.email || '';
@@ -2647,4 +2663,303 @@ input.focus();
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
   input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; });
+})();
+
+/* ── Settings → Audit: what the agent actually did ─────────────────── */
+
+(() => {
+  const list = document.getElementById('adList');
+  if (!list) return;
+
+  const botSel = document.getElementById('adBot');
+  const toolSel = document.getElementById('adTool');
+  const outSel = document.getElementById('adOutcome');
+  const fromIn = document.getElementById('adFrom');
+  const search = document.getElementById('adSearch');
+  const countEl = document.getElementById('adCount');
+  const moreBtn = document.getElementById('adMore');
+
+  const PAGE = 100;
+  let shown = PAGE;
+  let loaded = false;
+
+  const filter = () => ({
+    botId: botSel.value || undefined,
+    tool: toolSel.value || undefined,
+    outcome: outSel.value || undefined,
+    // A date input gives a local day; the log stores UTC instants. Take the
+    // whole day from its first moment so "from today" includes this morning.
+    from: fromIn.value ? new Date(fromIn.value + 'T00:00:00').toISOString() : undefined,
+    q: search.value.trim() || undefined,
+  });
+
+  const clock = (iso) => {
+    const d = new Date(iso);
+    const today = new Date().toDateString() === d.toDateString();
+    // 24-hour, because "01:38:25 AM" does not fit the column and a log is read
+    // by scanning the times down the page, where AM/PM is just noise.
+    return today
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+      : d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+  };
+
+  const took = (ms) => (ms === null || ms === undefined ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+
+  // Which dot: a failure is the only thing worth colouring.
+  const state = (r) => (r.dryRun ? 'dry' : r.ok === false ? 'err' : r.ok === true ? 'ok' : 'unknown');
+
+  // Older rows predate the one-line summary, and code mode never had one.
+  const summary = (r) => r.text || `${r.tool}${r.args && Object.keys(r.args).length ? ' ' + JSON.stringify(r.args).slice(0, 90) : ''}`;
+
+  function detail(r) {
+    const lines = [
+      `when      ${new Date(r.t).toLocaleString()}`,
+      `tool      ${r.tool}${r.mode === 'code' ? '  (code mode)' : ''}`,
+      `bot       ${r.botName || '—'}`,
+      `computer  ${r.computer || '—'}`,
+      `model     ${r.model || '—'}`,
+      `outcome   ${r.dryRun ? 'dry run — nothing happened'
+        : r.ok === false ? `failed — ${r.error || 'no message'}`
+        : r.ok === true ? 'worked' : 'unknown (requested, outcome not observed)'}`,
+      `took      ${took(r.ms) || '—'}`,
+      `task      ${r.taskId || '—'}`,
+      '',
+      JSON.stringify(r.args || {}, null, 2),
+    ];
+    return lines.join('\n');
+  }
+
+  function render(res) {
+    const { rows, total, lastError } = res;
+    list.innerHTML = '';
+
+    if (lastError) {
+      const warn = document.createElement('div');
+      warn.className = 'audit-warn';
+      warn.textContent = `The last record could not be written: ${lastError}`;
+      list.appendChild(warn);
+    }
+
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'audit-empty';
+      empty.textContent = total === 0 && !search.value && !botSel.value && !toolSel.value && !outSel.value && !fromIn.value
+        ? 'Nothing here yet. Every action an agent takes will be recorded.'
+        : 'No actions match those filters.';
+      list.appendChild(empty);
+      countEl.textContent = '';
+      moreBtn.hidden = true;
+      return;
+    }
+
+    for (const r of rows) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'audit-row';
+
+      const t = document.createElement('span');
+      t.className = 'audit-time';
+      t.textContent = clock(r.t);
+
+      const dot = document.createElement('span');
+      dot.className = 'audit-dot ' + state(r);
+
+      const what = document.createElement('span');
+      what.className = 'audit-what';
+      what.textContent = summary(r);
+
+      const tool = document.createElement('span');
+      tool.className = 'audit-tool';
+      tool.textContent = r.tool;
+
+      const ms = document.createElement('span');
+      ms.className = 'audit-ms';
+      ms.textContent = took(r.ms);
+
+      row.append(t, dot, what, tool, ms);
+
+      // The full record opens under the row it belongs to, so a long log does
+      // not need a second panel to read one line of it.
+      const open = document.createElement('div');
+      open.className = 'audit-detail';
+      open.textContent = detail(r);
+      open.hidden = true;
+
+      row.addEventListener('click', () => {
+        open.hidden = !open.hidden;
+        row.classList.toggle('open', !open.hidden);
+      });
+
+      list.append(row, open);
+    }
+
+    countEl.textContent = `${rows.length} of ${total} action${total === 1 ? '' : 's'}`;
+    moreBtn.hidden = rows.length >= total;
+  }
+
+  async function refreshAudit({ keepPage } = {}) {
+    if (!keepPage) shown = PAGE;
+    const [res, facets] = await Promise.all([
+      window.operator.auditQuery({ ...filter(), limit: shown }),
+      loaded ? null : window.operator.auditFacets(),
+    ]);
+
+    // The dropdowns only offer what the log actually contains, so a tool that
+    // has never run does not clutter the list. Built once per sheet opening.
+    if (facets) {
+      for (const b of facets.bots) botSel.add(new Option(b.name, b.id));
+      for (const t of facets.tools) toolSel.add(new Option(t, t));
+      loaded = true;
+    }
+
+    render(res);
+  }
+
+  const rerun = () => refreshAudit();
+  [botSel, toolSel, outSel, fromIn].forEach((el) => el.addEventListener('change', rerun));
+
+  let typing = null;
+  search.addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(rerun, 200); });
+
+  document.getElementById('adRefresh').addEventListener('click', () => { loaded = false; botSel.length = 1; toolSel.length = 1; refreshAudit(); });
+  moreBtn.addEventListener('click', () => { shown += PAGE; refreshAudit({ keepPage: true }); });
+
+  const exportAs = async (format, btn) => {
+    const was = btn.textContent;
+    btn.disabled = true;
+    const res = await window.operator.auditExport(format, filter());
+    btn.textContent = res.ok ? `Saved ${res.count}` : res.error ? 'Failed' : was;
+    btn.disabled = false;
+    if (res.ok || res.error) setTimeout(() => { btn.textContent = was; }, 2200);
+  };
+  document.getElementById('adCsv').addEventListener('click', (e) => exportAs('csv', e.currentTarget));
+  document.getElementById('adJsonl').addEventListener('click', (e) => exportAs('jsonl', e.currentTarget));
+
+  // Read it when the tab is opened, not on boot — the file can be large and
+  // most sessions never look at it.
+  document.querySelectorAll('#settingsTabs .tab').forEach((t) => {
+    if (t.dataset.tab === 'audit') t.addEventListener('click', () => refreshAudit());
+  });
+})();
+
+
+
+/* ── window buttons ────────────────────────────────────────────────── */
+
+(() => {
+  const min = document.getElementById('winMin');
+  if (!min || !window.operator || !window.operator.windowMinimize) return;
+  const max = document.getElementById('winMax');
+  const close = document.getElementById('winClose');
+  const icon = document.getElementById('winMaxIcon');
+
+  min.addEventListener('click', () => window.operator.windowMinimize());
+  close.addEventListener('click', () => window.operator.windowClose());
+  max.addEventListener('click', async () => paintMax(await window.operator.windowMaximize()));
+
+  // Restore shows two overlapping squares, the way Windows does it, so the
+  // button says which way it will go.
+  function paintMax(maximized) {
+    icon.innerHTML = maximized
+      ? '<rect x="2" y="4" width="6" height="6" rx="1"/><path d="M4 4V2.8A0.8 0.8 0 0 1 4.8 2H9.2A0.8 0.8 0 0 1 10 2.8V7.2A0.8 0.8 0 0 1 9.2 8H8"/>'
+      : '<rect x="2.5" y="2.5" width="7" height="7" rx="1"/>';
+    max.setAttribute('aria-label', maximized ? 'Restore' : 'Maximise');
+  }
+
+  if (window.operator.onWindowState) {
+    window.operator.onWindowState(({ maximized }) => paintMax(Boolean(maximized)));
+  }
+})();
+
+/* ── Settings → Appearance ─────────────────────────────────────────── */
+
+(() => {
+  const groups = {
+    theme: document.getElementById('apTheme'),
+    accent: document.getElementById('apAccent'),
+    glow: document.getElementById('apGlow'),
+    motion: document.getElementById('apMotion'),
+  };
+  if (!groups.theme || !window.operator || !window.operator.prefsGet) return;
+
+  const DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', motion: 'on' };
+  let prefs = { ...DEFAULTS };
+
+  // The <head> script already read the mirror; this keeps it honest afterwards.
+  function apply() {
+    const d = document.documentElement.dataset;
+    d.theme = prefs.theme;
+    d.accent = prefs.accent;
+    d.glow = prefs.glow;
+    d.motion = prefs.motion;
+    try { localStorage.setItem('prefs', JSON.stringify(prefs)); } catch { /* fine */ }
+    for (const [key, box] of Object.entries(groups)) {
+      box.querySelectorAll('[data-value]').forEach((b) => {
+        b.setAttribute('aria-pressed', String(b.dataset.value === prefs[key]));
+      });
+    }
+  }
+
+  for (const [key, box] of Object.entries(groups)) {
+    box.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-value]');
+      if (!btn) return;
+      prefs = { ...prefs, [key]: btn.dataset.value };
+      apply();
+      // The profile is the source of truth; the mirror above is only for speed.
+      window.operator.prefsSet({ [key]: btn.dataset.value }).catch(() => {});
+    });
+  }
+
+  window.operator.prefsGet()
+    .then((saved) => { prefs = { ...DEFAULTS, ...(saved || {}) }; apply(); })
+    .catch(() => apply());
+})();
+
+/* ── Settings → Connectors: the phone letterbox ────────────────────── */
+
+(() => {
+  const toggle = document.getElementById('phoneToggle');
+  if (!toggle || !window.operator || !window.operator.phoneStatus) return;
+
+  const sub = document.getElementById('phoneSub');
+  const body = document.getElementById('phoneBody');
+  const urlBox = document.getElementById('phoneUrl');
+  const tokenBox = document.getElementById('phoneToken');
+  const note = document.getElementById('phoneStatus');
+  const conn = document.getElementById('phoneConnector');
+
+  function paint(st) {
+    const on = Boolean(st && st.on);
+    conn.classList.toggle('on', on);
+    body.hidden = !on;
+    toggle.textContent = on ? 'Turn off' : 'Turn on';
+    if (!on) { sub.textContent = 'Off'; return; }
+
+    // The first non-internal address is the one a phone on the same wifi can
+    // reach; the rest are shown too because VPNs make the right one ambiguous.
+    const addrs = st.addresses || [];
+    urlBox.value = addrs.length ? `http://${addrs[0]}:${st.port}/sms` : `(no network address — port ${st.port})`;
+    tokenBox.value = st.token || '';
+    sub.textContent = st.lastSeen
+      ? `Paired · ${st.waiting} waiting`
+      : 'On · waiting for your phone';
+    if (addrs.length > 1) note.textContent = `Other addresses: ${addrs.slice(1).join(', ')}`;
+  }
+
+  toggle.addEventListener('click', async () => {
+    const st = await window.operator.phoneStatus();
+    paint(st.on ? await window.operator.phoneStop() : await window.operator.phoneStart());
+  });
+
+  document.getElementById('phoneRotate').addEventListener('click', async () => {
+    paint(await window.operator.phoneRotate());
+    note.textContent = 'New token. Any phone using the old one will need updating.';
+  });
+
+  document.querySelectorAll('#settingsTabs .tab').forEach((t) => {
+    if (t.dataset.tab === 'connectors') {
+      t.addEventListener('click', async () => paint(await window.operator.phoneStatus()));
+    }
+  });
 })();

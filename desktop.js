@@ -210,6 +210,19 @@ async function call(payload, timeoutMs) {
   return res;
 }
 
+// Reading a window and clicking by name answer "no" as a normal outcome: a
+// control that is not there is something the agent needs to be TOLD, along with
+// what is there instead, so it can correct itself on the same turn. Throwing
+// would collapse that into a bare message and lose the rest of the reply.
+async function callSoft(payload, timeoutMs) {
+  try {
+    const res = remote ? await remoteCall(payload, timeoutMs) : await send(payload, timeoutMs);
+    return res || { ok: false, error: 'desktop command failed' };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+}
+
 async function info() {
   return call({ cmd: 'info' });
 }
@@ -236,6 +249,10 @@ const scroll = (x, y, amount, horizontal, display) => { pointer('scroll', x, y, 
 const typeText = (text) => call({ cmd: 'type', text }, Math.max(30000, text.length * 120));
 const pressKeys = (keys) => call({ cmd: 'key', keys });
 const listWindows = () => call({ cmd: 'windows' });
+// Read a window as text rather than as a picture. The desktop's answer to
+// browser_read_text — see the helper for why this exists.
+const readScreen = (title, depth, budget) => callSoft({ cmd: 'read', title, depth, budget }, 20000);
+const clickText = (text, window) => callSoft({ cmd: 'clicktext', text, window }, 20000);
 const focusWindow = (title) => call({ cmd: 'focus', title });
 const launch = (target, args) => call({ cmd: 'launch', target, args }, 45000);
 const setQuiet = (on) => call({ cmd: 'quiet', on: Boolean(on) });
@@ -290,6 +307,8 @@ module.exports = {
   typeText,
   pressKeys,
   listWindows,
+  readScreen,
+  clickText,
   focusWindow,
   launch,
   setQuiet,

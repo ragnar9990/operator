@@ -472,6 +472,152 @@ function ConvertTo-Physical([int]$idx, [double]$x, [double]$y) {
     @([int][math]::Round($d.left + $x / $s), [int][math]::Round($d.top + $y / $s))
 }
 
+# --- reading the screen as text -------------------------------------------
+#
+# The browser tools hand the model the page as text, which is why web work is
+# quick: a look costs a couple of hundred tokens instead of a ~1,200-token
+# picture, and elements are named rather than hunted for by eye. UI Automation
+# is the same thing for native windows. Everything here exists to give the
+# desktop that second, cheap way to look.
+
+$script:UiaReady = $null
+
+# Loaded on first use, not at startup: most tasks never read a native window,
+# and these assemblies cost a moment to bring in.
+function Initialize-Uia {
+    if ($null -ne $script:UiaReady) { return $script:UiaReady }
+    try {
+        Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+        Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+        $script:UiaReady = $true
+    } catch {
+        $script:UiaReady = $false
+    }
+    return $script:UiaReady
+}
+
+# Physical virtual-desktop coords -> the scaled space the agent works in. The
+# exact inverse of ConvertTo-Physical: UI Automation reports real pixels, but
+# everything crossing this boundary must match the screenshots, or a control
+# found by name gets clicked in the wrong place.
+function ConvertTo-Scaled([double]$px, [double]$py) {
+    foreach ($d in $Displays) {
+        if ($px -ge $d.left -and $px -lt ($d.left + $d.width) -and
+            $py -ge $d.top  -and $py -lt ($d.top + $d.height)) {
+            $s = Get-Scale $d.index
+            return @{ x = [int][math]::Round(($px - $d.left) * $s)
+                      y = [int][math]::Round(($py - $d.top) * $s)
+                      d = $d.index }
+        }
+    }
+    return $null   # scrolled out of view, minimised, or on another desktop
+}
+
+# Things worth naming: either the agent can act on them, or they carry the text
+# that tells it what it is looking at.
+#
+# The awkward part is Pane. A modern app uses real control types, and its Panes
+# are layout - pure noise. A legacy Win32 app reaches UI Automation through the
+# MSAA bridge, where EVERY control arrives as a Pane carrying the right name;
+# drop those and Character Map, and half of Windows with it, reads as empty.
+# What tells them apart is children: a named Pane with nothing inside it is a
+# control, a named Pane with children is a container. So we judge each node
+# once we have enumerated its children, not before.
+$script:UiaAct  = @('Button','Edit','CheckBox','ComboBox','MenuItem','TabItem','Hyperlink',
+                    'ListItem','TreeItem','RadioButton','SplitButton','Slider','Spinner','Tab')
+$script:UiaText = @('Text','Document')
+$script:UiaMaybe = @('Pane','Group','Custom')
+
+function Read-UiaTree($root, [int]$maxDepth, [int]$budget) {
+    $rows = New-Object System.Collections.ArrayList
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $seen = 0
+
+    # An explicit stack rather than recursion: the budget has to stop the walk
+    # the moment it is spent, and a deep tree should not cost stack frames.
+    # Each node is reported as it comes off the stack, once its children are
+    # known - see the Pane note above for why that ordering matters.
+    $stack = New-Object System.Collections.Stack
+    $stack.Push(@{ el = $root; depth = 0 })
+
+    while ($stack.Count -gt 0 -and $seen -lt $budget) {
+        $node = $stack.Pop()
+        $depth = $node.depth
+
+        $kids = @()
+        try {
+            $child = $walker.GetFirstChild($node.el)
+            while ($null -ne $child) { $kids += $child; $child = $walker.GetNextSibling($child) }
+        } catch { $kids = @() }
+
+        # Skip the window itself; it is named in the reply already.
+        if ($depth -gt 0) {
+            $seen++
+            try {
+                $cur = $node.el.Current
+                if (-not $cur.IsOffscreen) {
+                    $type = $cur.ControlType.ProgrammaticName -replace 'ControlType\.', ''
+                    $name = ($cur.Name -replace '\s+', ' ').Trim()
+                    $leaf = ($kids.Count -eq 0)
+
+                    $act = $false
+                    $keep = $false
+                    if ($script:UiaAct -contains $type)                          { $act = $true;  $keep = $true }
+                    elseif ($script:UiaMaybe -contains $type -and $name -and $leaf) { $act = $true;  $keep = $true }
+                    elseif ($script:UiaText -contains $type -and $name)          { $act = $false; $keep = $true }
+
+                    if ($keep -and ($name -or $act)) {
+                        $r = $cur.BoundingRectangle
+                        if (-not $r.IsEmpty -and $r.Width -gt 0 -and $r.Height -gt 0) {
+                            $pt = ConvertTo-Scaled ($r.X + $r.Width / 2) ($r.Y + $r.Height / 2)
+                            if ($null -ne $pt) {
+                                [void]$rows.Add(@{
+                                    type = $type; name = $name; act = $act
+                                    x = $pt.x; y = $pt.y; d = $pt.d
+                                })
+                            }
+                        }
+                    }
+                }
+            } catch { }
+        }
+
+        # Pushed in reverse so siblings come back out in reading order.
+        if ($depth -lt $maxDepth) {
+            for ($i = $kids.Count - 1; $i -ge 0; $i--) {
+                $stack.Push(@{ el = $kids[$i]; depth = $depth + 1 })
+            }
+        }
+    }
+    return @{ rows = @($rows); visited = $seen; truncated = ($seen -ge $budget) }
+}
+
+# The window a read or a name-click applies to: one matched by title, else
+# whatever the user is actually looking at.
+function Resolve-UiaWindow([string]$title) {
+    $hit = $null
+    foreach ($w in [Op]::ListWindows()) {
+        $f = $w -split "`t"
+        # Plain substring, not -like: a title containing [ or ] is a wildcard
+        # to -like and would never match itself.
+        if ($title) {
+            if ($f[1].IndexOf($title, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $f; break }
+        }
+    }
+    if (-not $title) {
+        $fgTitle = [Op]::ForegroundTitle()
+        foreach ($w in [Op]::ListWindows()) {
+            $f = $w -split "`t"
+            if ($f[1] -eq $fgTitle) { $hit = $f; break }
+        }
+    }
+    if ($null -eq $hit) { return $null }
+    try {
+        $el = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr][long]$hit[0])
+        return @{ el = $el; title = $hit[1]; handle = $hit[0] }
+    } catch { return $null }
+}
+
 function Get-Capture([int]$idx, [int]$maxW = 0, [int]$quality = 0) {
     $d = $Displays[$idx - 1]
     $s = Get-Scale $idx $maxW
@@ -634,6 +780,69 @@ while ($true) {
             }
 
             "cursor" { $c = [Op]::Cursor(); Reply @{ ok = $true; x = $c[0]; y = $c[1] } }
+
+            # Read a native window as text instead of a picture. Cheap enough
+            # to use for every look, and it names what is there rather than
+            # leaving the model to find it by eye.
+            "read" {
+                if (-not (Initialize-Uia)) {
+                    Reply @{ ok = $false; error = "UI Automation is not available on this machine" }
+                }
+                else {
+                    $w = Resolve-UiaWindow "$($req.title)"
+                    if ($null -eq $w) {
+                        Reply @{ ok = $false; error = if ($req.title) { "no visible window matching '$($req.title)'" } else { "no foreground window to read" } }
+                    }
+                    else {
+                        $depth  = if ($req.depth)  { [int]$req.depth }  else { 8 }
+                        $budget = if ($req.budget) { [int]$req.budget } else { 400 }
+                        $res = Read-UiaTree $w.el $depth $budget
+                        Reply @{ ok = $true; title = $w.title; controls = $res.rows
+                                 visited = $res.visited; truncated = $res.truncated }
+                    }
+                }
+            }
+
+            # Click a control by its name. The desktop equivalent of
+            # browser_click_text: no coordinates to read off a picture, and no
+            # chance of being one row out.
+            "clicktext" {
+                if (-not (Initialize-Uia)) {
+                    Reply @{ ok = $false; error = "UI Automation is not available on this machine" }
+                }
+                else {
+                    $want = "$($req.text)".Trim()
+                    $w = Resolve-UiaWindow "$($req.window)"
+                    if ($null -eq $w) {
+                        Reply @{ ok = $false; error = "no window to click in" }
+                    }
+                    else {
+                        $res = Read-UiaTree $w.el 12 600
+                        $cands = @($res.rows | Where-Object { $_.act -and $_.name })
+
+                        # Exact first, then starts-with, then contains: "Save"
+                        # should take the Save button, not "Save As...".
+                        $hit = $cands | Where-Object { $_.name -eq $want } | Select-Object -First 1
+                        if ($null -eq $hit) { $hit = $cands | Where-Object { $_.name -like "$want*" } | Select-Object -First 1 }
+                        if ($null -eq $hit) { $hit = $cands | Where-Object { $_.name -like "*$want*" } | Select-Object -First 1 }
+
+                        if ($null -eq $hit) {
+                            $near = ($cands | Select-Object -First 25 | ForEach-Object { $_.name }) -join ', '
+                            Reply @{ ok = $false; error = "nothing called '$want' in '$($w.title)'"; nearby = $near }
+                        }
+                        else {
+                            # Same click path as the "click" command, so quiet
+                            # mode and the private desktop keep behaving.
+                            $p = ConvertTo-Physical $hit.d $hit.x $hit.y
+                            if ($script:Hidden) { [Op]::ClickMsg($p[0], $p[1], 'left', 1, $true) }
+                            elseif ($script:Quiet) { [Op]::ClickMsg($p[0], $p[1], 'left', 1, $false) }
+                            else { [Op]::Click($p[0], $p[1], 'left', 1) }
+                            Reply @{ ok = $true; clicked = $hit.name; type = $hit.type
+                                     x = $hit.x; y = $hit.y; display = $hit.d }
+                        }
+                    }
+                }
+            }
 
             "windows" {
                 $rows = @()

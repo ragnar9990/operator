@@ -10,7 +10,8 @@ agent.runTask(task, {
   onEvent: (e) => {
     if (e.type === 'tool') console.log('  TOOL  ', e.name, JSON.stringify(e.input).slice(0, 140));
     else if (e.type === 'assistant') console.log('  SAY   ', e.text.slice(0, 400));
-    else if (e.type === 'done') console.log('  DONE  ', e.text.slice(0, 600));
+    // text is null when the result only repeats what was already said
+    else if (e.type === 'done') console.log('  DONE  ', (e.text || '(nothing further)').slice(0, 600));
     else console.log('  ' + e.type, JSON.stringify(e).slice(0, 200));
   },
 }).then(() => { desktop.stop(); process.exit(0); })

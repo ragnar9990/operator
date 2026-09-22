@@ -67,6 +67,46 @@
   });
   const sync = () => put(BOTS);
 
+
+/* A week of agent history for the Audit panel. Values here are already redacted,
+   the same way the real log stores them. */
+const AUDIT = (() => {
+  const steps = [
+    ['browser_fill_form', 'fill 2 field(s) and submit', true, 412, null, false, 'agent'],
+    ['browser_type_into', 'type "[redacted]" into "Password"', true, 90, null, false, 'agent'],
+    ['browser_navigate', 'go to portal.supplier.com', true, 1340, null, false, 'agent'],
+    ['run_command', 'run: Get-ChildItem "D:/Invoices" -Filter *.pdf', true, 88, null, false, 'agent'],
+    ['email_send', 'email accounts@supplier.com — "Invoice 4471 query"', false, 1500, 'SMTP server refused the connection', false, 'agent'],
+    ['screen_click', 'click "Save" at (812, 460)', true, 30, null, true, 'agent'],
+    ['launch_app', 'open Excel', true, 2210, null, false, 'agent'],
+    ['browser_read_text', 'read the page', true, 260, null, false, 'agent'],
+    ['screen_type', 'type "Q3 reconciliation"', true, 140, null, false, 'agent'],
+    ['remember', 'remember "supplier portal logs out after 10 min"', true, 4, null, false, 'agent'],
+    ['Edit', 'Edit', null, null, null, false, 'code'],
+    ['Bash', 'Bash', null, null, null, false, 'code'],
+  ];
+  const out = [];
+  for (let i = 0; i < 46; i++) {
+    const [tool, text, ok, ms, error, dryRun, mode] = steps[i % steps.length];
+    const bot = i % 3 === 0 ? ['b2', 'Ops'] : ['b1', 'Nim'];
+    out.push({
+      t: new Date(Date.now() - i * 37 * 60 * 1000).toISOString(),
+      botId: bot[0], botName: bot[1], chatId: 'c1', taskId: '2f1c44de-9a01-4f2b-8c30-71ab',
+      mode, tool, text,
+      args: tool === 'browser_type_into'
+        ? { target: 'Password', text: '[redacted 11 chars sha256:08ca0d4a]' }
+        : { note: 'sample arguments' },
+      ok, error: error || null, ms,
+      computer: i % 5 === 0 ? 'remote http://100.66.223.8:8391' : 'private desktop',
+      model: 'claude-opus-5', dryRun,
+    });
+  }
+  return out;
+})();
+
+const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
+                addresses: ['192.168.20.2', '100.123.254.56'], waiting: 0, lastSeen: null };
+
   window.operator = {
     runTask: async (prompt, model, botId, chatId) => { scriptReply(prompt, botId, chatId); return { ok: true }; },
     stopTask: async () => ({ ok: true }),
@@ -237,6 +277,50 @@
         : null;
       return { ok: true, status: NVIDIA, models: 61, warning };
     },
+
+    /* a connected Gmail account, so the provider mark can be seen */
+    connectorsList: async () => ([{ id: 'email', connected: true, email: 'ronnie@gmail.com', provider: 'Gmail' }]),
+    googleGetCreds: async () => ({ clientId: 'preview', hasSecret: true, configured: true }),
+    disconnectConnector: async () => ({ ok: true }),
+
+    /* the phone letterbox, so the pairing panel can be seen */
+    phoneStatus: async () => PHONE,
+    phoneStart: async () => { PHONE.on = true; return PHONE; },
+    phoneStop: async () => { PHONE.on = false; return PHONE; },
+    phoneRotate: async () => { PHONE.token = 'k' + Math.random().toString(36).slice(2, 18); return PHONE; },
+
+    /* audit trail — a week of plausible history, so the panel can be seen full */
+    auditQuery: async (f = {}) => {
+      let r = AUDIT.slice();
+      if (f.botId) r = r.filter((x) => x.botId === f.botId);
+      if (f.tool) r = r.filter((x) => x.tool === f.tool);
+      if (f.outcome === 'ok') r = r.filter((x) => x.ok && !x.dryRun);
+      if (f.outcome === 'error') r = r.filter((x) => x.ok === false);
+      if (f.outcome === 'dry') r = r.filter((x) => x.dryRun);
+      if (f.from) r = r.filter((x) => x.t >= f.from);
+      if (f.q) r = r.filter((x) => JSON.stringify(x).toLowerCase().includes(f.q.toLowerCase()));
+      return { rows: r.slice(0, f.limit || 100), total: r.length, lastError: null };
+    },
+    auditFacets: async () => ({
+      bots: [...new Map(AUDIT.map((r) => [r.botId, r.botName])).entries()].map(([id, name]) => ({ id, name })),
+      tools: [...new Set(AUDIT.map((r) => r.tool))].sort(),
+      count: AUDIT.length,
+    }),
+    auditExport: async (_fmt, f) => ({ ok: true, count: (await window.operator.auditQuery({ ...f, limit: 1e9 })).rows.length }),
+
+    /* appearance — kept in memory so the preview can exercise the panel */
+    prefsGet: async () => JSON.parse(localStorage.getItem('prefs') || '{}'),
+    prefsSet: async (patch) => {
+      const now = { ...JSON.parse(localStorage.getItem('prefs') || '{}'), ...patch };
+      localStorage.setItem('prefs', JSON.stringify(now));
+      return now;
+    },
+
+    /* fire a humanised failure into the transcript, to see the card */
+    __demoError: () => emit({ type: 'error',
+      title: 'Operator has no brain to use yet',
+      fix: 'Sign in to Claude by running "claude login" in a terminal, or add a free NVIDIA key in Settings → Models and pick one of its models.',
+      text: 'Claude Code process exited with code 1. stderr: Invalid API key · Please run /login' }),
 
     listBots: async () => BOTS.map(card),
     getBot: async (id) => find(id) || null,

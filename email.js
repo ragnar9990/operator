@@ -114,19 +114,64 @@ function friendly(err) {
 }
 
 // The newest messages in a mailbox, envelopes only (fast, no bodies).
-async function list({ cfg, mailbox = 'INBOX', limit = 15, unreadOnly = false }) {
+// Gmail's tabs are labels, not folders — IMAP's INBOX holds all of them mixed
+// together, which is why "the latest email" from IMAP often isn't the one at the
+// top of what the user is actually looking at.
+const TABS = {
+  primary: 'CATEGORY_PERSONAL',
+  social: 'CATEGORY_SOCIAL',
+  promotions: 'CATEGORY_PROMOTIONS',
+  updates: 'CATEGORY_UPDATES',
+  forums: 'CATEGORY_FORUMS',
+};
+
+// Only claim a tab we can actually prove from the labels — guessing "primary"
+// for anything uncategorised is what made the listing lie about where mail sat.
+function tabOf(labels) {
+  if (!labels) return null;
+  const has = (l) => (labels.has ? labels.has(l) : Array.isArray(labels) && labels.includes(l));
+  for (const [name, label] of Object.entries(TABS)) if (has(label)) return name;
+  return null;
+}
+
+async function list({ cfg, mailbox = 'INBOX', limit = 15, unreadOnly = false, tab = undefined }) {
+  const isGmail = (providerFor(cfg.email) || {}).label === 'Gmail';
+
+  // On Gmail, "my inbox" means the Primary tab — that is the list the user is
+  // looking at. Defaulting to the raw IMAP INBOX surfaces promotions and social
+  // as "latest", which is never what they meant. Pass tab:"all" for everything.
+  let wanted = tab === undefined ? (isGmail && mailbox === 'INBOX' ? 'primary' : 'all') : String(tab).toLowerCase().trim();
+  if (wanted === 'all' || wanted === 'any' || !TABS[wanted]) wanted = TABS[wanted] ? wanted : null;
+
   return withImap(cfg, async (client) => {
     const lock = await client.getMailboxLock(mailbox);
     try {
       const out = [];
-      const search = unreadOnly ? { seen: false } : { all: true };
-      let uids = (await client.search(search, { uid: true })) || [];
-      // Newest mail has the highest UID. Sort the UIDs ourselves rather than
-      // trusting SEARCH's order (not guaranteed), then keep the newest `limit`.
+
+      // Ask Gmail directly for a tab when one is in play — far more accurate than
+      // filtering after the fact, and it searches the whole mailbox.
+      let search;
+      if (wanted && TABS[wanted]) {
+        search = { gmraw: `category:${wanted}${unreadOnly ? ' is:unread' : ''}` };
+      } else {
+        search = unreadOnly ? { seen: false } : { all: true };
+      }
+
+      let uids = [];
+      try {
+        uids = (await client.search(search, { uid: true })) || [];
+      } catch (_) {
+        // Server without Gmail extensions: fall back to the plain search.
+        uids = (await client.search(unreadOnly ? { seen: false } : { all: true }, { uid: true })) || [];
+      }
+
+      // Take a generous slice by UID (arrival order) then sort properly by date,
+      // because the two disagree often enough to put the wrong mail on top.
       uids.sort((a, b) => a - b);
-      uids = uids.slice(-limit);
+      uids = uids.slice(-Math.max(limit * 3, 40));
       if (!uids.length) return [];
-      for await (const msg of client.fetch(uids, { uid: true, envelope: true, flags: true }, { uid: true })) {
+
+      for await (const msg of client.fetch(uids, { uid: true, envelope: true, flags: true, labels: true }, { uid: true })) {
         const e = msg.envelope || {};
         out.push({
           uid: msg.uid,
@@ -135,15 +180,30 @@ async function list({ cfg, mailbox = 'INBOX', limit = 15, unreadOnly = false }) 
           subject: e.subject || '(no subject)',
           date: e.date ? new Date(e.date).toISOString() : null,
           unread: !(msg.flags && msg.flags.has('\\Seen')),
+          tab: tabOf(msg.labels),
         });
       }
-      // FETCH returns messages in ascending order no matter what range we asked
-      // for, so sort newest-first here — callers expect out[0] to be the latest.
-      out.sort((a, b) => b.uid - a.uid);
-      return out;
+
+      // Newest first by the date the user sees, falling back to UID.
+      out.sort((a, b) => {
+        const da = a.date ? Date.parse(a.date) : 0;
+        const db = b.date ? Date.parse(b.date) : 0;
+        return db - da || b.uid - a.uid;
+      });
+      return out.slice(0, limit);
     } finally {
       lock.release();
     }
+  });
+}
+
+// The folders on the account, so the agent can look somewhere other than INBOX.
+async function mailboxes({ cfg }) {
+  return withImap(cfg, async (client) => {
+    const list = await client.list();
+    return (list || [])
+      .filter((b) => !b.flags || !b.flags.has('\\Noselect'))
+      .map((b) => ({ path: b.path, name: b.name, special: b.specialUse || null }));
   });
 }
 
@@ -187,4 +247,4 @@ async function send({ cfg, to, subject, body }) {
   return { ok: true, id: info.messageId, to };
 }
 
-module.exports = { test, list, read, send, providerFor };
+module.exports = { test, list, read, send, mailboxes, providerFor };

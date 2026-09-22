@@ -11,6 +11,19 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@100..900&display=swap"
     />
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Runs before anything paints. The real preferences live in the profile,
+      // but reading those is async — long enough for the default theme to flash
+      // up first. The renderer mirrors them here, so this reads the mirror.
+      try {
+        var p = JSON.parse(localStorage.getItem('prefs') || '{}');
+        var d = document.documentElement.dataset;
+        d.theme = p.theme || 'warm';
+        d.accent = p.accent || 'blue';
+        d.glow = p.glow || 'full';
+        d.motion = p.motion || 'on';
+      } catch (e) { /* first run, or storage blocked */ }
+    </script>
   </head>
   <body>
     <div class="modebar">
@@ -22,6 +35,19 @@
         <button class="mode" data-mode="code" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg>
           Code
+        </button>
+      </div>
+
+      <!-- Our own window buttons. The native ones painted over the lit edge. -->
+      <div class="winctl">
+        <button class="winctl-btn" id="winMin" type="button" aria-label="Minimise">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8"/></svg>
+        </button>
+        <button class="winctl-btn" id="winMax" type="button" aria-label="Maximise">
+          <svg viewBox="0 0 12 12" aria-hidden="true" id="winMaxIcon"><rect x="2.5" y="2.5" width="7" height="7" rx="1"/></svg>
+        </button>
+        <button class="winctl-btn danger-hover" id="winClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6"/></svg>
         </button>
       </div>
     </div>
@@ -332,11 +358,32 @@
           </button>
         </header>
 
+        <div class="settings-split">
         <nav class="tabs" id="settingsTabs">
-          <button class="tab active" data-tab="computer" type="button">Computer</button>
-          <button class="tab" data-tab="models" type="button">Models</button>
-          <button class="tab" data-tab="connectors" type="button">Connectors</button>
-          <button class="tab" data-tab="skills" type="button">Skills</button>
+          <button class="tab active" data-tab="computer" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="13" rx="2.5"/><path d="M9.5 20.5h5"/></svg>
+            <span>Computer</span>
+          </button>
+          <button class="tab" data-tab="models" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.2 4.8L19 10l-4.8 2.2L12 17l-2.2-4.8L5 10l4.8-2.2z"/><path d="M18 16.5l.9 2 2.1.9-2.1.9-.9 2-.9-2-2.1-.9 2.1-.9z"/></svg>
+            <span>Models</span>
+          </button>
+          <button class="tab" data-tab="connectors" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-1.3 1.3"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.3-1.3"/></svg>
+            <span>Connectors</span>
+          </button>
+          <button class="tab" data-tab="skills" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5 10 19.5"/><path d="M7.5 8.5 4 12l3.5 3.5"/><path d="M16.5 8.5 20 12l-3.5 3.5"/></svg>
+            <span>Skills</span>
+          </button>
+          <button class="tab" data-tab="appearance" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-.9-.6-1.5-.6-2.2 0-.8.6-1.4 1.5-1.4h1.5A4.3 4.3 0 0 0 20.5 11 8.5 8.5 0 0 0 12 3.5Z"/><circle cx="8" cy="11" r="1.1"/><circle cx="12" cy="8" r="1.1"/><circle cx="16" cy="11" r="1.1"/></svg>
+            <span>Appearance</span>
+          </button>
+          <button class="tab" data-tab="audit" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4.5h8a2 2 0 0 1 2 2v13l-2.5-1.5L13 19.5 10.5 18 8 19.5V6.5a2 2 0 0 1 2-2Z"/><path d="M10.5 9h5M10.5 12.5h3"/></svg>
+            <span>Audit</span>
+          </button>
         </nav>
 
         <div class="sheet-body">
@@ -442,9 +489,56 @@
             <div class="set-section">
               <div class="set-label">Connect your accounts so the agents can use them</div>
 
+              <div class="connector" id="phoneConnector">
+                <div class="conn-head">
+                  <span class="conn-ic">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M11 18.5h2"/></svg>
+                  </span>
+                  <span class="conn-text">
+                    <span class="conn-name">Phone</span>
+                    <span class="conn-sub" id="phoneSub">Off</span>
+                  </span>
+                  <button class="pill ghost" id="phoneToggle" type="button">Turn on</button>
+                </div>
+
+                <div class="conn-body" id="phoneBody" hidden>
+                  <p class="conn-lead">
+                    Your phone sends Operator the codes it receives, so it can finish signing you
+                    in without waiting on you. Set up a shortcut on the phone to POST to the address
+                    below — see PHONE.md for how, on iPhone and Android.
+                  </p>
+                  <label class="field">
+                    <span>Address</span>
+                    <input id="phoneUrl" type="text" readonly spellcheck="false" />
+                  </label>
+                  <label class="field">
+                    <span>Pairing token — put this in the shortcut's X-Operator-Token header</span>
+                    <input id="phoneToken" type="text" readonly spellcheck="false" />
+                  </label>
+                  <div class="remote-actions">
+                    <button class="pill ghost" id="phoneRotate" type="button">New token</button>
+                    <span class="remote-status" id="phoneStatus"></span>
+                  </div>
+                  <p class="set-hint">
+                    Only reachable on your own network, and only with that token. Texts are held in
+                    memory for ten minutes, used once, and never written to disk. A new token
+                    unpairs any phone that had the old one.
+                  </p>
+                </div>
+              </div>
+
               <div class="connector" id="emailConnector">
                 <div class="conn-head">
-                  <span class="conn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg></span>
+                  <span class="conn-ic">
+                    <svg class="ic-generic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M4 7l8 6 8-6"/></svg>
+                    <svg class="brand ic-gmail" viewBox="0 0 512 384" aria-hidden="true">
+                      <path fill="#4285f4" d="M34.91 383.65h81.45V186.2L0 98.72v249.86c0 19.4 15.68 35.07 34.91 35.07z"/>
+                      <path fill="#34a853" d="M395.64 383.65h81.45c19.4 0 34.91-15.68 34.91-35.07V98.72L395.64 186.2z"/>
+                      <path fill="#fbbc04" d="M395.64 35.31V186.2L512 98.72V53.07c0-42.31-48.3-66.43-82.17-41.06z"/>
+                      <path fill="#ea4335" d="M116.36 186.2V35.31L256 139.95 395.64 35.31V186.2L256 290.84z"/>
+                      <path fill="#c5221f" d="M0 53.07v45.65L116.36 186.2V35.31L82.17 12.01C48.3-13.36 0 10.76 0 53.07z"/>
+                    </svg>
+                  </span>
                   <span class="conn-text">
                     <span class="conn-name">Email</span>
                     <span class="conn-sub" id="emailSub">Not connected</span>
@@ -553,6 +647,79 @@
               </form>
             </div>
           </div>
+          <div class="tab-panel" data-panel="appearance" hidden>
+            <div class="set-section">
+              <div class="set-label">Theme</div>
+              <div class="swatches" id="apTheme">
+                <button class="swatch" data-value="warm" type="button" title="Warm black">
+                  <span class="swatch-chip" style="--a:#131211;--b:#0e0d0d;--c:#fcfcfc"></span><span>Warm black</span>
+                </button>
+                <button class="swatch" data-value="cool" type="button" title="Cool grey">
+                  <span class="swatch-chip" style="--a:#0f1113;--b:#0a0c0d;--c:#f6f8fa"></span><span>Cool grey</span>
+                </button>
+                <button class="swatch" data-value="midnight" type="button" title="Midnight">
+                  <span class="swatch-chip" style="--a:#0c1020;--b:#080b17;--c:#eef1ff"></span><span>Midnight</span>
+                </button>
+                <button class="swatch" data-value="light" type="button" title="Light">
+                  <span class="swatch-chip" style="--a:#f7f7f6;--b:#ffffff;--c:#16181a"></span><span>Light</span>
+                </button>
+              </div>
+
+              <div class="set-label">Accent</div>
+              <div class="swatches" id="apAccent">
+                <button class="swatch" data-value="blue" type="button" title="Blue"><span class="swatch-dot" style="--a:#299fff"></span><span>Blue</span></button>
+                <button class="swatch" data-value="violet" type="button" title="Violet"><span class="swatch-dot" style="--a:#8b5cff"></span><span>Violet</span></button>
+                <button class="swatch" data-value="green" type="button" title="Green"><span class="swatch-dot" style="--a:#22c07a"></span><span>Green</span></button>
+                <button class="swatch" data-value="pink" type="button" title="Pink"><span class="swatch-dot" style="--a:#ff4ea8"></span><span>Pink</span></button>
+                <button class="swatch" data-value="amber" type="button" title="Amber"><span class="swatch-dot" style="--a:#f0a12e"></span><span>Amber</span></button>
+              </div>
+
+              <div class="set-label">Neon</div>
+              <p class="set-hint">The coloured line around the task box and the one that runs around a button when you hover it.</p>
+              <div class="seg" id="apGlow">
+                <button class="seg-btn" data-value="full" type="button">Full</button>
+                <button class="seg-btn" data-value="subtle" type="button">Subtle</button>
+                <button class="seg-btn" data-value="off" type="button">Off</button>
+              </div>
+
+              <div class="set-label">Motion</div>
+              <p class="set-hint">Turning it off keeps the colours but stops them moving. If your system is already set to reduce motion, that wins either way.</p>
+              <div class="seg" id="apMotion">
+                <button class="seg-btn" data-value="on" type="button">On</button>
+                <button class="seg-btn" data-value="off" type="button">Off</button>
+              </div>
+            </div>
+          </div>
+          <div class="tab-panel" data-panel="audit" hidden>
+            <div class="set-section">
+              <div class="set-label">Audit — every action, on the record</div>
+              <p class="set-hint">Written as it happens and never edited afterwards. Passwords, card numbers and tokens are replaced with a fingerprint before anything reaches the disk, so this file is safe to hand to someone else.</p>
+
+              <div class="audit-filters">
+                <select id="adBot"><option value="">All bots</option></select>
+                <select id="adTool"><option value="">All tools</option></select>
+                <select id="adOutcome">
+                  <option value="">Any outcome</option>
+                  <option value="ok">Worked</option>
+                  <option value="error">Failed</option>
+                  <option value="dry">Dry run</option>
+                </select>
+                <input id="adFrom" type="date" aria-label="From date" />
+                <input id="adSearch" type="search" placeholder="Search…" spellcheck="false" autocomplete="off" />
+              </div>
+
+              <div class="audit-bar">
+                <span class="audit-count" id="adCount"></span>
+                <button class="pill ghost sm" id="adRefresh" type="button">Refresh</button>
+                <button class="pill ghost sm" id="adCsv" type="button">Export CSV</button>
+                <button class="pill ghost sm" id="adJsonl" type="button">Export JSONL</button>
+              </div>
+
+              <div class="audit-list" id="adList"></div>
+              <button class="pill ghost sm audit-more" id="adMore" type="button" hidden>Show more</button>
+            </div>
+          </div>
+        </div>
         </div>
       </section>
     </div>

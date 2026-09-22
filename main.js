@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const browser = require('./browser');
 const desktop = require('./desktop');
 const speech = require('./speech');
@@ -10,6 +11,9 @@ const whisper = require('./whisper');
 const overlay = require('./overlay');
 const agent = require('./agent');
 const store = require('./store');
+const audit = require('./audit');
+const errors = require('./errors');
+const phone = require('./phone');
 const email = require('./email');
 const code = require('./code');
 const googleOAuth = require('./google-oauth');
@@ -29,7 +33,10 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#131211',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#131211', symbolColor: '#9E9E9E', height: 48 },
+    // No titleBarOverlay: the OS paints that strip itself, over the top of the
+    // page, which broke the lit edge across the whole top-right corner. The
+    // window buttons are ours now — see .winctl in the UI.
+
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -42,6 +49,15 @@ function createWindow() {
   win.webContents.session.setPermissionRequestHandler((_wc, permission, done) => {
     done(permission === 'media' || permission === 'audioCapture');
   });
+
+  // Windows maximises by overhanging the screen ~8px on every side, so an edge
+  // drawn at inset:0 ends up off-screen. Tell the page which state it is in and
+  // let the CSS pull the line in — and square its corners, which is what the OS
+  // does to the window itself when maximised.
+  const sendWindowState = () => send('window-state', { maximized: win.isMaximized() });
+  win.on('maximize', sendWindowState);
+  win.on('unmaximize', sendWindowState);
+  win.webContents.on('did-finish-load', sendWindowState);
 
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
 
@@ -64,6 +80,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   store.init(app.getPath('userData'));
+  audit.init(app.getPath('userData'));
 
   // The NVIDIA NIM key, if there is one, and the live list of what that key
   // can reach. Both are cheap and neither blocks the window. A key saved before
@@ -94,6 +111,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', async () => {
   await browser.closeBrowser();
+  agent.closeSession();   // the live SDK session holds a subprocess of its own
+  phone.stop();           // never leave a port listening after the app is gone
   desktop.stop();
   speech.stop();
   whisper.stop();
@@ -102,13 +121,21 @@ app.on('window-all-closed', async () => {
 });
 
 // The helper is a separate process; a hard quit would otherwise orphan it.
-app.on('before-quit', () => { desktop.stop(); speech.stop(); whisper.stop(); overlay.destroy(); });
+app.on('before-quit', () => { phone.stop(); agent.closeSession(); desktop.stop(); speech.stop(); whisper.stop(); overlay.destroy(); });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 const profileDir = () => path.join(app.getPath('userData'), 'agent-profile');
+
+// Where a step actually happened. Read per event rather than per task, because a
+// remote machine can be paired or dropped while a task is still running.
+function computerLabel() {
+  const t = desktop.target();
+  if (t.kind === 'remote') return `remote ${t.url}`;
+  return desktop.isPrivate() ? 'private desktop' : 'this desktop';
+}
 
 // Everything the picker can offer: the Claude models the subscription covers,
 // plus every model NVIDIA NIM is serving right now. The catalog is refreshed
@@ -215,6 +242,8 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   // A stopped run may still be unwinding when the next one starts, so each run
   // carries a token and only ever tidies up after itself.
   const token = {};
+  // Ties every audited step back to the one task that produced it.
+  const taskId = crypto.randomUUID();
   running = { abortController, botId, chatId, token };
   send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent), dryRun: Boolean(dryRun) });
 
@@ -223,6 +252,31 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   let progressed = false;
 
   const onEvent = (evt) => {
+    // A finished tool call. Recorded before the stop check below, and on
+    // purpose: a tool already running when Stop was pressed still did its
+    // work to the machine, and an action missing from the log because the
+    // user cut the run short is the one you would most want to find.
+    // Bookkeeping only — the transcript drew this step when it was asked for.
+    if (evt.type === 'tool_done') {
+      audit.write({
+        botId: botId || null,
+        botName: (bot && bot.name) || null,
+        chatId: chatId || null,
+        taskId,
+        mode: 'agent',
+        tool: evt.name,
+        text: evt.text,
+        args: evt.input,
+        ok: evt.ok !== false,
+        error: evt.error || null,
+        ms: evt.ms,
+        computer: computerLabel(),
+        model: model || null,
+        dryRun: Boolean(evt.dryRun),
+      });
+      return;
+    }
+
     // Once stopped, this run is over as far as the user is concerned. Whatever
     // it emits while winding down goes nowhere.
     if (abortController.signal.aborted) return;
@@ -293,6 +347,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     list: async (o) => email.list({ cfg: await freshEmailCfg(), ...o }),
     read: async (o) => email.read({ cfg: await freshEmailCfg(), ...o }),
     send: async (o) => email.send({ cfg: await freshEmailCfg(), ...o }),
+    mailboxes: async () => email.mailboxes({ cfg: await freshEmailCfg() }),
   } : null;
 
   // What a bot can do with the coding side: see the conversations, read one for
@@ -328,6 +383,9 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       model: model || (bot && bot.model) || undefined,
       resume,
       bot,
+      // Part of the session key: a session IS the conversation, so a different
+      // chat must not be handed the one that is already open.
+      chatId,
       teammates,
       messageBot,
       codeChats,
@@ -352,7 +410,11 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       await go(null);
     }
   } catch (err) {
-    onEvent({ type: 'error', text: String(err && err.message ? err.message : err) });
+    // Raw SDK and Node failures mean nothing to someone who has just installed
+    // this. errors.js turns the common ones into a sentence plus the fix, and
+    // keeps the original so a bug report still has it.
+    const e = errors.explain(err);
+    if (!e.stopped) onEvent({ type: 'error', title: e.title, fix: e.fix, text: e.detail || e.title });
   } finally {
     overlay.hide();          // the agent has stopped pointing at things
     // If Stop already cleared this — or a newer task has started since — leave
@@ -463,6 +525,33 @@ ipcMain.handle('codeChats:create', async () => {
   return store.createCodeChat({ model: agent.DEFAULT_MODEL, cwd: d.cwd, cwdName: d.name });
 });
 ipcMain.handle('codeChats:delete', async (_e, id) => { store.removeCodeChat(id); return { ok: true }; });
+// --- audit trail -----------------------------------------------------------
+// Read-only from the UI's side: the log is appended by the run, never edited by
+// the person reading it, which is the only reason it is worth anything.
+
+ipcMain.handle('audit:query', (_e, filter) => audit.query(filter || {}));
+ipcMain.handle('audit:facets', () => audit.facets());
+
+ipcMain.handle('audit:export', async (_e, format, filter) => {
+  const ext = format === 'csv' ? 'csv' : 'jsonl';
+  const stamp = new Date().toISOString().slice(0, 10);
+  const res = await dialog.showSaveDialog(win, {
+    defaultPath: `operator-audit-${stamp}.${ext}`,
+    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false };
+
+  // Export what the filter is showing, not just the page on screen.
+  const { rows } = audit.query({ ...(filter || {}), limit: Infinity, offset: 0 });
+  const text = ext === 'csv' ? audit.toCSV(rows) : audit.toJSONL(rows);
+  try {
+    fs.writeFileSync(res.filePath, text, 'utf8');
+    return { ok: true, path: res.filePath, count: rows.length };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
 ipcMain.handle('codeChats:setModel', async (_e, id, model) => store.saveCodeChat(id, { model }));
 
 // A chat is tied to a project folder. Pick one for this chat.
@@ -491,6 +580,7 @@ async function runCodeTask(chatId, prompt) {
 
   const abortController = new AbortController();
   const run = { abortController };
+  const codeTaskId = crypto.randomUUID();
   codeRuns.set(chatId, run);
   send('code-event', { type: 'status', text: 'running', chatId });
 
@@ -519,16 +609,30 @@ async function runCodeTask(chatId, prompt) {
         } else if (evt.type === 'tool') {
           if (!steps) { steps = { k: 'steps', items: [] }; turns.push(steps); }
           steps.items.push({ name: evt.name, input: evt.input });
+          // Code mode runs on the SDK's own file tools, so unlike the computer
+          // tools there is no wrapper to time or catch them: all we honestly
+          // know here is that the step was asked for. `ok: null` says so rather
+          // than claiming a success we did not observe.
+          audit.write({
+            botId: chat.botId || null, chatId, taskId: codeTaskId, mode: 'code',
+            tool: evt.name, text: null, args: evt.input, ok: null, ms: null,
+            computer: `project ${chat.cwdName || chat.cwd}`, model: chat.model || null, dryRun: false,
+          });
         } else if (evt.type === 'tool_error') {
           if (!steps) { steps = { k: 'steps', items: [] }; turns.push(steps); }
           steps.items.push({ name: 'error', input: { command: evt.text }, err: true });
+          audit.write({
+            botId: chat.botId || null, chatId, taskId: codeTaskId, mode: 'code',
+            tool: 'error', text: null, args: {}, ok: false, error: evt.text, ms: null,
+            computer: `project ${chat.cwdName || chat.cwd}`, model: chat.model || null, dryRun: false,
+          });
         }
         if (evt.type !== 'say_delta' && evt.type !== 'say_start') store.saveCodeChat(chatId, { turns });
         send('code-event', { ...evt, chatId });
       },
     });
   } catch (err) {
-    const msg = String(err && err.message ? err.message : err);
+    const msg = errors.explainLine(err);
     send('code-event', { type: 'error', text: msg, chatId });
     return { ok: false, error: msg };
   } finally {
@@ -679,9 +783,30 @@ ipcMain.handle('routines:remove', async (_e, id, rid) => { store.removeRoutine(i
 
 /* ── chats, which live under a bot ───────────────────────────────── */
 
+// The phone letterbox. Off unless the user turns it on, and the token is what
+// keeps it shut — see phone.js.
+ipcMain.handle('phone:status', () => phone.status());
+ipcMain.handle('phone:start', () => { const st = phone.start(); store.setPrefs({ phoneOn: true }); return st; });
+ipcMain.handle('phone:stop', () => { const st = phone.stop(); store.setPrefs({ phoneOn: false }); return st; });
+ipcMain.handle('phone:rotate', () => phone.rotate());
+
+ipcMain.handle('prefs:get', () => store.getPrefs());
+ipcMain.handle('prefs:set', (_e, patch) => store.setPrefs(patch));
+
+// Window buttons. Ours to draw now that the native overlay is gone, so they
+// have to be ours to operate too.
+ipcMain.handle('window:minimize', () => { if (win) win.minimize(); });
+ipcMain.handle('window:maximize', () => {
+  if (!win) return false;
+  if (win.isMaximized()) win.unmaximize(); else win.maximize();
+  return win.isMaximized();
+});
+ipcMain.handle('window:close', () => { if (win) win.close(); });
+
 ipcMain.handle('chats:list', async (_e, botId) => store.listChats(botId));
 ipcMain.handle('chats:get', async (_e, botId, id) => store.getChat(botId, id));
 ipcMain.handle('chats:create', async (_e, botId) => store.createChat(botId));
+
 ipcMain.handle('chats:save', async (_e, botId, id, patch) => store.saveChat(botId, id, patch || {}));
 ipcMain.handle('chats:delete', async (_e, botId, id) => { store.removeChat(botId, id); return { ok: true }; });
 

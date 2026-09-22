@@ -13,6 +13,18 @@ contextBridge.exposeInMainWorld('operator', {
 
   openBrowser: (url) => ipcRenderer.invoke('browser:open', url),
   onEvent: (cb) => ipcRenderer.on('agent-event', (_e, payload) => cb(payload)),
+  onWindowState: (cb) => ipcRenderer.on('window-state', (_e, payload) => cb(payload)),
+  phoneStatus: () => ipcRenderer.invoke('phone:status'),
+  phoneStart: () => ipcRenderer.invoke('phone:start'),
+  phoneStop: () => ipcRenderer.invoke('phone:stop'),
+  phoneRotate: () => ipcRenderer.invoke('phone:rotate'),
+
+  prefsGet: () => ipcRenderer.invoke('prefs:get'),
+  prefsSet: (patch) => ipcRenderer.invoke('prefs:set', patch),
+
+  windowMinimize: () => ipcRenderer.invoke('window:minimize'),
+  windowMaximize: () => ipcRenderer.invoke('window:maximize'),
+  windowClose: () => ipcRenderer.invoke('window:close'),
   onBotsChanged: (cb) => ipcRenderer.on('bots-changed', (_e, payload) => cb(payload)),
 
   // bots
@@ -64,6 +76,11 @@ contextBridge.exposeInMainWorld('operator', {
   codeStop: (chatId) => ipcRenderer.invoke('code:stop', chatId),
   codeRunningChats: () => ipcRenderer.invoke('code:running'),
   onCode: (cb) => ipcRenderer.on('code-event', (_e, payload) => cb(payload)),
+
+  // audit trail (Settings → Audit) — query and export only; nothing here writes
+  auditQuery: (filter) => ipcRenderer.invoke('audit:query', filter),
+  auditFacets: () => ipcRenderer.invoke('audit:facets'),
+  auditExport: (format, filter) => ipcRenderer.invoke('audit:export', format, filter),
 
   connectorsList: () => ipcRenderer.invoke('connectors:list'),
   connectEmail: (cfg) => ipcRenderer.invoke('connectors:connectEmail', cfg),

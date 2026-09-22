@@ -85,6 +85,23 @@ function listConnectors() {
 }
 
 // The full config, password included — for the backend only, never sent to the UI.
+/* ── appearance ──────────────────────────────────────────────────── */
+// How the app should look. Kept here rather than in the renderer so it follows
+// the profile; the renderer also mirrors it to localStorage so the theme is on
+// screen before the first paint instead of flashing the default first.
+
+const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', motion: 'on' };
+
+function getPrefs() {
+  return { ...PREF_DEFAULTS, ...(settings.prefs || {}) };
+}
+
+function setPrefs(patch) {
+  settings.prefs = { ...getPrefs(), ...(patch || {}) };
+  flushSettings();
+  return getPrefs();
+}
+
 function getConnector(id) { return (settings.connectors || {})[id] || null; }
 
 function setConnector(id, cfg) {
@@ -548,6 +565,7 @@ module.exports = {
   addRoutine, updateRoutine, removeRoutine, allRoutines,
   listChats, getChat, createChat, saveChat, removeChat,
   sessionOf, setSession, forgetSession,
+  getPrefs, setPrefs,
   listConnectors, getConnector, setConnector, removeConnector, getGoogle, setGoogle,
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,
