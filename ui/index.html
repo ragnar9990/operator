@@ -124,6 +124,17 @@
             </div>
 
             <div class="dock">
+              <!-- hands-free: the voice that runs the app, not the computer -->
+              <div class="vox" id="vox" hidden>
+                <div class="vox-top">
+                  <span class="vox-dot" id="voxDot"></span>
+                  <span class="vox-state" id="voxState">Listening</span>
+                  <span class="vox-voice" id="voxVoice"></span>
+                  <button class="mini" id="voxStop" type="button">Stop</button>
+                </div>
+                <div class="vox-log" id="voxLog"></div>
+              </div>
+
               <div class="slash-menu" id="slashMenu" hidden></div>
               <form class="composer" id="composer">
                 <textarea
@@ -776,6 +787,7 @@
     </div>
 
     <script src="avatar.js"></script>
+    <script src="vox.js"></script>
     <script src="mic.js"></script>
     <script src="renderer.js"></script>
   </body>

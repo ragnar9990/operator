@@ -174,6 +174,50 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 .chats-empty { padding: 6px 10px; color: var(--ink-4); font-size: 13px; }
 
+/* ── hands-free: the voice that runs the app ───────────────────────── */
+
+.vox {
+  margin: 0 0 8px;
+  border: 1px solid var(--line-hi);
+  border-radius: 13px;
+  background: var(--raise);
+  overflow: hidden;
+}
+.vox-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.vox-dot {
+  flex: none;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+/* Listening breathes, talking is solid, thinking pulses faster. The dot is the
+   only thing telling you whether it is your turn. */
+.vox[data-state="listening"] .vox-dot { animation: voxBreathe 2.2s ease-in-out infinite; }
+.vox[data-state="hearing"] .vox-dot,
+.vox[data-state="thinking"] .vox-dot { animation: voxBreathe 0.7s ease-in-out infinite; }
+.vox[data-state="talking"] .vox-dot { animation: none; background: var(--ink); }
+@keyframes voxBreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .vox-dot { animation: none !important; } }
+
+.vox-state { flex: none; color: var(--ink-2); font-size: 13px; font-weight: 500; letter-spacing: -0.2px; }
+.vox-voice { flex: 1; min-width: 0; color: var(--ink-4); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.vox-log { max-height: 148px; overflow-y: auto; padding: 8px 12px 10px; scrollbar-width: thin; }
+.vox-line { font-size: 13px; line-height: 1.5; letter-spacing: -0.2px; padding: 1px 0; }
+.vox-line.you { color: var(--ink); }
+.vox-line.you::before { content: '“'; }
+.vox-line.you::after { content: '”'; }
+.vox-line.said { color: var(--ink-2); }
+/* What it did, as opposed to what it said — quieter, and set apart. */
+.vox-line.did { color: var(--ink-4); font-size: 12px; padding-left: 13px; position: relative; }
+.vox-line.did::before { content: '·'; position: absolute; left: 3px; }
+
 /* ── workspaces: named folders of agents ───────────────────────────── */
 
 .spaces { flex: none; margin-bottom: 4px; }

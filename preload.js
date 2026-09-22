@@ -68,6 +68,15 @@ contextBridge.exposeInMainWorld('operator', {
   deleteChat: (botId, id) => ipcRenderer.invoke('chats:delete', botId, id),
 
   voiceSay: (text) => ipcRenderer.invoke('voice-say', text),
+
+  // hands-free mode: the voice that runs the app
+  voiceWarm: () => ipcRenderer.invoke('voice:warm'),
+  voiceHeard: (said, onScreen) => ipcRenderer.invoke('voice:heard', said, onScreen),
+  voiceQuiet: () => ipcRenderer.invoke('voice:hush'),
+  voiceEnd: () => ipcRenderer.invoke('voice:end'),
+  onVoiceAudio: (cb) => ipcRenderer.on('voice-audio', (_e, p) => cb(p)),
+  onVoiceChanged: (cb) => ipcRenderer.on('voice-changed', () => cb()),
+  onVoiceOpen: (cb) => ipcRenderer.on('voice-open', (_e, p) => cb(p)),
   grabScreen: (opts) => ipcRenderer.invoke('screen:grab', opts),
   setQuiet: (on) => ipcRenderer.invoke('input:quiet', on),
   setOwnDesktop: (on) => ipcRenderer.invoke('input:ownDesktop', on),

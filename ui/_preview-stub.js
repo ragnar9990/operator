@@ -3,7 +3,7 @@
 // exercise the real code paths. Excluded from the packaged app.
 
 (function () {
-  const listeners = { agent: [], voice: [], bots: [] };
+  const listeners = { agent: [], voice: [], bots: [], voiceAudio: [], voiceChanged: [], voiceOpen: [] };
   const emit = (e) => listeners.agent.forEach((cb) => cb(e));
   window.emit = emit;
 
@@ -348,6 +348,25 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       if ('workspaceId' in patch) b.workspaceId = patch.workspaceId || null;
       b.updatedAt = Date.now(); sync(); return card(b);
     },
+    // hands-free mode. The real one runs a model and a neural voice; here it
+    // just echoes, so the panel and its states can be looked at.
+    voiceWarm: async () => ({ ok: true, tts: 'piper', rate: 22050 }),
+    voiceHeard: async (said, onScreen) => {
+      const evt = (e) => listeners.voice.forEach((cb) => cb({ ev: 'voice', ...e }));
+      await new Promise((r) => setTimeout(r, 400));
+      if (/workspace/i.test(said)) evt({ type: 'tool', name: 'make_workspace', input: { name: 'Client work' } });
+      else if (/agent/i.test(said)) evt({ type: 'tool', name: 'make_agent', input: { name: 'Receipts' } });
+      else evt({ type: 'tool', name: 'read_agent', input: { name: onScreen || 'Invoices' } });
+      await new Promise((r) => setTimeout(r, 300));
+      evt({ type: 'say', text: 'Done. That is sorted.' });
+      evt({ type: 'done', text: 'Done. That is sorted.' });
+      return { ok: true };
+    },
+    voiceQuiet: async () => ({ ok: true }),
+    voiceEnd: async () => ({ ok: true }),
+    onVoiceAudio: (cb) => listeners.voiceAudio.push(cb),
+    onVoiceChanged: (cb) => listeners.voiceChanged.push(cb),
+    onVoiceOpen: (cb) => listeners.voiceOpen.push(cb),
     listWorkspaces: async () => WS.map((w) => ({ ...w, count: BOTS.filter((b) => b.workspaceId === w.id).length })),
     createWorkspace: async (name) => {
       const w = { id: uid('w'), name: String(name || 'New workspace').slice(0, 40), collapsed: false };

@@ -75,13 +75,46 @@ project folder; the shell is a shell, so it can still go where you send it.
 
 ## Talking to it
 
-Click the microphone in the command bar and just talk. It transcribes what you
-said, runs it, and reads the answer back.
+Click the microphone and just talk. It keeps listening until you stop it.
+
+What you are talking to is **not** one of the agents — it is Operator itself.
+It makes agents, names them, writes their personas, files them into
+workspaces, reads back what one of them has been saying, and hands real work to
+whichever agent should do it:
+
+- *"Make me a workspace called client work."*
+- *"Create an agent called Receipts that files my receipts by month, and put it
+  in there."*
+- *"What did the invoices one say?"*
+- *"Put Kimi on Opus."*
+- *"Tell the invoices agent to download this month and file them by date."*
+
+Work it hands out really runs, on this machine, in the background — through the
+same path as a typed task, so the audit log, the rules and the check at the end
+all still apply. It tells you it has set the job going rather than pretending to
+wait for it; ask it later what that agent said.
+
+Deleting is the one thing it checks before doing. Speech gets misheard and
+there is no undo, so it says what it is about to delete and waits for a yes.
+
+It answers in a sentence or two, because everything it says has to be listened
+to in real time rather than skimmed.
 
 - **Hearing** is Whisper `large-v3` running locally on the GPU, through
   whisper.cpp. Free, offline, no API key. The model lives in `D:\whisper`
   (not in this folder, and not on C: — it is 3.1 GB and C: is nearly full).
-- **Speaking** is the SAPI voice built into Windows.
+- **Speaking** is [Piper](https://github.com/rhasspy/piper), a small neural
+  text-to-speech that runs locally on the CPU. Free, offline, MIT licensed. The
+  binary and one 60 MB voice live in `D:\piper\piper`. Measured here: 885ms to
+  the first audio on a cold start, **36ms once the process is warm**, and about
+  thirteen times faster than real time — so it is generating the end of a
+  sentence long before it has finished saying the start of it. The audio streams
+  into the app as raw PCM and plays through Web Audio, so there are no temp
+  files and no wait for a whole line to finish.
+- If Piper is not installed it falls back to the **SAPI voice built into
+  Windows**, which is free and instant and sounds like 2009. Everything still
+  works; it just sounds worse. Point it elsewhere with `OPERATOR_PIPER_DIR` /
+  `OPERATOR_PIPER_MODEL`.
 
 It works out where a sentence ends by watching the microphone level, calibrating
 against your room tone first, and keeping a third of a second of audio from
@@ -206,6 +239,9 @@ npm run dist     # produces dist\Operator Setup <version>.exe
 | `ui/mic.js` | Capture and voice-activity detection: finds where a sentence ends |
 | `speech.js` + `speech-helper.ps1` | Speaking — the Windows SAPI voice |
 | `agent.js` | The brain — builds the tools and the prompt, then hands them to Claude or to NIM |
+| `voice.js` | The other brain — hands-free mode, which drives the app itself rather than the computer |
+| `piper.js` + `ui/vox.js` | The neural voice: a warm Piper process streaming PCM, played through Web Audio |
+| `verify.js` | The second pass that decides whether a run actually met its goal |
 | `nim.js` | The other brain — NVIDIA's catalog, and the tool-calling loop that drives it |
 | `code.js` | The coding side — Claude Code's own toolset, or NIM with the one below |
 | `code-tools.js` | Read/Write/Edit/Bash/Grep/Glob/LS in plain Node, for models that bring none |
@@ -231,6 +267,16 @@ Whisper lives outside this folder, so a fresh clone needs it put back:
 D:\whisper\whisper-server.exe     from whisper.cpp release b5130 (CUDA 12.4 build)
 D:\whisper\ggml-large-v3.bin      from huggingface.co/ggerganov/whisper.cpp
 ```
+
+The voice lives outside the folder too, for the same reason:
+
+```
+D:\piper\piper\piper.exe          from github.com/rhasspy/piper releases (windows_amd64)
+D:\piper\piper\voice.onnx         any piper voice from huggingface.co/rhasspy/piper-voices
+D:\piper\piper\voice.onnx.json    its config, which carries the sample rate
+```
+
+Without it, hands-free mode still works and falls back to the Windows voice.
 
 Point it somewhere else with `OPERATOR_WHISPER_DIR` / `OPERATOR_WHISPER_MODEL`.
 

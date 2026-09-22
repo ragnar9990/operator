@@ -1749,32 +1749,136 @@ function voiceProblem(what, detail) {
   turn('', '<div class="error"><b>' + esc(what) + '</b><span>' + esc(detail || '') + '</span></div>');
 }
 
+/* ── hands-free ──────────────────────────────────────────────────────
+ * The microphone button no longer dictates a task into the box. It opens a
+ * conversation with Operator itself: a voice that makes agents, names them,
+ * files them into workspaces, reads back what one of them said, and hands real
+ * work to whichever agent should do it. See voice.js for the brain and the
+ * tools, piper.js for the voice, ui/vox.js for playing it.
+ *
+ * It keeps listening the whole time. The only thing that stops it hearing its
+ * own reply is that the microphone is ignored until the audio has finished
+ * sounding — which Vox reports, because generating speech finishes long before
+ * saying it does.
+ */
+
+const voxEl = document.getElementById('vox');
+const voxLog = document.getElementById('voxLog');
+const voxState = document.getElementById('voxState');
+const voxVoiceEl = document.getElementById('voxVoice');
+
+function voxSay(kind, text) {
+  if (!voxLog) return;
+  const line = document.createElement('div');
+  line.className = 'vox-line ' + kind;
+  line.textContent = text;
+  voxLog.appendChild(line);
+  while (voxLog.children.length > 8) voxLog.firstChild.remove();
+  voxLog.scrollTop = voxLog.scrollHeight;
+  return line;
+}
+
+// What it just did, in the words a person would use. The tool names are for
+// the model; this row is for the human watching.
+function voxToolLine(name, a) {
+  switch (name) {
+    case 'make_agent': return 'made the agent "' + (a.name || '') + '"';
+    case 'configure_agent': return 'changed ' + (a.name || 'an agent');
+    case 'delete_agent': return 'deleted ' + (a.name || 'an agent');
+    case 'open_agent': return 'opened ' + (a.name || 'an agent');
+    case 'remember_for_agent': return (a.name || 'an agent') + ' will remember that';
+    case 'make_workspace': return 'made the workspace "' + (a.name || '') + '"';
+    case 'rename_workspace': return 'renamed "' + (a.name || '') + '" to "' + (a.newName || '') + '"';
+    case 'delete_workspace': return 'deleted the workspace "' + (a.name || '') + '"';
+    case 'file_agent': return 'filed ' + (a.name || '') + ' into ' + (a.workspace || 'the list');
+    case 'send_to_agent': return 'sent ' + (a.name || 'an agent') + ': ' + String(a.task || '').slice(0, 70);
+    case 'read_agent': return 'read what ' + (a.name || 'an agent') + ' said';
+    case 'list_agents': return 'looked at the agents';
+    case 'list_workspaces': return 'looked at the workspaces';
+    default: return name.replace(/_/g, ' ');
+  }
+}
+
+function voxStatus(word) {
+  if (voxState) voxState.textContent = word;
+  if (voxEl) voxEl.dataset.state = word.toLowerCase();
+}
+
 async function setVoice(on) {
   if (on) {
-    showHeard('Starting Whisper…', true);
+    showHeard('');
+    voxEl.hidden = false;
+    voxLog.textContent = '';
+    voxStatus('Starting');
+
     const warm = await window.operator.whisperWarm();
-    if (!warm.ok) {
-      showHeard('');
-      voiceProblem('Voice', warm.error);
-      return;
-    }
+    if (!warm.ok) { voxEl.hidden = true; voiceProblem('Voice', warm.error); return; }
+
+    // Opens the voice's own SDK session and loads the neural voice, so the
+    // first thing said gets the same answer speed as everything after it.
+    const v = await window.operator.voiceWarm();
+    voxVoiceEl.textContent = v.tts === 'piper' ? 'neural voice' : 'Windows voice';
+    voxVoiceEl.title = v.ttsError || '';
+    voxRate = v.rate || 22050;
+
     try {
       await MicListener.start({ onUtterance: heardSomething, onState: micLevel });
     } catch (err) {
-      showHeard('');
+      voxEl.hidden = true;
       voiceProblem('Microphone', err.message);
       return;
     }
     voiceOn = true;
-    showHeard('Listening…', true);
+    voxStatus('Listening');
   } else {
     voiceOn = false;
     MicListener.stop();
-    window.operator.voiceHush();
+    Vox.stop();
+    window.operator.voiceQuiet();
+    window.operator.voiceEnd();
+    voxEl.hidden = true;
     showHeard('');
   }
   paintMic();
 }
+
+let voxRate = 22050;
+
+if (document.getElementById('voxStop')) {
+  document.getElementById('voxStop').addEventListener('click', () => setVoice(false));
+}
+
+// Audio arriving from piper.js, chunk by chunk.
+window.operator.onVoiceAudio((evt) => {
+  if (!voiceOn) return;
+  if (evt.ev === 'pcm') {
+    if (!speaking) { speaking = true; voxStatus('Talking'); paintMic(); }
+    Vox.play(evt.b64, evt.rate || voxRate);
+  } else if (evt.ev === 'hush') {
+    Vox.stop();
+  }
+});
+
+// Only once the sound has actually stopped is it safe to listen again.
+Vox.setDoneListener(() => {
+  speaking = false;
+  MicListener.discard();
+  paintMic();
+  if (voiceOn) voxStatus('Listening');
+});
+
+// The voice changed something in the rail underneath us.
+window.operator.onVoiceChanged(async () => {
+  await loadSpaces();
+  await loadBots(bot && bot.id);
+  await paintRail();
+});
+
+// …or put a different agent on screen.
+window.operator.onVoiceOpen(async ({ botId }) => {
+  const b = (await window.operator.listBots()).find((x) => x.id === botId);
+  if (b) await openAgent(b.id, b.threads.length ? b.threads[0].id : null);
+});
 
 micBtn.addEventListener('click', () => setVoice(!voiceOn));
 
@@ -1794,25 +1898,26 @@ async function heardSomething(wav) {
   // Anything captured while Operator is talking is Operator talking.
   if (speaking) return;
 
-  showHeard('…', true);
+  voxStatus('Hearing');
   const res = await window.operator.whisperTranscribe(wav);
 
   if (!res.ok) {
-    showHeard('');
+    voxStatus('Listening');
     voiceProblem('Voice', res.error);
     return;
   }
 
   const text = (res.text || '').trim();
-  if (!text) { showHeard('Listening…', true); return; }
+  if (!text) { voxStatus('Listening'); return; }
 
-  if (busy) { showHeard('heard "' + text + '" — busy, finish this first'); return; }
-  if (!worthRunning(text)) { showHeard('heard "' + text + '" — too short to act on'); return; }
+  if (!worthRunning(text)) { voxStatus('Listening'); return; }
 
   showHeard('');
-  input.value = text;
-  resize();
-  run();
+  voxSay('you', text);
+  voxStatus('Thinking');
+
+  const said = await window.operator.voiceHeard(text, bot && bot.name);
+  if (!said.ok) { voxStatus('Listening'); voiceProblem('Voice', said.error); }
 }
 
 window.operator.onVoice((evt) => {
@@ -1824,6 +1929,13 @@ window.operator.onVoice((evt) => {
         showHeard('');
         voiceProblem('Whisper', evt.detail);
       }
+      break;
+
+    // the hands-free voice: what it is saying and what it is doing
+    case 'voice':
+      if (evt.type === 'say') voxSay('said', evt.text);
+      else if (evt.type === 'tool') voxSay('did', voxToolLine(evt.name, evt.input || {}));
+      else if (evt.type === 'done' && !Vox.speaking()) voxStatus('Listening');
       break;
 
     case 'spoke':
@@ -1847,7 +1959,11 @@ window.operator.onVoice((evt) => {
 let lastSpoken = '';
 
 function speak(text) {
+  // In hands-free mode the assistant is the one talking. Reading an agent's
+  // reply out at the same time puts two voices over each other; ask it what the
+  // agent said instead and it will tell you.
   if (!voiceOn) return;
+  if (voxEl && !voxEl.hidden) return;
   const key = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!key || key === lastSpoken) return;
   lastSpoken = key;

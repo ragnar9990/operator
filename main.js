@@ -7,6 +7,8 @@ const crypto = require('crypto');
 const browser = require('./browser');
 const desktop = require('./desktop');
 const speech = require('./speech');
+const piper = require('./piper');
+const voice = require('./voice');
 const whisper = require('./whisper');
 const overlay = require('./overlay');
 const agent = require('./agent');
@@ -76,6 +78,11 @@ function createWindow() {
   // Voice events (heard speech, listening state) go straight to the renderer,
   // which decides whether a transcript should become a task.
   speech.setListener((evt) => send('voice-event', evt));
+
+  // The neural voice streams raw PCM; the renderer plays it through Web Audio.
+  // Sent as it arrives so the first words are already sounding while the rest
+  // of the sentence is still being generated.
+  piper.setListener((evt) => send('voice-audio', evt));
   whisper.setStateListener((evt) => send('voice-event', { ev: 'whisper', ...evt }));
 }
 
@@ -113,6 +120,8 @@ app.whenReady().then(() => {
 app.on('window-all-closed', async () => {
   await browser.closeBrowser();
   agent.closeSession();   // the live SDK session holds a subprocess of its own
+  voice.close();          // hands-free mode holds one of its own
+  piper.stop();
   phone.stop();           // never leave a port listening after the app is gone
   desktop.stop();
   speech.stop();
@@ -122,7 +131,7 @@ app.on('window-all-closed', async () => {
 });
 
 // The helper is a separate process; a hard quit would otherwise orphan it.
-app.on('before-quit', () => { phone.stop(); agent.closeSession(); desktop.stop(); speech.stop(); whisper.stop(); overlay.destroy(); });
+app.on('before-quit', () => { phone.stop(); agent.closeSession(); voice.close(); desktop.stop(); speech.stop(); piper.stop(); whisper.stop(); overlay.destroy(); });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -1016,6 +1025,273 @@ ipcMain.handle('stop-task', async () => {
   send('agent-event', { type: 'status', text: 'idle', botId, chatId });
   return { ok: true };
 });
+
+/* ── hands-free voice mode ───────────────────────────────────────────
+ * voice.js holds the brain and the tool schemas; this is the other half —
+ * what those tools actually do to the app. Kept here because it is all store
+ * and window work, which voice.js deliberately knows nothing about.
+ *
+ * Speaking goes through piper.js when the neural voice is installed and falls
+ * back to the Windows SAPI voice in speech.js when it is not, so hands-free
+ * mode works out of the box and simply sounds better once Piper is there.
+ */
+
+// Voice names things the way a person does — "the invoices one", "Kimi" — so
+// matching is deliberately loose: exact first, then start-of-name, then
+// contains, then the closest by shared words.
+function findAgent(name) {
+  const want = String(name || '').trim().toLowerCase();
+  if (!want) return null;
+  const all = store.listBots();
+  return all.find((b) => b.name.toLowerCase() === want)
+    || all.find((b) => b.name.toLowerCase().startsWith(want))
+    || all.find((b) => b.name.toLowerCase().includes(want))
+    || all.find((b) => want.includes(b.name.toLowerCase()))
+    || all.find((b) => {
+      const words = want.split(/\s+/).filter((w) => w.length > 3);
+      return words.some((w) => b.name.toLowerCase().includes(w));
+    })
+    || null;
+}
+
+function findSpace(name) {
+  const want = String(name || '').trim().toLowerCase();
+  if (!want || want === 'none' || want === 'no workspace') return null;
+  const all = store.listWorkspaces();
+  return all.find((w) => w.name.toLowerCase() === want)
+    || all.find((w) => w.name.toLowerCase().startsWith(want))
+    || all.find((w) => w.name.toLowerCase().includes(want))
+    || null;
+}
+
+// "opus", "haiku", "sonnet 5" — spoken, never an exact model id.
+function findModel(said) {
+  const want = String(said || '').trim().toLowerCase();
+  if (!want) return null;
+  const all = agent.listModels();
+  return (all.find((m) => m.id.toLowerCase() === want)
+    || all.find((m) => m.name.toLowerCase() === want)
+    || all.find((m) => m.name.toLowerCase().includes(want))
+    || all.find((m) => m.id.toLowerCase().includes(want.replace(/\s+/g, '-')))
+    || null);
+}
+
+// The rail and the open conversation are the renderer's; tell it to catch up
+// whenever the voice has changed something underneath it.
+const voiceChanged = () => send('voice-changed', {});
+
+const voiceApp = {
+  listAgents: async () => {
+    const all = store.listBots();
+    if (!all.length) return 'There are no agents yet.';
+    const spaces = new Map(store.listWorkspaces().map((w) => [w.id, w.name]));
+    return all.slice(0, 60).map((b) => {
+      const where = b.pinned ? `pinned (${b.role || 'main'})` : b.workspaceId ? `in ${spaces.get(b.workspaceId) || 'a workspace'}` : 'in the list';
+      return `${b.name} — ${where}${b.title ? `; ${b.title}` : ''}${b.lastLine ? `; last said: ${b.lastLine.slice(0, 80)}` : ''}`;
+    }).join('\n');
+  },
+
+  readAgent: async (name, turns) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    const full = store.getBot(b.id);
+    const chat = full && full.chats && full.chats[0];
+    if (!chat || !chat.turns || !chat.turns.length) return `${b.name} has not said anything yet.`;
+    const recent = chat.turns.slice(-Math.max(2, Math.min(20, turns || 6)));
+    const lines = recent.map((t) => {
+      if (t.k === 'you') return `User: ${t.text}`;
+      if (t.k === 'says') return `${b.name}: ${t.text}`;
+      if (t.k === 'error') return `${b.name} hit an error: ${t.text}`;
+      if (t.k === 'check') return `A check on its work said the goal was ${t.ok === true ? 'met' : t.ok === false ? 'NOT met' : 'unclear'}: ${t.why || ''}`;
+      if (t.k === 'steps') return `[it did: ${(t.items || []).map((s) => s.name).slice(0, 8).join(', ')}]`;
+      return '';
+    }).filter(Boolean);
+    return `The last ${recent.length} turns of ${b.name}:\n${lines.join('\n').slice(0, 2500)}`;
+  },
+
+  makeAgent: async ({ name, title, persona, workspace, pinned, role }) => {
+    const made = store.createAgent({
+      name: String(name || 'New agent').slice(0, 40),
+      title: title || '',
+      persona: persona || '',
+      pinned: Boolean(pinned),
+      role: role || (pinned ? 'main' : null),
+    });
+    if (!made) return 'Could not make it — there are too many agents already.';
+    const ws = findSpace(workspace);
+    if (ws) store.setAgentWorkspace(made.id, ws.id);
+    voiceChanged();
+    return `Made "${made.name}"${ws ? ` in ${ws.name}` : ''}${pinned ? ', pinned to the top' : ''}.`;
+  },
+
+  configureAgent: async ({ name, newName, title, persona, model, pinned, role, workspace }) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    const patch = {};
+    const did = [];
+    if (newName) { patch.name = newName; did.push(`renamed it to ${newName}`); }
+    if (title !== undefined) { patch.title = title; did.push('set what it does'); }
+    if (persona !== undefined) { patch.persona = persona; did.push('set how it works'); }
+    if (pinned !== undefined) { patch.pinned = pinned; patch.role = pinned ? (role || 'main') : null; did.push(pinned ? 'pinned it' : 'unpinned it'); }
+    else if (role) { patch.pinned = true; patch.role = role; did.push(`badged it ${role}`); }
+    if (model) {
+      const m = findModel(model);
+      if (!m) return `I do not have a model called "${model}".`;
+      patch.model = m.id;
+      did.push(`put it on ${m.name}`);
+    }
+    if (Object.keys(patch).length) store.updateBot(b.id, patch);
+    if (workspace !== undefined) {
+      const ws = findSpace(workspace);
+      store.setAgentWorkspace(b.id, ws ? ws.id : null);
+      did.push(ws ? `filed it in ${ws.name}` : 'took it out of its workspace');
+    }
+    voiceChanged();
+    return did.length ? `${b.name}: ${did.join(', ')}.` : 'Nothing to change.';
+  },
+
+  rememberFor: async (name, note) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    store.remember(b.id, String(note).slice(0, 200));
+    voiceChanged();
+    return `${b.name} will remember that.`;
+  },
+
+  deleteAgent: async (name) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    store.deleteBot(b.id);
+    voiceChanged();
+    return `Deleted ${b.name}.`;
+  },
+
+  openAgent: async (name) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    send('voice-open', { botId: b.id });
+    return `${b.name} is on screen.`;
+  },
+
+  listWorkspaces: async () => {
+    const all = store.listWorkspaces();
+    if (!all.length) return 'There are no workspaces yet.';
+    return all.map((w) => `${w.name} — ${w.count} agent${w.count === 1 ? '' : 's'}`).join('\n');
+  },
+
+  makeWorkspace: async (name) => {
+    const w = store.createWorkspace(name);
+    voiceChanged();
+    return `Made the workspace "${w.name}".`;
+  },
+
+  renameWorkspace: async (name, newName) => {
+    const w = findSpace(name);
+    if (!w) return `There is no workspace called "${name}".`;
+    const out = store.updateWorkspace(w.id, { name: newName });
+    voiceChanged();
+    return `Renamed it to "${out.name}".`;
+  },
+
+  deleteWorkspace: async (name) => {
+    const w = findSpace(name);
+    if (!w) return `There is no workspace called "${name}".`;
+    const r = store.deleteWorkspace(w.id);
+    voiceChanged();
+    return `Deleted "${w.name}"${r.freed ? `; its ${r.freed} agent${r.freed === 1 ? '' : 's'} went back to the list` : ''}.`;
+  },
+
+  fileAgent: async (name, workspace) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    const ws = findSpace(workspace);
+    store.setAgentWorkspace(b.id, ws ? ws.id : null);
+    voiceChanged();
+    return ws ? `${b.name} is now in ${ws.name}.` : `${b.name} is back in the main list.`;
+  },
+
+  // Real work on the real machine. This deliberately does NOT wait: a task can
+  // run for minutes, and holding the voice turn open would leave the user
+  // listening to nothing. It starts the run and returns, and everything it does
+  // goes through the same runOne as a typed task — same policy, same audit,
+  // same check at the end.
+  sendToAgent: async (name, task) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    if (running) return `${b.name} cannot start — something else is using the computer right now.`;
+
+    const thread = store.threadOf(b.id);
+    send('voice-open', { botId: b.id });
+
+    runOne({
+      prompt: task,
+      botId: b.id,
+      chatId: thread.id,
+      record: makeRecorder(b.id, thread.id, task),
+    }).then(() => { voiceChanged(); send('bots-changed', { botId: b.id }); });
+
+    return `Started. ${b.name} is doing it now, in the background. Do not report a result — say it has been set going.`;
+  },
+};
+
+/* what the renderer calls */
+
+ipcMain.handle('voice:warm', async () => {
+  const out = { ok: true, tts: 'sapi', rate: 22050 };
+  if (piper.installed()) {
+    const w = piper.warm();
+    if (w.ok) { out.tts = 'piper'; out.rate = w.rate; }
+    else out.ttsError = w.error;
+  } else {
+    out.ttsError = piper.describeMissing();
+  }
+  // Opening the SDK session is the slow part — pay it before the first word.
+  voice.warm(voiceApp).catch(() => {});
+  return out;
+});
+
+// What the voice needs to know before it can answer almost anything: which
+// agents exist, and which one is on screen. Handing it over with the utterance
+// saves a whole round trip to list_agents on most turns, and a round trip is
+// about a second and a half of someone sitting in silence.
+function voiceContext(onScreen) {
+  const spaces = new Map(store.listWorkspaces().map((w) => [w.id, w.name]));
+  const names = store.listBots().slice(0, 40).map((b) => {
+    const where = b.pinned ? 'pinned' : b.workspaceId ? (spaces.get(b.workspaceId) || 'a workspace') : 'list';
+    return `${b.name} (${where})`;
+  });
+  const ws = store.listWorkspaces().map((w) => `${w.name} (${w.count})`);
+  return [
+    'CONTEXT, not something the user said aloud — never read this out:',
+    onScreen ? `On screen: "${onScreen}".` : null,
+    names.length ? `Agents: ${names.join(', ')}.` : 'There are no agents yet.',
+    ws.length ? `Workspaces: ${ws.join(', ')}.` : 'There are no workspaces yet.',
+    'Names above are exact. Use them without calling list_agents first.',
+  ].filter(Boolean).join(' ');
+}
+
+ipcMain.handle('voice:heard', async (_e, said, onScreen) => {
+  const here = voiceContext(onScreen);
+  try {
+    await voice.heard(said, voiceApp, (evt) => {
+      if (evt.type === 'say') speakOut(evt.text);
+      send('voice-event', { ev: 'voice', ...evt });
+    }, here);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('voice:hush', async () => { piper.hush(); speech.hush(); return { ok: true }; });
+ipcMain.handle('voice:end', async () => { voice.close(); piper.hush(); return { ok: true }; });
+
+// One way out for everything spoken, so the fallback is decided in a single
+// place rather than at each call site.
+function speakOut(text) {
+  if (piper.installed()) piper.say(text);
+  else speech.say(text);
+}
 
 ipcMain.handle('voice-say', async (_e, text) => { speech.say(text); return { ok: true }; });
 ipcMain.handle('voice-hush', async () => { speech.hush(); return { ok: true }; });
