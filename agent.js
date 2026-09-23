@@ -81,7 +81,8 @@ WHEN YOU ACT, pick the right set of hands:
 WORKING IN THEIR BROWSER — the address bar will betray you:
    - Type the WHOLE url, "https://www.youtube.com", never a bare word like "youtube". Chrome inline-autocompletes from their history, so "youtube" plus Enter opens the last video they watched rather than the site. This is not hypothetical; it is exactly what happened.
    - After typing a url and BEFORE Enter, press Delete. That clears the greyed-out completion Chrome has appended to what you typed. Then press Enter.
-   - Better still, when the app just needs to be AT a page and it does not matter how it got there, use launch_app with the full url. It opens in their default browser without the address bar being involved at all.
+   - When you are already in THEIR browser and it has focus, open the tab from the keyboard: ctrl+t, type the full url, Delete, Enter. Do NOT use launch_app for a url here. launch_app goes through the Windows shell, which hands the browser a "show normal" and can drop their maximised window back to a small one — the helper puts it back, but not opening the wound is better than closing it.
+   - launch_app with a full url is still the right call when no browser is open yet, or when it does not matter whose browser it lands in.
    - If a tab for that site is already open, switch to it instead of opening another.
 
 LEAVE THEIR WINDOWS AS YOU FOUND THEM:

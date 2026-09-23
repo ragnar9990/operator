@@ -907,6 +907,16 @@ while ($true) {
 
             "launch" {
                 $target = "$($req.target)"
+                # Opening a url goes through ShellExecute, which can hand the
+                # browser a "show normal" and drop a maximised window back to
+                # its restored size. Note what was maximised so it can be put
+                # back below — leaving someone's window smaller than they left
+                # it is not ours to do.
+                $wasMax = @()
+                foreach ($w in [Op]::ListWindows()) {
+                    $f = $w -split "`t"
+                    if ($f[6] -eq "1") { $wasMax += $f[0] }
+                }
                 # On a private desktop, force the app onto it. Start-Process would
                 # let a single-instance app surface on the user's real desktop.
                 if ($script:Hidden -and $target -notmatch '^[a-z]+://') {
@@ -925,7 +935,15 @@ while ($true) {
                     Start-Process -FilePath $target | Out-Null
                 }
                 Start-Sleep -Milliseconds 700
-                Reply @{ ok = $true }
+                $restored = 0
+                foreach ($h in $wasMax) {
+                    $ptr = [IntPtr][long]$h
+                    if ([Op]::IsWindowVisible($ptr) -and -not [Op]::IsZoomed($ptr)) {
+                        [Op]::ShowWindow($ptr, 3) | Out-Null   # SW_MAXIMIZE
+                        $restored++
+                    }
+                }
+                Reply @{ ok = $true; remaximized = $restored }
             }
 
             # Only used when this helper is the far end of a remote session:

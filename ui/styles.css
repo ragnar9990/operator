@@ -1185,15 +1185,13 @@ body.started .intro { display: none; }
 .sheet-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); animation: fade 0.15s both; }
 @keyframes fade { from { opacity: 0; } }
 
+/* Every sheet is a card. This used to live under #settingsSheet only, which
+   left the agent panel with no background to sit on and — worse — no flex
+   column, so its body could not be bounded and ran off the bottom of the
+   window instead of scrolling. */
 .sheet-card {
   position: relative;
   width: min(560px, calc(100vw - 48px));
-}
-
-/* Settings carries a sidebar, so it needs more width than the bot sheet. */
-#settingsSheet .sheet-card {
-  width: min(880px, calc(100vw - 48px));
-  max-height: min(88vh, 820px);
   max-height: min(86vh, 760px);
   display: flex;
   flex-direction: column;
@@ -1203,6 +1201,9 @@ body.started .intro { display: none; }
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6);
   animation: sheet-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/* Settings carries a sidebar, so it needs more width than the agent sheet. */
+#settingsSheet .sheet-card { width: min(880px, calc(100vw - 48px)); }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
 
 .sheet-top {
