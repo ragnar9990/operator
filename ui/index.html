@@ -124,17 +124,6 @@
             </div>
 
             <div class="dock">
-              <!-- hands-free: the voice that runs the app, not the computer -->
-              <div class="vox" id="vox" hidden>
-                <div class="vox-top">
-                  <span class="vox-dot" id="voxDot"></span>
-                  <span class="vox-state" id="voxState">Listening</span>
-                  <span class="vox-voice" id="voxVoice"></span>
-                  <button class="mini" id="voxStop" type="button">Stop</button>
-                </div>
-                <div class="vox-log" id="voxLog"></div>
-              </div>
-
               <div class="slash-menu" id="slashMenu" hidden></div>
               <form class="composer" id="composer">
                 <textarea
@@ -284,6 +273,33 @@
       </section>
     </div>
 
+
+    <!-- hands-free: the voice that runs the app, not the computer. Floats above
+         everything and is dragged by its bar, so it can sit wherever suits. -->
+    <div class="vox" id="vox" hidden>
+      <div class="vox-bar" id="voxBar">
+        <span class="vox-dot" id="voxDot"></span>
+        <span class="vox-state" id="voxState">Starting</span>
+        <span class="vox-grip" aria-hidden="true"></span>
+        <button class="vox-x" id="voxStop" type="button" aria-label="Stop listening">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <div class="vox-body">
+        <div class="vox-in">
+          <select id="voxDevice" aria-label="Microphone"></select>
+          <div class="vox-meter" id="voxMeter" title="How loud the microphone is hearing you">
+            <i id="voxFill"></i>
+            <b id="voxMark" title="Anything above this line counts as speech"></b>
+          </div>
+          <p class="vox-hint" id="voxHint">Say something — the bar should move.</p>
+        </div>
+
+        <div class="vox-log" id="voxLog"></div>
+        <p class="vox-foot" id="voxVoice"></p>
+      </div>
+    </div>
 
     <div class="sheet" id="sheet" hidden>
       <div class="sheet-scrim" id="sheetScrim"></div>

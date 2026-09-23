@@ -176,13 +176,97 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 /* ── hands-free: the voice that runs the app ───────────────────────── */
 
+/* Floats over the app and is dragged by its bar, so it can be parked wherever
+   it is not in the way. Position is kept between sessions. */
 .vox {
-  margin: 0 0 8px;
+  position: fixed;
+  z-index: 60;
+  width: 320px;
   border: 1px solid var(--line-hi);
-  border-radius: 13px;
-  background: var(--raise);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
+.vox-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+.vox-bar:active { cursor: grabbing; }
+.vox.lifted { box-shadow: 0 26px 64px rgba(0, 0, 0, 0.62); }
+
+/* The dotted handle, so the bar reads as something you can pick up. */
+.vox-grip {
+  flex: 1;
+  height: 12px;
+  background-image: radial-gradient(circle, var(--line-max) 1px, transparent 1px);
+  background-size: 6px 6px;
+  opacity: 0.55;
+}
+.vox-x {
+  flex: none;
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+.vox-x svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.vox-x:hover { color: var(--fail); background: rgba(244, 104, 95, 0.12); }
+
+.vox-body { padding: 10px 12px 11px; }
+
+/* ── is the microphone actually hearing me? ───────────────────────── */
+
+.vox-in { padding-bottom: 9px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.vox-in select {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raise);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+}
+
+/* The bar moves with your voice. The mark is where it starts counting as
+   speech — below the line nothing is being captured, and that is the whole
+   point of showing it. */
+.vox-meter {
+  position: relative;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--raise-hi);
+  overflow: hidden;
+}
+.vox-meter i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 9999px;
+  background: var(--ink-4);
+  transition: width 0.06s linear, background 0.12s;
+}
+.vox.loud .vox-meter i { background: var(--accent); }
+.vox-meter b {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 2px;
+  background: var(--ink-3);
+  opacity: 0.7;
+}
+.vox-hint { margin: 6px 0 0; color: var(--ink-4); font-size: 11.5px; line-height: 1.4; }
+.vox-hint.bad { color: var(--fail); }
+
 .vox-top {
   display: flex;
   align-items: center;
@@ -208,7 +292,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .vox-state { flex: none; color: var(--ink-2); font-size: 13px; font-weight: 500; letter-spacing: -0.2px; }
 .vox-voice { flex: 1; min-width: 0; color: var(--ink-4); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.vox-log { max-height: 148px; overflow-y: auto; padding: 8px 12px 10px; scrollbar-width: thin; }
+.vox-log { max-height: 168px; overflow-y: auto; scrollbar-width: thin; }
+.vox-foot { margin: 8px 0 0; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink-4); font-size: 11px; }
+.vox-foot:empty { display: none; }
 .vox-line { font-size: 13px; line-height: 1.5; letter-spacing: -0.2px; padding: 1px 0; }
 .vox-line.you { color: var(--ink); }
 .vox-line.you::before { content: '“'; }

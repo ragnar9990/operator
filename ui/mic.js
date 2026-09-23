@@ -21,6 +21,7 @@ const MicListener = (() => {
   let rate = 48000;
   let onUtterance = null;
   let onState = null;
+  let using = null;            // the microphone actually opened, not the one asked for
 
   let preroll = [];            // Float32Array chunks, trimmed to PREROLL_MS
   let prerollLen = 0;
@@ -157,19 +158,36 @@ const MicListener = (() => {
     return new Uint8Array(buf);
   }
 
+  // Which microphones this machine has. Labels are only filled in once the user
+  // has granted access once, so this is worth calling again after start().
+  async function devices() {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      return all.filter((d) => d.kind === 'audioinput')
+        .map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
+    } catch (_) {
+      return [];
+    }
+  }
+
   async function start(handlers) {
     if (running) return;
     onUtterance = handlers.onUtterance;
     onState = handlers.onState;
 
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,     // stops it hearing its own spoken replies
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    const want = {
+      channelCount: 1,
+      echoCancellation: true,     // stops it hearing its own spoken replies
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    // A named device is a preference, not a requirement: one that has been
+    // unplugged since it was chosen must not stop voice working altogether.
+    if (handlers.deviceId) want.deviceId = { ideal: handlers.deviceId };
+
+    stream = await navigator.mediaDevices.getUserMedia({ audio: want });
+    const track = stream.getAudioTracks()[0];
+    using = track ? { id: track.getSettings().deviceId || '', label: track.label || 'Microphone' } : null;
 
     ctx = new AudioContext();
     rate = ctx.sampleRate;
@@ -213,11 +231,16 @@ const MicListener = (() => {
     try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
     try { if (ctx) ctx.close(); } catch (_) {}
     node = source = stream = ctx = null;
+    using = null;
   }
 
   return {
     start,
     stop,
+    devices,
+    // What is actually open. getUserMedia can hand back a different device
+    // from the one asked for, and the panel should say which one it got.
+    current: () => using,
     isRunning: () => running,
     // Throws away whatever is part-captured — used when Operator starts talking,
     // so a spoken reply never lands as a new instruction.

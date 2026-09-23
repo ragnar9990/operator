@@ -1766,6 +1766,133 @@ const voxEl = document.getElementById('vox');
 const voxLog = document.getElementById('voxLog');
 const voxState = document.getElementById('voxState');
 const voxVoiceEl = document.getElementById('voxVoice');
+const voxBar = document.getElementById('voxBar');
+const voxFill = document.getElementById('voxFill');
+const voxMark = document.getElementById('voxMark');
+const voxHint = document.getElementById('voxHint');
+const voxDevice = document.getElementById('voxDevice');
+
+const VOX_POS = 'operator.voxPos';
+const VOX_MIC = 'operator.voxMic';
+
+/* dragging the panel around */
+
+// Parked where it was left, but never off the edge — a window that is smaller
+// than it was last time would otherwise strand it somewhere unreachable.
+function placeVox() {
+  let at = null;
+  try { at = JSON.parse(localStorage.getItem(VOX_POS) || 'null'); } catch { /* fine */ }
+  const w = voxEl.offsetWidth || 320;
+  const h = voxEl.offsetHeight || 260;
+  const x = at ? Math.min(Math.max(8, at.x), window.innerWidth - w - 8) : window.innerWidth - w - 24;
+  const y = at ? Math.min(Math.max(8, at.y), window.innerHeight - h - 8) : window.innerHeight - h - 110;
+  voxEl.style.left = x + 'px';
+  voxEl.style.top = y + 'px';
+}
+
+if (voxBar) {
+  voxBar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.vox-x')) return;      // the close button is not a handle
+    const box = voxEl.getBoundingClientRect();
+    const dx = e.clientX - box.left;
+    const dy = e.clientY - box.top;
+    voxEl.classList.add('lifted');
+    voxBar.setPointerCapture(e.pointerId);
+
+    const move = (ev) => {
+      const x = Math.min(Math.max(4, ev.clientX - dx), window.innerWidth - box.width - 4);
+      const y = Math.min(Math.max(4, ev.clientY - dy), window.innerHeight - box.height - 4);
+      voxEl.style.left = x + 'px';
+      voxEl.style.top = y + 'px';
+    };
+    const up = () => {
+      voxBar.removeEventListener('pointermove', move);
+      voxBar.removeEventListener('pointerup', up);
+      voxEl.classList.remove('lifted');
+      try { localStorage.setItem(VOX_POS, JSON.stringify({ x: parseInt(voxEl.style.left, 10), y: parseInt(voxEl.style.top, 10) })); } catch { /* fine */ }
+    };
+    voxBar.addEventListener('pointermove', move);
+    voxBar.addEventListener('pointerup', up);
+  });
+}
+window.addEventListener('resize', () => { if (!voxEl.hidden) placeVox(); });
+
+/* the level meter: proof the microphone is hearing you */
+
+// RMS is tiny and bunched near zero, so a straight mapping leaves the bar
+// twitching in the first pixel. The square root spreads quiet speech across
+// most of the bar, which is where the useful signal is.
+const voxScale = (v) => Math.min(1, Math.sqrt(Math.max(0, v) / 0.25));
+
+let voxSeen = 0;      // loudest thing heard since the panel opened
+
+function voxLevel({ level, threshold, speaking: talking }) {
+  if (voxEl.hidden) return;
+  voxFill.style.width = (voxScale(level) * 100).toFixed(1) + '%';
+  voxMark.style.left = (voxScale(threshold) * 100).toFixed(1) + '%';
+  voxEl.classList.toggle('loud', Boolean(talking));
+  if (level > voxSeen) voxSeen = level;
+  micBtn.classList.toggle('hearing', Boolean(talking));
+}
+
+// If nothing has moved the bar at all after a few seconds, say so plainly
+// rather than leaving someone talking at a dead microphone.
+let voxWatch = null;
+function watchForSilence() {
+  clearInterval(voxWatch);
+  voxSeen = 0;
+  const started = Date.now();
+  voxWatch = setInterval(() => {
+    if (voxEl.hidden) return;
+    if (voxSeen > 0.004) {
+      voxHint.textContent = 'Microphone is working.';
+      voxHint.classList.remove('bad');
+      clearInterval(voxWatch);
+    } else if (Date.now() - started > 6000) {
+      voxHint.textContent = 'Nothing coming in. Try another input above, or check Windows sound settings.';
+      voxHint.classList.add('bad');
+    }
+  }, 700);
+}
+
+/* which microphone */
+
+async function fillDevices() {
+  if (!voxDevice) return;
+  const list = await MicListener.devices();
+  const picked = (() => { try { return localStorage.getItem(VOX_MIC) || ''; } catch { return ''; } })();
+  voxDevice.textContent = '';
+  const auto = document.createElement('option');
+  auto.value = '';
+  auto.textContent = 'Default microphone';
+  voxDevice.appendChild(auto);
+  for (const d of list) {
+    const o = document.createElement('option');
+    o.value = d.id;
+    o.textContent = d.label;
+    voxDevice.appendChild(o);
+  }
+  const now = MicListener.current();
+  voxDevice.value = picked && list.some((d) => d.id === picked) ? picked : (now && list.some((d) => d.id === now.id) ? now.id : '');
+}
+
+if (voxDevice) {
+  voxDevice.addEventListener('change', async () => {
+    try { localStorage.setItem(VOX_MIC, voxDevice.value); } catch { /* fine */ }
+    // Swapping input means re-opening the stream; the conversation is untouched.
+    MicListener.stop();
+    voxHint.textContent = 'Switching…';
+    voxHint.classList.remove('bad');
+    try {
+      await MicListener.start({ onUtterance: heardSomething, onState: voxLevel, deviceId: voxDevice.value || undefined });
+      voxHint.textContent = 'Say something — the bar should move.';
+      watchForSilence();
+    } catch (err) {
+      voxHint.textContent = 'Could not open that microphone: ' + err.message;
+      voxHint.classList.add('bad');
+    }
+  });
+}
 
 function voxSay(kind, text) {
   if (!voxLog) return;
@@ -1804,34 +1931,61 @@ function voxStatus(word) {
   if (voxEl) voxEl.dataset.state = word.toLowerCase();
 }
 
+// Anything that goes wrong is said IN the panel. Hiding it and dropping a card
+// into the transcript is how the first version managed to look like a button
+// that did nothing at all.
+function voxFail(what) {
+  voxStatus('Stopped');
+  voxHint.textContent = what;
+  voxHint.classList.add('bad');
+}
+
 async function setVoice(on) {
   if (on) {
     showHeard('');
     voxEl.hidden = false;
+    placeVox();
     voxLog.textContent = '';
+    voxVoiceEl.textContent = '';
+    voxHint.classList.remove('bad');
     voxStatus('Starting');
 
-    const warm = await window.operator.whisperWarm();
-    if (!warm.ok) { voxEl.hidden = true; voiceProblem('Voice', warm.error); return; }
-
-    // Opens the voice's own SDK session and loads the neural voice, so the
-    // first thing said gets the same answer speed as everything after it.
-    const v = await window.operator.voiceWarm();
-    voxVoiceEl.textContent = v.tts === 'piper' ? 'neural voice' : 'Windows voice';
-    voxVoiceEl.title = v.ttsError || '';
-    voxRate = v.rate || 22050;
-
+    // The microphone comes FIRST. It is the part that actually fails — a denied
+    // permission, a device in use, no input at all — and asking for it first
+    // means the panel can say so in a second rather than after Whisper has
+    // spent ten of them loading a 3 GB model for nothing.
+    voxHint.textContent = 'Asking for the microphone…';
     try {
-      await MicListener.start({ onUtterance: heardSomething, onState: micLevel });
+      const pick = (() => { try { return localStorage.getItem(VOX_MIC) || ''; } catch { return ''; } })();
+      await MicListener.start({ onUtterance: heardSomething, onState: voxLevel, deviceId: pick || undefined });
     } catch (err) {
-      voxEl.hidden = true;
-      voiceProblem('Microphone', err.message);
+      voxFail(err && err.name === 'NotAllowedError'
+        ? 'Windows or Electron blocked the microphone. Check Settings → Privacy → Microphone.'
+        : 'Could not open the microphone: ' + (err && err.message ? err.message : err));
+      paintMic();
       return;
     }
+
     voiceOn = true;
+    paintMic();
+    await fillDevices();
+    voxHint.textContent = 'Say something — the bar should move.';
+    watchForSilence();
     voxStatus('Listening');
+
+    // Now the slow parts, with the meter already live so there is something to
+    // look at — and something to tell you the microphone is fine even while
+    // the model is still loading.
+    const warm = await window.operator.whisperWarm();
+    if (!warm.ok) { voxFail('Whisper: ' + warm.error); return; }
+
+    const v = await window.operator.voiceWarm();
+    voxVoiceEl.textContent = v.tts === 'piper' ? 'Neural voice · Whisper large-v3' : 'Windows voice · Whisper large-v3';
+    if (v.ttsError) voxVoiceEl.textContent += ' (no neural voice: ' + v.ttsError + ')';
+    voxRate = v.rate || 22050;
   } else {
     voiceOn = false;
+    clearInterval(voxWatch);
     MicListener.stop();
     Vox.stop();
     window.operator.voiceQuiet();
@@ -1881,10 +2035,6 @@ window.operator.onVoiceOpen(async ({ botId }) => {
 });
 
 micBtn.addEventListener('click', () => setVoice(!voiceOn));
-
-function micLevel({ speaking: talking }) {
-  micBtn.classList.toggle('hearing', Boolean(talking));
-}
 
 // A misfire here starts a real task on a real computer, so a stray word should
 // never be enough to trigger one.

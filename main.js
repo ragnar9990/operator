@@ -62,6 +62,15 @@ function createWindow() {
   win.on('unmaximize', sendWindowState);
   win.webContents.on('did-finish-load', sendWindowState);
 
+  // A thrown error in the renderer is otherwise invisible unless devtools are
+  // open, which they never are on someone else's machine. Warnings and errors
+  // come through to whoever started the app.
+  win.webContents.on('console-message', (_e, level, message, line, source) => {
+    if (level < 2) return;
+    const where = source ? ' (' + String(source).split(/[\/]/).pop() + ':' + line + ')' : '';
+    console.error('[ui]' + where + ' ' + message);
+  });
+
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
 
   // Live view: whichever surface the agent last looked at, browser or desktop.

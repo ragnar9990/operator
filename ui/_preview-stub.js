@@ -447,7 +447,41 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     onVoice: (cb) => listeners.voice.push(cb),
   };
 
-  window.MicListener = { start: async () => {}, stop: () => {}, discard: () => {} };
+  // A fake microphone that actually moves the meter, so the panel can be
+  // looked at without a real one. Real device enumeration is used where the
+  // browser allows it, because that is the part worth seeing.
+  window.MicListener = (() => {
+    let timer = null;
+    let state = null;
+    let open = null;
+    return {
+      start: async (h) => {
+        state = h.onState;
+        open = { id: h.deviceId || '', label: h.deviceId ? 'Chosen microphone' : 'Default microphone' };
+        clearInterval(timer);
+        let t = 0;
+        timer = setInterval(() => {
+          t += 0.08;
+          // a believable speech envelope: quiet room, then bursts
+          const burst = Math.max(0, Math.sin(t * 0.7)) ** 3;
+          const level = 0.004 + burst * (0.03 + Math.random() * 0.06);
+          if (state) state({ level, threshold: 0.012, speaking: level > 0.012 });
+        }, 80);
+      },
+      stop: () => { clearInterval(timer); timer = null; open = null; },
+      discard: () => {},
+      isRunning: () => Boolean(timer),
+      current: () => open,
+      devices: async () => {
+        try {
+          const all = await navigator.mediaDevices.enumerateDevices();
+          const ins = all.filter((d) => d.kind === 'audioinput').map((d, i) => ({ id: d.deviceId, label: d.label || ('Microphone ' + (i + 1)) }));
+          if (ins.length) return ins;
+        } catch (_) { /* fall through to the made-up ones */ }
+        return [{ id: 'a', label: 'Headset (Realtek)' }, { id: 'b', label: 'Webcam microphone' }];
+      },
+    };
+  })();
 
   /* a scripted turn that emits exactly what agent.js emits */
 
