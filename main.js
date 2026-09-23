@@ -1303,6 +1303,15 @@ const voiceApp = {
   // goes through the same runOne as a typed task — same policy, same audit,
   // same check at the end.
   sendToAgent: async (name, task, paste) => {
+    // The voice rewrites what it heard into a task, and "my" is the first
+    // word a paraphrase drops — "in my window" becomes "in the browser
+    // window", which is a different browser the user cannot see. Whether
+    // they said it is not a judgement call, so it is not left to one.
+    if (MEANS_MY_SCREEN.test(lastHeard)) {
+      task = "ON THE USER'S OWN SCREEN, in the windows they already have open — " +
+             "call use_my_screen first and do not open your own browser. " + task;
+    }
+
     const b = findAgent(name);
     if (!b) return `There is no agent called "${name}".`;
     if (running) return `${b.name} cannot start — something else is using the computer right now.`;
@@ -1389,7 +1398,16 @@ function voiceContext(onScreen) {
 const ACKS = ['Right.', 'On it.', 'One sec.', 'Okay.', 'Sure.'];
 let ackAt = 0;
 
+// Said about their own screen, as opposed to merely containing the word
+// "my" — "tidy my downloads folder" is a file job and must not hijack their
+// desktop.
+const MEANS_MY_SCREEN = /\bmy\s+(window|windows|browser|screen|chrome|edge|firefox|tab|tabs|desktop)\b|\bon\s+my\s+(screen|monitor|display)\b|\b(window|tab|browser)\s+(i|I)\s+(have|had|already\s+have)\s+open\b/i;
+
+// The last thing actually said out loud, before the model paraphrased it.
+let lastHeard = '';
+
 ipcMain.handle('voice:heard', async (_e, said, onScreen) => {
+  lastHeard = String(said || '');
   const here = voiceContext(onScreen);
   let spoke = false;
   let acked = false;
