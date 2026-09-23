@@ -1,6 +1,6 @@
 {
   "name": "operator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "An AI agent with its own computer. Drives the whole Windows desktop plus a dedicated browser, using your Claude subscription.",
   "main": "main.js",
   "scripts": {
