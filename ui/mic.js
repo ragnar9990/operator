@@ -6,7 +6,11 @@
 
 const MicListener = (() => {
   const TARGET_RATE = 16000;   // what Whisper wants; anything else it resamples badly
-  const SILENCE_MS = 700;      // quiet this long ends an utterance
+  // Quiet this long ends an utterance. Every millisecond here is paid on every
+  // single thing you say, before transcription has even started — 700 was a
+  // safe default that made the whole loop feel sluggish. 420 still clears the
+  // gap between words comfortably.
+  const SILENCE_MS = 420;
   const MIN_SPEECH_MS = 320;   // shorter than this is a cough, a click, a door
   const MAX_UTTERANCE_MS = 28000;
   const PREROLL_MS = 300;      // kept before speech starts, or the first word clips

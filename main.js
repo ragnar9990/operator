@@ -1,6 +1,6 @@
 // main.js — Electron main process. Wires the UI to the agent + its browser.
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -1219,24 +1219,66 @@ const voiceApp = {
     return ws ? `${b.name} is now in ${ws.name}.` : `${b.name} is back in the main list.`;
   },
 
+  // Handing one agent's words to another. Kept on the real Windows clipboard
+  // rather than in a variable, so "copy that" is also useful outside the app —
+  // Ctrl+V works in Word, in a browser, anywhere.
+  copyFromAgent: async (name) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    const full = store.getBot(b.id);
+    const chat = full && full.chats && full.chats[0];
+    const turns = (chat && chat.turns) || [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].k === 'says' && String(turns[i].text || '').trim()) {
+        const t = String(turns[i].text).trim();
+        clipboard.writeText(t);
+        const words = t.split(/\s+/).length;
+        return `Copied ${words} words from ${b.name}. It starts "${t.slice(0, 70)}…". Use send_to_agent with paste true to hand it over word for word.`;
+      }
+    }
+    return `${b.name} has not said anything to copy yet.`;
+  },
+
+  copyText: async (content) => {
+    clipboard.writeText(String(content || ''));
+    return `Copied ${String(content || '').split(/\s+/).filter(Boolean).length} words to the clipboard.`;
+  },
+
+  readClipboard: async () => {
+    const t = clipboard.readText() || '';
+    if (!t.trim()) return 'The clipboard is empty.';
+    return `The clipboard holds ${t.split(/\s+/).length} words, starting "${t.slice(0, 200)}".`;
+  },
+
   // Real work on the real machine. This deliberately does NOT wait: a task can
   // run for minutes, and holding the voice turn open would leave the user
   // listening to nothing. It starts the run and returns, and everything it does
   // goes through the same runOne as a typed task — same policy, same audit,
   // same check at the end.
-  sendToAgent: async (name, task) => {
+  sendToAgent: async (name, task, paste) => {
     const b = findAgent(name);
     if (!b) return `There is no agent called "${name}".`;
     if (running) return `${b.name} cannot start — something else is using the computer right now.`;
+
+    // The whole point of paste: the other agent's words go across untouched,
+    // rather than being remembered and retyped slightly differently.
+    let prompt = task;
+    if (paste) {
+      const held = clipboard.readText() || '';
+      if (!held.trim()) return 'There is nothing copied to paste. Use copy_from_agent first.';
+      prompt = `${task}
+
+${held}`;
+    }
 
     const thread = store.threadOf(b.id);
     send('voice-open', { botId: b.id });
 
     runOne({
-      prompt: task,
+      prompt,
       botId: b.id,
       chatId: thread.id,
-      record: makeRecorder(b.id, thread.id, task),
+      record: makeRecorder(b.id, thread.id, prompt),
     }).then(() => { voiceChanged(); send('bots-changed', { botId: b.id }); });
 
     return `Started. ${b.name} is doing it now, in the background. Do not report a result — say it has been set going.`;
@@ -1263,27 +1305,56 @@ ipcMain.handle('voice:warm', async () => {
 // agents exist, and which one is on screen. Handing it over with the utterance
 // saves a whole round trip to list_agents on most turns, and a round trip is
 // about a second and a half of someone sitting in silence.
+// Every turn's context stays in the conversation for the rest of the session,
+// so a roster repeated on all of them piles up: forty names re-sent twenty
+// times is thousands of tokens of the same thing, paid for on every later turn.
+// It goes out in full only when it has actually changed.
+let voiceRoster = '';
+
 function voiceContext(onScreen) {
   const spaces = new Map(store.listWorkspaces().map((w) => [w.id, w.name]));
   const names = store.listBots().slice(0, 40).map((b) => {
-    const where = b.pinned ? 'pinned' : b.workspaceId ? (spaces.get(b.workspaceId) || 'a workspace') : 'list';
-    return `${b.name} (${where})`;
+    const where = b.pinned ? ' (pinned)' : b.workspaceId ? ` (${spaces.get(b.workspaceId) || 'filed'})` : '';
+    return b.name + where;
   });
   const ws = store.listWorkspaces().map((w) => `${w.name} (${w.count})`);
+  const roster = [
+    names.length ? `Agents: ${names.join(', ')}.` : 'There are no agents yet.',
+    ws.length ? `Workspaces: ${ws.join(', ')}.` : 'There are no workspaces yet.',
+  ].join(' ');
+
+  const fresh = roster !== voiceRoster;
+  voiceRoster = roster;
+
   return [
     'CONTEXT, not something the user said aloud — never read this out:',
     onScreen ? `On screen: "${onScreen}".` : null,
-    names.length ? `Agents: ${names.join(', ')}.` : 'There are no agents yet.',
-    ws.length ? `Workspaces: ${ws.join(', ')}.` : 'There are no workspaces yet.',
-    'Names above are exact. Use them without calling list_agents first.',
+    fresh ? roster : 'Agents and workspaces are unchanged since the last message.',
+    fresh ? 'Names above are exact. Use them without calling list_agents first.' : null,
   ].filter(Boolean).join(' ');
 }
 
+// Measured: the model reaches for a tool at about 2.3 seconds and does not say
+// a word until about 4.1. That gap is the whole reason hands-free felt slow —
+// it had understood and was already acting, in silence. The tool call is proof
+// enough to answer on, so the acknowledgement is spoken here rather than waited
+// for. Only when the model has not already said something itself.
+const ACKS = ['Right.', 'On it.', 'One sec.', 'Okay.', 'Sure.'];
+let ackAt = 0;
+
 ipcMain.handle('voice:heard', async (_e, said, onScreen) => {
   const here = voiceContext(onScreen);
+  let spoke = false;
+  let acked = false;
   try {
     await voice.heard(said, voiceApp, (evt) => {
-      if (evt.type === 'say') speakOut(evt.text);
+      if (evt.type === 'say') {
+        spoke = true;
+        speakOut(evt.text);
+      } else if (evt.type === 'tool' && !spoke && !acked) {
+        acked = true;
+        speakOut(ACKS[ackAt++ % ACKS.length]);
+      }
       send('voice-event', { ev: 'voice', ...evt });
     }, here);
     return { ok: true };
@@ -1293,7 +1364,7 @@ ipcMain.handle('voice:heard', async (_e, said, onScreen) => {
 });
 
 ipcMain.handle('voice:hush', async () => { piper.hush(); speech.hush(); return { ok: true }; });
-ipcMain.handle('voice:end', async () => { voice.close(); piper.hush(); return { ok: true }; });
+ipcMain.handle('voice:end', async () => { voice.close(); piper.hush(); voiceRoster = ''; return { ok: true }; });
 
 // One way out for everything spoken, so the fallback is decided in a single
 // place rather than at each call site.

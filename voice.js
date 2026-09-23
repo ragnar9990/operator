@@ -32,7 +32,7 @@ YOU RUN THE APP, NOT THE COMPUTER. Operator holds a set of agents. Each agent is
 
 HOW TO TALK:
 - ONE OR TWO SENTENCES. This is speech. Nobody can skim it.
-- Say what you did, not what you are about to do: "Made it" beats "I'll go ahead and create that for you now".
+- Say what you did, not what you are about to do: "Made it" beats "I'll go ahead and create that for you now". Do not open with "Right" or "On it" — the app has already said that out loud by the time you answer.
 - No lists, no markdown, no headings, no emoji, no file paths, no ids. If you must name several things, say at most three and then "and four others".
 - Never read a transcript out word for word. Say what it amounts to.
 - Don't ask permission for things you can simply do. Do it, then say it is done.
@@ -47,6 +47,11 @@ WHAT YOU CAN DO:
 - Make workspaces, rename them, and file agents into them. A workspace is a folder in the list — it does not wall anything off, so never say it does.
 - Read back what an agent said with read_agent, and say what it amounts to. Any question about what an agent SAID, FOUND, or DID is read_agent — list_agents only tells you which agents exist, and answering from its one-line preview gets you half the story.
 - Hand a task to an agent with send_to_agent. That agent then really does it on this computer, in the background. Say you have set it going; do not pretend to wait for it or invent a result. The user can ask you later what it said.
+
+PASSING WORK BETWEEN AGENTS — this is what copy and paste is for:
+- When one agent has written something another one needs, do NOT retype it from memory and do NOT summarise it. Call copy_from_agent on the one that wrote it, then send_to_agent on the one that needs it with paste set to true. That hands over the exact words.
+- "Make another agent and give it that prompt" means: make the agent, copy_from_agent from the one that wrote the prompt, then send_to_agent with paste true. Three calls, no paraphrasing.
+- It goes on the real Windows clipboard too, so "copy that" alone is a perfectly good request and Ctrl+V will work anywhere afterwards.
 
 CHOOSING WHO DOES THE WORK:
 - If the user asks for something to be DONE on the computer — open an app, tidy files, look something up, write an email — that is send_to_agent, not something you refuse. Pick the agent whose name or persona fits. If none fits, make one with a fitting name and send the task to that.
@@ -153,8 +158,20 @@ async function openSession(app) {
       {
         name: z.string().describe('which agent does it'),
         task: z.string().describe('the task in plain English, as you would type it to that agent'),
+        paste: z.boolean().optional().describe('append whatever was last copied to the end of the task, word for word — use this to give one agent what another wrote'),
       },
-      async ({ name, task }) => text(await app.sendToAgent(name, task))),
+      async ({ name, task, paste }) => text(await app.sendToAgent(name, task, paste))),
+
+    tool('copy_from_agent', "Copy an agent's last reply, in full and word for word, onto the clipboard. Use this when one agent has written something — a prompt, a draft, a list — that another agent needs, or that the user wants to paste somewhere themselves. It goes on the real Windows clipboard, so Ctrl+V works anywhere.",
+      { name: z.string().describe('the agent whose last reply to copy') },
+      async ({ name }) => text(await app.copyFromAgent(name))),
+
+    tool('copy_text', 'Put some text on the Windows clipboard yourself, so the user can paste it anywhere.',
+      { content: z.string() },
+      async ({ content }) => text(await app.copyText(content))),
+
+    tool('read_clipboard', 'What is on the clipboard right now. Say what it is, not the whole of it.',
+      {}, async () => text(await app.readClipboard())),
   ];
 
   const server = createSdkMcpServer({ name: 'app', version: '1.0.0', tools });
@@ -196,9 +213,12 @@ ${said}` : said);
     let whole = '';
     let spoke = false;
 
-    // A sentence is finished when it has an ending and a space after it.
+    // A sentence ends at .?! — followed by a space, OR straight into the next
+    // capital. That second case is not pedantry: text resumed after a tool call
+    // often arrives with no leading space, and splitting on whitespace alone
+    // glues "…first." and "Done." into a single breathless line.
     const flush = (force) => {
-      const parts = pending.split(/(?<=[.!?…])\s+/);
+      const parts = pending.split(/(?<=[.!?…])(?=\s|["'“‘(]?[A-Z])/);
       const tail = force ? '' : parts.pop();
       for (const p of parts) {
         const s = p.trim();
