@@ -9,6 +9,16 @@
 
 $ErrorActionPreference = 'Stop'
 
+# This protocol is UTF-8 on the Node side, so it has to be UTF-8 on this side
+# too. Without it the console falls back to the ANSI codepage and a single
+# accented character in a window title emits a byte that the reader cannot
+# decode — it then swallows the following bytes waiting for a continuation
+# that never comes, and the rest of the JSON line is lost. No BOM: it would
+# be written once at the head of the stream and break the first reply.
+$utf8 = New-Object System.Text.UTF8Encoding $false
+[Console]::OutputEncoding = $utf8
+[Console]::InputEncoding = $utf8
+
 Add-Type @'
 using System;
 using System.Collections.Generic;
@@ -39,6 +49,7 @@ public class Op {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextLengthW(IntPtr h);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
@@ -344,7 +355,8 @@ public class Op {
             if (!GetWindowRect(h, out r)) return true;
             if (r.Right - r.Left < 120 || r.Bottom - r.Top < 80) return true;   // tooltips, tray hosts
             found.Add(h.ToInt64() + "\t" + sb.ToString() + "\t" +
-                      r.Left + "\t" + r.Top + "\t" + (r.Right - r.Left) + "\t" + (r.Bottom - r.Top));
+                      r.Left + "\t" + r.Top + "\t" + (r.Right - r.Left) + "\t" + (r.Bottom - r.Top) + "\t" +
+                      (IsZoomed(h) ? "1" : "0"));
             return true;
         }, IntPtr.Zero);
         return found;
@@ -849,9 +861,27 @@ while ($true) {
                 foreach ($w in [Op]::ListWindows()) {
                     $f = $w -split "`t"
                     $rows += @{ handle = $f[0]; title = $f[1]; left = [int]$f[2]; top = [int]$f[3]
-                                width = [int]$f[4]; height = [int]$f[5] }
+                                width = [int]$f[4]; height = [int]$f[5]; max = ($f[6] -eq "1") }
                 }
                 Reply @{ ok = $true; windows = $rows; foreground = [Op]::ForegroundTitle() }
+            }
+
+            # Put a window back the way it was found. Opening a tab drops Chrome
+            # out of full screen, and leaving someone's window smaller than they
+            # left it is its own small rudeness.
+            "maximize" {
+                $want = "$($req.title)"
+                $hit = $null
+                foreach ($w in [Op]::ListWindows()) {
+                    $f = $w -split "`t"
+                    if ($f[1].ToLower().Contains($want.ToLower())) { $hit = $f; break }
+                }
+                if ($null -eq $hit) { Reply @{ ok = $false; error = "no visible window matching '$want'" } }
+                else {
+                    [Op]::ShowWindow([IntPtr][long]$hit[0], 3) | Out-Null   # SW_MAXIMIZE
+                    Start-Sleep -Milliseconds 150
+                    Reply @{ ok = $true; title = $hit[1] }
+                }
             }
 
             "focus" {

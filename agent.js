@@ -76,6 +76,17 @@ WHEN YOU ACT, pick the right set of hands:
    - You normally run on a hidden desktop of your own, which is why their windows are not in list_windows until you call use_my_screen. "I can't see your window" is never the answer — calling use_my_screen is.
    - Once you are on their screen you are moving their real mouse. Do only what was asked, and call use_own_screen when you are done.
    - If they did not say "my", it is your own browser and your own desktop as usual.
+   - ONCE YOU ARE ON THEIR SCREEN, STAY THERE for the rest of that job. Every follow-up — "now click the second one", "scroll down", "play it" — is still about the window in front of them. Reaching for browser_* halfway through opens a different browser they cannot see, and the work silently stops being visible to them.
+
+WORKING IN THEIR BROWSER — the address bar will betray you:
+   - Type the WHOLE url, "https://www.youtube.com", never a bare word like "youtube". Chrome inline-autocompletes from their history, so "youtube" plus Enter opens the last video they watched rather than the site. This is not hypothetical; it is exactly what happened.
+   - After typing a url and BEFORE Enter, press Delete. That clears the greyed-out completion Chrome has appended to what you typed. Then press Enter.
+   - Better still, when the app just needs to be AT a page and it does not matter how it got there, use launch_app with the full url. It opens in their default browser without the address bar being involved at all.
+   - If a tab for that site is already open, switch to it instead of opening another.
+
+LEAVE THEIR WINDOWS AS YOU FOUND THEM:
+   - list_windows marks a window MAXIMISED. If one was maximised when you found it and is not by the time you are done, call maximize_window to put it back. Opening a tab is enough to drop Chrome out of full screen, so check before you finish.
+   - Do not move, resize or close their windows unless that is the actual task.
 
 1. Anything on the web that is YOURS to do — searching, a site, a form, a video, an account, where it does not matter whose browser it happens in — use the browser_* tools. They drive a dedicated Chromium window and are far more reliable than clicking pixels: browser_click_text and browser_type_into name the element. Reach for these first for web work the user did not attach to their own screen.
    SPEED — this matters a lot:
@@ -251,6 +262,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'screen_click_text': return `click "${a.text}"${a.window ? ` in ${a.window}` : ''}`;
       case 'use_my_screen': return `take over your screen${a.reason ? ' to ' + a.reason : ''}`;
       case 'use_own_screen': return 'give your screen back';
+      case 'maximize_window': return `put "${a.title}" back to full size`;
       case 'screen_read': return `read ${a.title || 'the window in front'} as text`;
       case 'browser_click_text': return `click "${a.text}" in the browser`;
       case 'browser_click_xy': return `click (${a.x}, ${a.y}) in the browser`;
@@ -546,7 +558,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       {}, async () => {
         const res = await desktop.listWindows();
         const rows = res.windows
-          .map((w) => `• ${w.title}  [${w.width}x${w.height} at ${w.left},${w.top}]`)
+          .map((w) => `• ${w.title}  [${w.width}x${w.height} at ${w.left},${w.top}${w.max ? ', MAXIMISED' : ''}]`)
           .join('\n');
         return { content: [{ type: 'text', text: `Foreground: ${res.foreground}\n\nOpen windows:\n${rows}` }] };
       }),
@@ -581,6 +593,13 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       { title: z.string() }, async ({ title }) => {
         const res = await desktop.focusWindow(title);
         return afterScreen(`Focused "${res.title}"`);
+      }),
+
+    tool('maximize_window', "Put a window back to maximised. Opening a tab drops Chrome out of full screen, so if a window was MAXIMISED when you found it and is not any more, put it back before you finish.",
+      { title: z.string().describe('a fragment of the window title') },
+      async ({ title }) => {
+        const res = await desktop.maximizeWindow(title);
+        return afterScreen(`Maximised "${res.title}"`);
       }),
 
     tool('launch_app', 'Start a program by name ("notepad", "calc", "explorer"), open a file path, or open a URL.',

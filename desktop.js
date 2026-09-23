@@ -254,6 +254,7 @@ const listWindows = () => call({ cmd: 'windows' });
 const readScreen = (title, depth, budget) => callSoft({ cmd: 'read', title, depth, budget }, 20000);
 const clickText = (text, window) => callSoft({ cmd: 'clicktext', text, window }, 20000);
 const focusWindow = (title) => call({ cmd: 'focus', title });
+const maximizeWindow = (title) => call({ cmd: 'maximize', title });
 const launch = (target, args) => call({ cmd: 'launch', target, args }, 45000);
 const setQuiet = (on) => call({ cmd: 'quiet', on: Boolean(on) });
 
@@ -310,6 +311,7 @@ module.exports = {
   readScreen,
   clickText,
   focusWindow,
+  maximizeWindow,
   launch,
   setQuiet,
   runCommand,
