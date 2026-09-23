@@ -16,10 +16,30 @@ const Vox = (() => {
   let onDone = null;
   let doneTimer = null;
 
+  const waiting = [];       // chunks that arrived before the context was running
+  let resuming = false;
+  let played = 0;           // seconds of audio actually scheduled, for the self-test
+
   function context() {
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (ctx.state === 'suspended') ctx.resume();
     return ctx;
+  }
+
+  // Chromium starts an AudioContext suspended until the page has been
+  // interacted with, and resume() is a promise. Scheduling against a clock that
+  // is not running loses the audio, so anything that arrives early is held in
+  // order and released together the moment the context is live.
+  function whenRunning(fn) {
+    const c = context();
+    if (c.state === 'running') { fn(); return; }
+    waiting.push(fn);
+    if (resuming) return;
+    resuming = true;
+    c.resume().then(() => {
+      resuming = false;
+      const q = waiting.splice(0);
+      for (const f of q) f();
+    }).catch(() => { resuming = false; waiting.length = 0; });
   }
 
   // Fires once the last scheduled chunk has actually finished sounding — which
@@ -36,6 +56,10 @@ const Vox = (() => {
   }
 
   function play(b64, rate) {
+    whenRunning(() => schedule(b64, rate));
+  }
+
+  function schedule(b64, rate) {
     const bin = atob(b64);
     const n = bin.length >> 1;                 // 16-bit samples
     if (!n) return;
@@ -63,6 +87,7 @@ const Vox = (() => {
     const at = Math.max(c.currentTime + 0.02, nextAt);
     src.start(at);
     nextAt = at + buf.duration;
+    played += buf.duration;
     live.push(src);
     src.onended = () => { live = live.filter((s) => s !== src); };
     armDone();
@@ -78,6 +103,10 @@ const Vox = (() => {
   return {
     play,
     stop,
+    // For the panel's self-test: what the audio layer has actually done, so a
+    // silent reply can be told apart from a reply that never arrived.
+    stats: () => ({ state: ctx ? ctx.state : 'not started', seconds: played, queued: waiting.length }),
+    resetStats: () => { played = 0; },
     setDoneListener: (cb) => { onDone = cb; },
     // How much is still queued to say, in seconds.
     remaining: () => (ctx ? Math.max(0, nextAt - ctx.currentTime) : 0),

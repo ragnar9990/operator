@@ -123,7 +123,11 @@ async function ready(timeoutMs = 180000) {
   }
 }
 
-async function transcribe(wav) {
+// `prompt` primes the decoder with words it should expect — the user's own
+// agent and workspace names. Measured: without it, "Tell Kimi K3 to check the
+// pricing page" comes back as "Kimmy K3"; with it, the name is exact. It costs
+// nothing and, if anything, decodes faster.
+async function transcribe(wav, prompt) {
   await ready();
 
   const form = new FormData();
@@ -133,6 +137,7 @@ async function transcribe(wav) {
   // Whisper will happily invent words for a clip that is only breathing; giving
   // it nothing to continue from makes that much less likely.
   form.append('no_context', 'true');
+  if (prompt) form.append('prompt', String(prompt).slice(0, 900));
 
   const res = await fetch(`${BASE}/inference`, { method: 'POST', body: form });
   if (!res.ok) throw new Error(`whisper returned ${res.status}`);
@@ -157,6 +162,26 @@ const HALLUCINATIONS = new Set([
   'please subscribe', 'subscribe', 'the end', 'so', 'and', 'i', 'no',
 ]);
 
+// The exact-match list above only catches the short ones. Music and room noise
+// produce whole confident sentences instead — large-v3 was trained on subtitled
+// video, so when it hears something that is not speech it reaches for the
+// furniture of subtitles. Caught in the wild here with Spotify playing:
+// "Subtitles by the Amara.org community", arriving as if it had been said out
+// loud and starting a real turn. These are phrases no one says to a computer.
+const SUBTITLE_JUNK = [
+  /amara\.org/i,
+  /\bsubtitle[sd]?\s+(by|from)\b/i,
+  /\bsubtitling\b/i,
+  /\btranscri(ption|bed)\s+by\b/i,
+  /\bcaption(s|ed)\s+by\b/i,
+  /thanks?\s+(you\s+)?for\s+watching/i,
+  /(don'?t\s+forget\s+to\s+)?(like|subscribe)\s+and\s+subscribe/i,
+  /(smash|hit)\s+that\s+(like|subscribe)/i,
+  /\bsee\s+you\s+(in\s+)?(the\s+)?next\s+(video|time|one)\b/i,
+  /^\W*(music|applause|laughter|silence|foreign)\W*$/i,
+  /www\.[a-z0-9-]+\.(com|org|net)/i,
+];
+
 function clean(text) {
   const s = String(text || '')
     .replace(/\[(BLANK_AUDIO|INAUDIBLE|NOISE|SILENCE|MUSIC)\]/gi, ' ')
@@ -166,6 +191,7 @@ function clean(text) {
 
   const bare = s.toLowerCase().replace(/[.,!?¡¿"'’—-]/g, '').replace(/\s+/g, ' ').trim();
   if (HALLUCINATIONS.has(bare)) return '';
+  for (const re of SUBTITLE_JUNK) if (re.test(s)) return '';
   return s;
 }
 

@@ -57,6 +57,8 @@ CHOOSING WHO DOES THE WORK:
 - If the user asks for something to be DONE on the computer — open an app, tidy files, look something up, write an email — that is send_to_agent, not something you refuse. Pick the agent whose name or persona fits. If none fits, make one with a fitting name and send the task to that.
 - If the user says "you" and means the app ("make me a workspace"), that is yours to do directly.
 
+STOP MEANS STOP. "Stop", "cancel", "never mind", "that's wrong" while an agent is working means stop_task immediately. Never ask them to confirm stopping.
+
 DELETING IS THE ONE THING YOU CHECK FIRST. Before deleting an agent or a workspace, say what you are about to delete and wait for a yes. Speech gets misheard, and there is no undo. Everything else, just do it.
 
 Be brief, be warm, and get on with it.`;
@@ -172,6 +174,18 @@ async function openSession(app) {
 
     tool('read_clipboard', 'What is on the clipboard right now. Say what it is, not the whole of it.',
       {}, async () => text(await app.readClipboard())),
+
+    tool('stop_task', 'Stop whatever agent is working right now. Use this the moment the user says stop, cancel, or never mind — do not ask first.',
+      {}, async () => text(await app.stopTask())),
+
+    tool('add_routine', 'Give an agent a standing job it does on a schedule, without being asked again.',
+      {
+        name: z.string().describe('the agent that does it'),
+        task: z.string().describe('what it should do, in plain English'),
+        every: z.enum(['min5', 'min15', 'min30', 'hour', 'day', 'weekday', 'week']).optional().describe('how often; day is the default'),
+        at: z.string().optional().describe('time of day as HH:MM, 24 hour, for the daily and weekly ones'),
+      },
+      async (a) => text(await app.addRoutine(a))),
   ];
 
   const server = createSdkMcpServer({ name: 'app', version: '1.0.0', tools });

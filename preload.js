@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('operator', {
   // hands-free mode: the voice that runs the app
   voiceWarm: () => ipcRenderer.invoke('voice:warm'),
   voiceHeard: (said, onScreen) => ipcRenderer.invoke('voice:heard', said, onScreen),
+  voiceTest: () => ipcRenderer.invoke('voice:test'),
   voiceQuiet: () => ipcRenderer.invoke('voice:hush'),
   voiceEnd: () => ipcRenderer.invoke('voice:end'),
   onVoiceAudio: (cb) => ipcRenderer.on('voice-audio', (_e, p) => cb(p)),

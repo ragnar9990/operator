@@ -1219,6 +1219,32 @@ const voiceApp = {
     return ws ? `${b.name} is now in ${ws.name}.` : `${b.name} is back in the main list.`;
   },
 
+  // Nothing else could stop a run by voice, which made "stop" the one thing you
+  // had to reach for the keyboard to do — the exact opposite of the point.
+  stopTask: async () => {
+    if (!running) return 'Nothing is running.';
+    try { running.abortController.abort(); } catch (_) {}
+    const who = running.botId ? (store.getBot(running.botId) || {}).name : null;
+    running = null;
+    send('agent-event', { type: 'status', text: 'idle' });
+    voiceChanged();
+    return who ? `Stopped ${who}.` : 'Stopped it.';
+  },
+
+  addRoutine: async ({ name, task, every, at }) => {
+    const b = findAgent(name);
+    if (!b) return `There is no agent called "${name}".`;
+    const r = store.addRoutine(b.id, {
+      name: String(task).slice(0, 50),
+      prompt: task,
+      every: every || 'day',
+      at: at || '09:00',
+    });
+    if (!r) return 'Could not add that routine.';
+    voiceChanged();
+    return `${b.name} will do that ${every === 'weekday' ? 'on weekdays' : every === 'week' ? 'on Mondays' : every && every.startsWith('min') ? 'every ' + every.slice(3) + ' minutes' : every === 'hour' ? 'every hour' : 'every day'}${(every || 'day') === 'day' || every === 'weekday' || every === 'week' ? ' at ' + (at || '09:00') : ''}.`;
+  },
+
   // Handing one agent's words to another. Kept on the real Windows clipboard
   // rather than in a variable, so "copy that" is also useful outside the app —
   // Ctrl+V works in Word, in a browser, anywhere.
@@ -1363,6 +1389,16 @@ ipcMain.handle('voice:heard', async (_e, said, onScreen) => {
   }
 });
 
+// The voice, on demand. Being able to prove the sound reaches the speakers
+// without first having to hold a conversation is the difference between "it is
+// broken" and "my output device is wrong".
+ipcMain.handle('voice:test', async () => {
+  const line = 'Voice check. If you can hear this, the speaking half is working.';
+  if (piper.installed()) { piper.say(line); return { ok: true, via: 'piper' }; }
+  speech.say(line);
+  return { ok: true, via: 'sapi', note: piper.describeMissing() };
+});
+
 ipcMain.handle('voice:hush', async () => { piper.hush(); speech.hush(); return { ok: true }; });
 ipcMain.handle('voice:end', async () => { voice.close(); piper.hush(); voiceRoster = ''; return { ok: true }; });
 
@@ -1389,9 +1425,22 @@ ipcMain.handle('whisper-warm', async () => {
   }
 });
 
+// The words most likely to be said, handed to Whisper before it decodes. Names
+// are the part it gets wrong — ordinary English it already knows.
+function heardVocabulary() {
+  const names = store.listBots().slice(0, 30).map((b) => b.name);
+  const ws = store.listWorkspaces().map((w) => w.name);
+  return [
+    'Operator voice commands.',
+    names.length ? `Agents: ${names.join(', ')}.` : '',
+    ws.length ? `Workspaces: ${ws.join(', ')}.` : '',
+    'Commands: make an agent, make a workspace, file it, pin it, copy that, paste it, send it, what did it say, stop, delete it.',
+  ].filter(Boolean).join(' ');
+}
+
 ipcMain.handle('whisper-transcribe', async (_e, wav) => {
   try {
-    const text = await whisper.transcribe(Buffer.from(wav));
+    const text = await whisper.transcribe(Buffer.from(wav), heardVocabulary());
     return { ok: true, text };
   } catch (err) {
     return { ok: false, error: err.message };

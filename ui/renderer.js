@@ -1997,9 +1997,35 @@ async function setVoice(on) {
 }
 
 let voxRate = 22050;
+let voxBusy = false;   // a turn is in flight
 
 if (document.getElementById('voxStop')) {
   document.getElementById('voxStop').addEventListener('click', () => setVoice(false));
+}
+
+// Proof the speaking half reaches your speakers, without having to hold a
+// conversation to find out. It reports what the audio layer actually did, so
+// "nothing was generated" and "it played and you did not hear it" are told
+// apart — which is the difference between a bug here and the wrong output
+// device in Windows.
+if (document.getElementById('voxTest')) {
+  document.getElementById('voxTest').addEventListener('click', async () => {
+    Vox.resetStats();
+    const before = Vox.stats();
+    voxHint.textContent = 'Saying a test line…';
+    voxHint.classList.remove('bad');
+    const r = await window.operator.voiceTest();
+    setTimeout(() => {
+      const st = Vox.stats();
+      if (st.seconds > 0.2) {
+        voxHint.textContent = `Played ${st.seconds.toFixed(1)}s through ${r.via === 'piper' ? 'the neural voice' : 'the Windows voice'}. If you heard nothing, check the output device in Windows.`;
+        voxHint.classList.remove('bad');
+      } else {
+        voxHint.textContent = `No audio came back (audio ${st.state}${st.queued ? ', ' + st.queued + ' chunks stuck waiting' : ''}).` + (r.note ? ' ' + r.note : '');
+        voxHint.classList.add('bad');
+      }
+    }, 2500);
+  });
 }
 
 // Audio arriving from piper.js, chunk by chunk.
@@ -2061,12 +2087,22 @@ async function heardSomething(wav) {
   if (!text) { voxStatus('Listening'); return; }
 
   if (!worthRunning(text)) { voxStatus('Listening'); return; }
+  // A turn already in flight. Starting another on top of it is how a reply gets
+  // talked over by the next question — and with background noise producing a
+  // steady drip of near-misses, it happens constantly.
+  if (voxBusy) { voxStatus('Listening'); return; }
 
   showHeard('');
   voxSay('you', text);
   voxStatus('Thinking');
+  voxBusy = true;
 
-  const said = await window.operator.voiceHeard(text, bot && bot.name);
+  let said;
+  try {
+    said = await window.operator.voiceHeard(text, bot && bot.name);
+  } finally {
+    voxBusy = false;
+  }
   if (!said.ok) { voxStatus('Listening'); voiceProblem('Voice', said.error); }
 }
 
