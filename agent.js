@@ -71,7 +71,13 @@ FIRST, decide what kind of message this is:
 
 WHEN YOU ACT, pick the right set of hands:
 
-1. Anything on the web — searching, a site, a form, a video, an account — use the browser_* tools. They drive a dedicated Chromium window and are far more reliable than clicking pixels: browser_click_text and browser_type_into name the element. Reach for these first for web work.
+0. WHOSE SCREEN IS IT? Decide this BEFORE anything else.
+   - If the user says "my" — my browser, my window, my Chrome, my screen, my tab, "the one I have open", "the video on my screen" — they mean THEIR windows, not yours. Call use_my_screen, then list_windows, then focus_window, and work it with screen_* tools. Do NOT open your own browser; it is a different browser with different tabs and they will not see anything happen.
+   - You normally run on a hidden desktop of your own, which is why their windows are not in list_windows until you call use_my_screen. "I can't see your window" is never the answer — calling use_my_screen is.
+   - Once you are on their screen you are moving their real mouse. Do only what was asked, and call use_own_screen when you are done.
+   - If they did not say "my", it is your own browser and your own desktop as usual.
+
+1. Anything on the web that is YOURS to do — searching, a site, a form, a video, an account, where it does not matter whose browser it happens in — use the browser_* tools. They drive a dedicated Chromium window and are far more reliable than clicking pixels: browser_click_text and browser_type_into name the element. Reach for these first for web work the user did not attach to their own screen.
    SPEED — this matters a lot:
    - Every browser action already returns the page as text, so you can read results, field names and links without a separate step. Do NOT call browser_read_text or browser_screenshot after an action just to "see" — you already have the page. Only screenshot when you genuinely need to see pixels (a canvas, an image, an odd layout).
    - Fill forms with ONE browser_fill_form call listing every field, not one browser_type_into per field. Set submit:true to send it in the same call.
@@ -79,7 +85,7 @@ WHEN YOU ACT, pick the right set of hands:
    - DROPDOWNS: always browser_select. Never click a dropdown open and try to find the option by eye — a real <select> draws its list outside the page, so it is not in the screenshot and cannot be clicked or scrolled at coordinates. That is why long lists like a year of birth get stuck.
    - Chain: navigate, then fill_form with submit — a whole "go to the site and fill it in" is often just two calls.
 
-2. Anything else on the computer — desktop apps, Explorer, settings, games, installers, local files, or a browser the user already has open — use the screen_* tools. This is real mouse and keyboard on the real desktop.
+2. Anything else on the computer — desktop apps, Explorer, settings, games, installers, local files, or a browser the user already has open — use the screen_* tools. This is a real mouse and keyboard on a real desktop.
 
 USING THE SCREEN:
 - LOOK WITH TEXT FIRST. screen_read gives you a window as a list of named controls with the coordinates to click them — a button, a box, a label, each with a position. It costs a fraction of a screenshot and it tells you what things are CALLED, so you are not squinting at pixels guessing where a button is. For an ordinary app — Explorer, Notepad, Settings, Office, a dialog — screen_read then screen_click_text is the fast path, and you should take it by default.
@@ -209,6 +215,9 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
     'browser_click_text', 'browser_type_into', 'browser_fill_form', 'browser_select',
     'browser_click_xy', 'browser_press_key', 'browser_scroll',
     'email_send', 'remember', 'message_bot', 'screen_click_text',
+    // Stepping onto the user's screen moves their real mouse, so a rehearsal
+    // describes it rather than doing it.
+    'use_my_screen', 'use_own_screen',
   ]);
 
   // A shell command only counts as looking if it matches a conservative
@@ -240,6 +249,8 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'focus_window': return `switch to "${a.title}"`;
       case 'run_command': return `run: ${String(a.command || '').slice(0, 140)}`;
       case 'screen_click_text': return `click "${a.text}"${a.window ? ` in ${a.window}` : ''}`;
+      case 'use_my_screen': return `take over your screen${a.reason ? ' to ' + a.reason : ''}`;
+      case 'use_own_screen': return 'give your screen back';
       case 'screen_read': return `read ${a.title || 'the window in front'} as text`;
       case 'browser_click_text': return `click "${a.text}" in the browser`;
       case 'browser_click_xy': return `click (${a.x}, ${a.y}) in the browser`;
@@ -540,6 +551,32 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         return { content: [{ type: 'text', text: `Foreground: ${res.foreground}\n\nOpen windows:\n${rows}` }] };
       }),
 
+    tool('use_my_screen', "Move onto the USER'S OWN screen, so you can see and drive the windows they already have open — their Chrome, their Explorer, whatever they are looking at. Call this the moment they say 'my' anything: my browser, my window, my screen, the tab I have open. Until you do you are on a hidden desktop of your own, where their windows do not exist — which is why list_windows cannot find them and opening your own browser is the wrong answer.",
+      { reason: z.string().describe('what you need their screen for, in a few words') },
+      async ({ reason }) => {
+        if (desktop.target().kind === 'remote') {
+          return { content: [{ type: 'text', text: 'You are driving another machine, so the user\'s own windows are not reachable from here. Say so rather than opening anything.' }] };
+        }
+        const already = !desktop.isPrivate();
+        if (!already) {
+          desktop.usePrivateDesktop(false);
+          ctx.onEvent({ type: 'desktop', mine: true, reason });
+        }
+        const res = await desktop.listWindows();
+        const rows = res.windows.map((w) => `• ${w.title}  [${w.width}x${w.height} at ${w.left},${w.top}]`).join('\n');
+        const head = already
+          ? 'You were already on the user\'s screen.'
+          : 'You are now on the user\'s own desktop, sharing their real mouse and keyboard. Move deliberately, do not click anything you were not asked to, and call use_own_screen the moment you are finished.';
+        return { content: [{ type: 'text', text: `${head}\n\nForeground: ${res.foreground}\n\nTheir open windows:\n${rows}` }] };
+      }),
+
+    tool('use_own_screen', 'Go back to your own hidden desktop and give the user their mouse and keyboard back. Do this as soon as you have finished with their screen.',
+      {}, async () => {
+        if (desktop.isPrivate()) return { content: [{ type: 'text', text: 'You are already on your own desktop.' }] };
+        desktop.usePrivateDesktop(true);
+        ctx.onEvent({ type: 'desktop', mine: false });
+        return { content: [{ type: 'text', text: 'Back on your own desktop. The user has their screen to themselves again.' }] };
+      }),
     tool('focus_window', 'Bring a window to the front by a fragment of its title. Do this before typing into an app.',
       { title: z.string() }, async ({ title }) => {
         const res = await desktop.focusWindow(title);

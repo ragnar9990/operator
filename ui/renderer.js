@@ -754,6 +754,7 @@ function replay(turns) {
     else if (t.k === 'note') turn('', noteCard(t.text));
     else if (t.k === 'check') turn('', checkCard(t));
     else if (t.k === 'routine') turn('', routineCard(t.text));
+    else if (t.k === 'screen') turn('', screenCard(t));
     else if (t.k === 'steps') {
       const g = openGroup();
       for (const it of t.items) addStepRow(g, it.name, it.input || {}, it.at || '', false);
@@ -932,6 +933,16 @@ function checkCard(v) {
   return '<div class="check ' + state + '"><svg viewBox="0 0 24 24" aria-hidden="true">' + icon + '</svg>' +
     '<span class="check-text"><b>' + head + '</b>' +
     (v.why ? '<i>' + esc(v.why) + '</i>' : '') + '</span></div>';
+}
+
+function screenCard(v) {
+  const icon = v.mine
+    ? '<rect x="2.5" y="4" width="19" height="13" rx="2.5"/><path d="M8 20.5h8"/>'
+    : '<rect x="2.5" y="4" width="19" height="13" rx="2.5"/><path d="M8 20.5h8M7 10.5l3 3 5-5"/>';
+  const text = v.mine
+    ? 'Working on <b>your</b> screen' + (v.reason ? ' — ' + esc(v.reason) : '')
+    : (v.auto ? 'Finished — your screen is yours again' : 'Gave your screen back');
+  return '<div class="event screen"><svg viewBox="0 0 24 24" aria-hidden="true">' + icon + '</svg><span>' + text + '</span></div>';
 }
 
 function routineCard(name) {
@@ -1310,6 +1321,16 @@ window.operator.onEvent((evt) => {
     if (window.__watchOpen && window.__watchFrame) {
       window.__watchFrame.src = frame.src;
       if (evt.label && window.__watchLabel) window.__watchLabel.textContent = evt.label.replace(/^https?:\/\//, '');
+    }
+    return;
+  }
+
+  // The agent stepping onto the user's own screen is the one action that moves
+  // their real mouse, so it is called out rather than buried in the step list.
+  if (evt.type === 'desktop') {
+    if (mine) {
+      turn('', screenCard(evt));
+      rec({ k: 'screen', mine: evt.mine, reason: evt.reason, auto: evt.auto });
     }
     return;
   }

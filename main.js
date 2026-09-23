@@ -274,6 +274,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   // did, the last thing it said about it, and which hands it used — so the
   // check only asks for evidence this run already paid for.
   const acts = [];
+  let tookTheScreen = false;
   let lastReply = null;
   let usedScreen = false;
   let usedBrowser = false;
@@ -318,6 +319,13 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     // window is closed before the turn ends.
     if (evt.type === 'remember') {
       if (botId) store.remember(botId, evt.text);
+      send('agent-event', { ...evt, botId, chatId });
+      return;
+    }
+    // The agent has stepped onto (or off) the user's own screen. Worth seeing in
+    // the transcript: it is the one thing that moves their real mouse.
+    if (evt.type === 'desktop') {
+      if (evt.mine) tookTheScreen = true;
       send('agent-event', { ...evt, botId, chatId });
       return;
     }
@@ -507,6 +515,13 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     const e = errors.explain(err);
     if (!e.stopped) onEvent({ type: 'error', title: e.title, fix: e.fix, text: e.detail || e.title });
   } finally {
+    // Hand the screen back. A follow-up that needs it again can simply ask for
+    // it; leaving the agent holding the user's mouse after the job is done is
+    // the thing the private desktop exists to prevent.
+    if (tookTheScreen && ownDesktopPref && desktop.target().kind !== 'remote') {
+      try { desktop.usePrivateDesktop(true); } catch (_) {}
+      onEvent({ type: 'desktop', mine: false, auto: true });
+    }
     overlay.hide();          // the agent has stopped pointing at things
     // If Stop already cleared this — or a newer task has started since — leave
     // it alone. Saying "idle" over the top of a live run would blank the UI.
@@ -546,9 +561,15 @@ ipcMain.handle('input:quiet', async (_e, on) => {
 
 // Give the agent its own hidden desktop, or take it back. Switching restarts the
 // helper, so refuse mid-task rather than pull the desktop out from under a run.
+// What the user chose in Settings. The agent can step onto their screen for a
+// job that is explicitly about their own windows, but this is what it goes back
+// to afterwards — the choice is theirs, not the agent's to keep.
+let ownDesktopPref = true;
+
 ipcMain.handle('input:ownDesktop', async (_e, on) => {
   if (running) return { ok: false, error: 'Finish or stop the current task first.' };
   try {
+    ownDesktopPref = Boolean(on);
     const isOn = desktop.usePrivateDesktop(on);
     overlay.hide();
     return { ok: true, on: isOn };
