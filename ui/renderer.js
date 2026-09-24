@@ -393,17 +393,32 @@ function rec(record) {
   save();
 }
 
+// Which conversation the pending save is for, taken when it was asked for.
+// Reading `bot` and `chat` when the timer fired instead meant switching or
+// deleting inside those 400ms either threw (both null) or wrote the wrong
+// conversation — and the one you had just left lost its last lines.
+let saveFor = null;
+
 function save() {
   if (!chat || !bot) return;
+  // One still pending for another conversation goes now rather than never.
+  if (saveFor && (saveFor.botId !== bot.id || saveFor.chat.id !== chat.id)) flushSave();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    await window.operator.saveChat(bot.id, chat.id, { title: chat.title, turns: chat.turns });
-    // The rail is painted from the roster now, not from a separate fetch, so
-    // it has to be reloaded before repainting — otherwise an agent keeps the
-    // name it had before the first thing you asked it.
-    await loadBots();
-    await paintRail();
-  }, 400);
+  saveFor = { botId: bot.id, chat };
+  saveTimer = setTimeout(flushSave, 400);
+}
+
+async function flushSave() {
+  clearTimeout(saveTimer);
+  const s = saveFor;
+  saveFor = null;
+  if (!s) return;
+  await window.operator.saveChat(s.botId, s.chat.id, { title: s.chat.title, turns: s.chat.turns });
+  // The rail is painted from the roster now, not from a separate fetch, so
+  // it has to be reloaded before repainting — otherwise an agent keeps the
+  // name it had before the first thing you asked it.
+  await loadBots();
+  await paintRail();
 }
 
 // An agent is its thread, so asking for the agent is asking for the thread.

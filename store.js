@@ -638,6 +638,10 @@ function addRoutine(botId, { name, prompt, every, at }) {
     at: /^\d{2}:\d{2}$/.test(at || '') ? at : '09:00',
     paused: false,
     lastRun: null,
+    // The scheduler counts from here until it has run once, so a routine is
+    // not due the moment it is made — "every day at 09:00" added at five in
+    // the afternoon first runs tomorrow at nine, not straight away.
+    createdAt: Date.now(),
   };
   b.routines.push(routine);
   flush();

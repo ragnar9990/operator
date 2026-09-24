@@ -1069,7 +1069,8 @@ const SPAN = { min5: 5, min15: 15, min30: 30, hour: 60 };
 
 function dueNow(r, now) {
   if (r.paused) return false;
-  const last = r.lastRun || 0;
+  // Never run yet: count from when it was made (see store.addRoutine).
+  const last = Math.max(r.lastRun || 0, r.createdAt || 0);
 
   // Anything under a day repeats from its last run rather than a clock slot.
   if (SPAN[r.every]) return now - last >= SPAN[r.every] * 60 * 1000;
