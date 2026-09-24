@@ -10,7 +10,7 @@ if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined) {
   process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
 }
 
-const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -26,6 +26,7 @@ const store = require('./store');
 const audit = require('./audit');
 const verify = require('./verify');
 const modelOptions = require('./model-options');
+const handover = require('./handover');
 const errors = require('./errors');
 const phone = require('./phone');
 const email = require('./email');
@@ -198,6 +199,28 @@ const modelOptionsState = (mode, id) => {
   };
 };
 ipcMain.handle('model-options:get', async (_e, mode, id) => modelOptionsState(mode, id));
+
+// The user's turn (handover.js): their answers from the card in the chat.
+ipcMain.handle('handover:done', async (_e, id) => handover.finish(id, 'user'));
+ipcMain.handle('handover:skip', async (_e, id) => handover.finish(id, 'skipped'));
+ipcMain.handle('handover:show', async (_e, id) => handover.show(id));
+
+// Said where they will see it even with Operator in the background: a Windows
+// notification (clicking it brings Operator up) and a flashing taskbar button.
+function tellUserItIsTheirTurn(evt) {
+  if (!win || win.isDestroyed() || win.isFocused()) return;
+  if (process.env.OPERATOR_NO_NOTIFY === '1') return;   // automated tests
+  try { win.flashFrame(true); } catch (_) {}
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({
+      title: evt.helperName ? `${evt.helperName} needs you` : 'Operator needs you',
+      body: String(evt.what || 'Your turn.').slice(0, 200),
+    });
+    n.on('click', () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } });
+    n.show();
+  } catch (_) { /* a missing notification is not worth failing a task over */ }
+}
 ipcMain.handle('model-options:set', async (_e, mode, id, patch) => {
   store.setModelOptions(mode, id, patch);
   return modelOptionsState(mode, id);
@@ -313,6 +336,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   let lastReply = null;
   let usedScreen = false;
   let usedBrowser = false;
+  let leftForUser = false;   // a step handed to the user that they did not finish
 
   const onEvent = (evt) => {
     // A finished tool call. Recorded before the stop check below, and on
@@ -367,6 +391,11 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       send('agent-event', { ...evt, botId, chatId });
       return;
     }
+    // The user's turn: make sure they notice, and remember a step they did not
+    // finish — sending the agent back to redo the work cannot fix that one.
+    if (evt.type === 'handover') tellUserItIsTheirTurn(evt);
+    if (evt.type === 'handover_end' && (evt.outcome === 'timeout' || evt.outcome === 'skipped')) leftForUser = true;
+    if (evt.type === 'helper_done' && evt.state === 'needs') leftForUser = true;
     if (evt.type === 'tool' && evt.name === 'run_helpers') {
       const names = ((evt.input && evt.input.tasks) || []).map((t) => t.name);
       acts.push({ text: `handed ${names.length} jobs to helpers working at the same time, each in its own browser tab: ${names.join(', ')} — their steps follow, marked with their names`, ok: true });
@@ -535,6 +564,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       // "unsure" must never send the agent back to redo work that was fine.
       if (v.ok !== false) return;
       if (tries >= VERIFY_RETRIES) return;      // out of retries; the verdict stands
+      // Part of it was the user's and was not done (skipped, or the wait ran
+      // out). Redoing the agent's part cannot finish theirs, so the verdict
+      // stands and the run ends where it is.
+      if (leftForUser) return;
 
       // Same conversation, not a new one: the agent has to see its own work to
       // fix it. Read the session back rather than reusing the one this task

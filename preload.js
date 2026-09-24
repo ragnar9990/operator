@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld('operator', {
   listModels: () => ipcRenderer.invoke('list-models'),
   // The dial beside the picker: { spec, values, summary } for a model, per side.
   modelOptions: (mode, id) => ipcRenderer.invoke('model-options:get', mode, id),
+  // The user's turn (handover.js): done, skip, or show me the tab.
+  handoverDone: (id) => ipcRenderer.invoke('handover:done', id),
+  handoverSkip: (id) => ipcRenderer.invoke('handover:skip', id),
+  handoverShow: (id) => ipcRenderer.invoke('handover:show', id),
   setModelOptions: (mode, id, patch) => ipcRenderer.invoke('model-options:set', mode, id, patch),
 
   // NVIDIA NIM — one key, every vendor's models

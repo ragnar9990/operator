@@ -201,6 +201,9 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     // The dial beside the picker, mirroring model-options.js closely enough to
     // draw and exercise it. Saved per side in sessionStorage.
     modelOptions: async (mode, id) => MO.state(mode, id),
+    handoverDone: async () => true,
+    handoverSkip: async () => true,
+    handoverShow: async () => true,
     setModelOptions: async (mode, id, patch) => { MO.save(mode, id, patch); return MO.state(mode, id); },
 
     // A snapshot of a real NIM catalog, so the picker's grouping, search and

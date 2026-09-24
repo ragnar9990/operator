@@ -128,10 +128,12 @@ function endRun() {
 // The run is over, so no helper of it is still working. After Stop their own
 // last words are dropped on purpose (main.js), so the card is told here.
 function settleHelpers() {
+  // The main agent's turn cards too: their own ending is dropped after Stop.
+  for (const [id, h] of handovers) { handovers.delete(id); endHandoverCard(h, 'stopped'); }
   if (!helpers) return;
   let changed = false;
   for (const lane of helpers.lanes.values()) {
-    if (lane.data.state !== 'working') continue;
+    if (lane.data.state !== 'working' && lane.data.state !== 'waiting') continue;
     lane.data.state = 'stopped';
     paintLane(lane.el, lane.data);
     changed = true;
@@ -817,6 +819,7 @@ function replay(turns) {
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'screen') turn('', screenCard(t));
     else if (t.k === 'helpers') turn('', '').appendChild(helpersCard(t));
+    else if (t.k === 'handover') turn('', handoverCard(t.what, t.outcome || 'stopped'));
     else if (t.k === 'steps') {
       const g = openGroup();
       for (const it of t.items) addStepRow(g, it.name, it.input || {}, it.at || '', false);
@@ -840,6 +843,7 @@ function errorCard(title, fix, detail) {
 function clearThread() {
   thread.querySelectorAll('.turn').forEach((el) => el.remove());
   helpers = null;
+  handovers.clear();
   group = null;
   stepsRec = null;
   live = null;
@@ -1420,7 +1424,66 @@ function hideDots() {
  * is saved with the chat (without the pictures) and replayed like the rest.
  */
 
-const HELPER_STATE = { working: 'Working', done: 'Done', needs: 'Needs you', failed: 'Failed', stopped: 'Stopped' };
+const HELPER_STATE = { working: 'Working', waiting: 'Your turn', done: 'Done', needs: 'Needs you', failed: 'Failed', stopped: 'Stopped' };
+
+/* ── the user's turn ──────────────────────────────────────────────────
+ * A step only the user can do — a code, a robot check, a password — handed
+ * over without ending the task (wait_for_user, handover.js). A card says what
+ * to do, with "Show me" (brings that tab up in the agent's browser), "I've
+ * done it" and "Skip"; the agent carries on the moment it is done. A helper's
+ * turn shows in its own lane instead.
+ */
+
+const HANDOVER_END = { user: 'Done — carrying on', moved: 'Done — carrying on', gone: 'Done — carrying on', skipped: 'Skipped', timeout: 'Timed out — nothing more was done', stopped: 'Stopped' };
+const handovers = new Map();   // id → { el, record }
+
+function handoverCard(what, outcome) {
+  const over = outcome !== null && outcome !== undefined;
+  return '<div class="handover' + (over ? ' is-over' : '') + '">' +
+    '<div class="handover-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>' +
+      '<b>Your turn</b><span class="handover-state">' + (over ? esc(HANDOVER_END[outcome] || outcome) : 'Waiting for you') + '</span></div>' +
+    '<p class="handover-what">' + esc(what) + '</p>' +
+    (over ? '' :
+      '<div class="handover-actions">' +
+        '<button type="button" class="pill ghost sm hv-show">Show me</button>' +
+        '<button type="button" class="pill solid sm hv-done">I\'ve done it</button>' +
+        '<button type="button" class="hv-skip">Skip this step</button>' +
+      '</div>') +
+  '</div>';
+}
+
+// The three buttons, for a card or a helper's lane. `id` is read when clicked:
+// a lane is handed a new one for each turn.
+function bindHandover(root, getId) {
+  const act = (fn) => () => { const id = getId(); if (id) fn(id); };
+  root.querySelector('.hv-show').addEventListener('click', act((id) => window.operator.handoverShow(id)));
+  root.querySelector('.hv-done').addEventListener('click', act((id) => window.operator.handoverDone(id)));
+  root.querySelector('.hv-skip').addEventListener('click', act((id) => window.operator.handoverSkip(id)));
+}
+
+function onHandover(evt) {
+  if (evt.type === 'handover') {
+    closeGroup();
+    hideDots();
+    const record = { k: 'handover', what: evt.what, outcome: null };
+    const el = turn('', handoverCard(evt.what, null));
+    bindHandover(el, () => (handovers.has(evt.id) ? evt.id : null));
+    handovers.set(evt.id, { el, record });
+    rec(record);
+    return;
+  }
+  const h = handovers.get(evt.id);
+  if (!h) return;
+  handovers.delete(evt.id);
+  endHandoverCard(h, evt.outcome);
+  if (evt.outcome !== 'stopped') showDots();
+}
+
+function endHandoverCard(h, outcome) {
+  h.record.outcome = outcome;
+  h.el.innerHTML = handoverCard(h.record.what, outcome);
+  save();
+}
 let helpers = null;   // the card being filled right now: { el, record, lanes: Map }
 
 function helperLane(data) {
@@ -1431,11 +1494,17 @@ function helperLane(data) {
     '<div class="helper-body">' +
       '<div class="helper-top"><i class="helper-dot"></i><b class="helper-name"></b><span class="helper-state"></span></div>' +
       '<div class="helper-step"></div>' +
+      '<div class="helper-actions handover-actions" hidden>' +
+        '<button type="button" class="pill ghost sm hv-show">Show me</button>' +
+        '<button type="button" class="pill solid sm hv-done">I\'ve done it</button>' +
+        '<button type="button" class="hv-skip">Skip</button>' +
+      '</div>' +
       '<div class="helper-report" hidden></div>' +
     '</div>';
   el.querySelector('.helper-initial').textContent = (data.name || '?').trim().charAt(0).toUpperCase();
   el.querySelector('.helper-name').textContent = data.name;
   el.title = data.task || '';
+  bindHandover(el, () => (data.state === 'waiting' ? data.hv : null));
   paintLane(el, data);
   return el;
 }
@@ -1445,7 +1514,9 @@ function paintLane(el, data) {
   el.querySelector('.helper-state').textContent = HELPER_STATE[data.state] || data.state;
   el.querySelector('.helper-step').textContent = data.state === 'working'
     ? (data.step || 'Opening its tab…')
+    : data.state === 'waiting' ? data.what
     : data.steps + (data.steps === 1 ? ' step' : ' steps');
+  el.querySelector('.helper-actions').hidden = data.state !== 'waiting';
   const report = el.querySelector('.helper-report');
   // The report opens with DONE / NEEDS YOU, which the badge already says.
   const text = String(data.report || '').replace(/^\s*(DONE|NEEDS YOU)\s*[:—–-]?\s*/i, '');
@@ -1455,11 +1526,13 @@ function paintLane(el, data) {
 
 function paintHelpersHead(card, lanes) {
   const all = [...lanes];
-  const working = all.filter((l) => l.state === 'working').length;
+  const waiting = all.filter((l) => l.state === 'waiting').length;
+  const working = all.filter((l) => l.state === 'working').length + waiting;
   const needs = all.filter((l) => l.state === 'needs').length;
   const sum = card.querySelector('.helpers-sum');
-  if (working === all.length) sum.textContent = all.length + ' working at once';
-  else if (working) sum.textContent = (all.length - working) + ' of ' + all.length + ' finished';
+  const turn = waiting ? ' — ' + waiting + ' waiting for you' : '';
+  if (working === all.length) sum.textContent = all.length + ' working at once' + turn;
+  else if (working) sum.textContent = (all.length - working) + ' of ' + all.length + ' finished' + turn;
   else sum.textContent = 'All ' + all.length + ' finished' + (needs ? ' — ' + needs + ' need' + (needs === 1 ? 's' : '') + ' you' : '');
   card.classList.toggle('is-working', working > 0);
 }
@@ -1478,7 +1551,7 @@ function helpersCard(record) {
   for (const l of record.lanes) {
     // A card replayed from history cannot still be working: whatever did not
     // report back was cut off when the run ended.
-    if (!helpers || helpers.record !== record) { if (l.state === 'working') l.state = 'stopped'; }
+    if (!helpers || helpers.record !== record) { if (l.state === 'working' || l.state === 'waiting') l.state = 'stopped'; }
     const el = helperLane(l);
     el.dataset.id = l.id;
     grid.appendChild(el);
@@ -1520,7 +1593,15 @@ function onHelperEvent(evt) {
     img.hidden = false;
     return;
   }
-  if (evt.type === 'helper_step') {
+  if (evt.type === 'handover') {
+    lane.data.state = 'waiting';
+    lane.data.what = evt.what;
+    lane.data.hv = evt.id;
+  } else if (evt.type === 'handover_end') {
+    if (lane.data.state === 'waiting') lane.data.state = 'working';
+    lane.data.hv = null;
+    lane.data.step = evt.outcome === 'skipped' ? 'Skipped that step' : evt.outcome === 'timeout' ? 'Stopped waiting' : 'Carrying on';
+  } else if (evt.type === 'helper_step') {
     lane.data.step = evt.text || evt.name;
     lane.data.steps += 1;
     actionCount += 1;
@@ -1610,6 +1691,12 @@ window.operator.onEvent((evt) => {
 
   if (evt.type === 'helper_start' || evt.type === 'helper_step' || evt.type === 'helper_frame' || evt.type === 'helper_done') {
     onHelperEvent(evt);
+    return;
+  }
+  // A helper's turn shows in its lane; the main agent's gets a card of its own.
+  if (evt.type === 'handover' || evt.type === 'handover_end') {
+    if (evt.helper) onHelperEvent(evt);
+    else onHandover(evt);
     return;
   }
 

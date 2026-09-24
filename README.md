@@ -199,10 +199,18 @@ Two sets of hands, and it picks between them:
 of web work — an account on each of four sites, the same lookup in several
 shops — the agent hands them to up to four helpers that work at the same time,
 each in its own tab of its browser. They use the same browser tools, model and
-settings, stop at anything that is yours to do (passwords, phone codes, robot
-checks, terms, payments) and leave that tab open for you. Each gets a lane in a
-card in the chat: a live picture of its tab, what it is doing, and its report.
-Stop stops them all. Desktop work stays one agent at a time — there is one mouse.
+settings. Each gets a lane in a card in the chat: a live picture of its tab,
+what it is doing, and its report. Stop stops them all. Desktop work stays one
+agent at a time — there is one mouse.
+
+**Your turn — it waits instead of giving up.** A verification code it cannot
+fetch, a robot check, a password, a phone or identity check: when the agent (or
+a helper) reaches a step like that, it does not end the task. A "Your turn"
+card says exactly what to do, with **Show me** (brings that tab up), **I've
+done it** and **Skip**; if Operator is in the background you get a Windows
+notification. It carries on by itself the moment the page moves on, or when
+you press "I've done it" — up to ten minutes by default. Connect an email
+account in Settings → Connectors and it fetches emailed codes itself.
 
 Both monitors are supported. Screenshots come back per display, scaled to 1280
 wide, and click coordinates use that same space — so what it sees is what it hits.

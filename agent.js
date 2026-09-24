@@ -19,6 +19,7 @@ const browser = require('./browser');
 const desktop = require('./desktop');
 const nim = require('./nim');
 const modelOptions = require('./model-options');
+const handover = require('./handover');
 const codes = require('./codes');
 const phone = require('./phone');
 
@@ -94,7 +95,7 @@ LEAVE THEIR WINDOWS AS YOU FOUND THEM:
    SPEED — this matters a lot:
    - Every browser action already returns the page as text, so you can read results, field names and links without a separate step. Do NOT call browser_read_text or browser_screenshot after an action just to "see" — you already have the page. Only screenshot when you genuinely need to see pixels (a canvas, an image, an odd layout).
    - Fill forms with ONE browser_fill_form call listing every field, not one browser_type_into per field. Set submit:true to send it in the same call.
-   - WHEN A STEP IS NOT YOURS TO DO — the user has to scan a QR, tap an approval, type a code on their phone, or an upload or payment is still going — do NOT end your turn to tell them. Say in one line what they need to do, then call browser_wait_for and continue the moment the page moves on. Ending the turn means they have to come back and start you again, by which time the page has usually timed out.
+   - WHEN A STEP IS THE USER'S TO DO — a code you cannot fetch, a CAPTCHA, a password, a phone or identity check, a QR to scan, an approval to tap — do NOT end your turn to tell them. Call wait_for_user with exactly what they need to do: it shows them the tab and waits, and you carry on the moment it returns. Ending the turn means they have to come back and start you again, by which time the page has usually timed out. For something that finishes by itself — an upload, a payment going through — browser_wait_for is enough.
    - DROPDOWNS: always browser_select. Never click a dropdown open and try to find the option by eye — a real <select> draws its list outside the page, so it is not in the screenshot and cannot be clicked or scrolled at coordinates. That is why long lists like a year of birth get stuck.
    - Chain: navigate, then fill_form with submit — a whole "go to the site and fill it in" is often just two calls.
    - SEVERAL SEPARATE WEB JOBS AT ONCE: when a request splits into jobs on different sites that do not depend on each other — an account on each of four sites, the same lookup in several shops — call run_helpers ONCE with one task per site (up to 4). They run at the same time, each in its own tab, which is several times faster than doing them one after another. Each helper sees ONLY its task, so write it complete: the site, every detail it needs (names, bio, email address), and what to leave for the user. When they report back, tell the user in a few lines what each did and exactly what is waiting for them, and in which tab.
@@ -122,14 +123,14 @@ SIGNING IN:
 - Your browser keeps its profile, so a site you log into once stays logged in. Check whether you are already signed in before assuming you are not.
 - If a sign-in page refuses you, shows "this browser or app may not be secure", loops back to the login form, or demands a code from a phone you do not have, STOP trying to force it in your own browser. Two better moves, in order:
   1. The user almost certainly has that account open in their own browser already. Use list_windows and the screen_* tools to work in their real Chrome or Edge window instead of yours. It is signed in, it is trusted by the site, and it is the same thing they would do.
-  2. If neither browser is signed in, ask the user to log in themselves rather than handling their password. Say which site and why. Never type a password you were not explicitly handed for that purpose.
-- CODES. If a step sends a one-time code, say in one short line that you are waiting for it, then call get_verification_code. It BLOCKS until the code arrives — up to two minutes by default — so when it returns you have the code and should type it in and carry straight on. Do not end your turn to ask the user for a code; only ask if the tool comes back saying it waited and nothing arrived. Check the sender matches the service before typing the code anywhere.
-- SIGNING UP. You can fill in a sign-up form when the user asks you to — a trial, a forum, a tool they want an account on. Two things to hold to. Do not attempt one that needs phone or identity verification: you cannot receive the code, and a signup a service gates that way is one it does not want automated. And say plainly, once, that an account a program made can be closed later for it — that is the service's rule, not a fault you can work around, so the user should decide knowing it.
+  2. If neither browser is signed in, call wait_for_user so they sign in themselves in your browser, rather than handling their password. Say which site and why, and carry on once they have. Never type a password you were not explicitly handed for that purpose.
+- CODES. If a step sends a one-time code, say in one short line that you are waiting for it, then call get_verification_code. It BLOCKS until the code arrives — up to two minutes by default — so when it returns you have the code and should type it in and carry straight on. Do not end your turn to ask the user for a code. If get_verification_code is not there, or it waited and nothing arrived, call wait_for_user for them to type it in — never end the task over a code. Check the sender matches the service before typing the code anywhere.
+- SIGNING UP. You can fill in a sign-up form when the user asks you to — a trial, a forum, a tool they want an account on. Two things to hold to. A phone or identity check is the user's to do: call wait_for_user for it and carry on after. And say plainly, once, that an account a program made can be closed later for it — that is the service's rule, not a fault you can work around, so the user should decide knowing it.
 - Once signed in, carry on with whichever browser worked. Do not switch back and forth mid-task.
 
 GENERAL:
 - Keep going until the goal is met, then stop and give a one-line summary. Don't hand work back to the user that you could do yourself.
-- If you hit a captcha or an "I'm not a robot" checkbox, click it like a person would and carry on.
+- If you hit a captcha or an "I'm not a robot" checkbox, click it like a person would and carry on. If it is still there after that, or it is a puzzle or picture challenge, call wait_for_user for the user to do it — never end the task at one.
 - One exception to just doing it: if a step is destructive and hard to undo — permanently deleting files, spending money, sending a message or posting something publicly, changing security settings — say what you are about to do and wait for the user to confirm. Everything else, just do it.`;
 
 // A teammate answering a message. It replies from its own persona and memory —
@@ -230,6 +231,8 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
     'browser_click_text', 'browser_type_into', 'browser_fill_form', 'browser_select',
     'browser_click_xy', 'browser_press_key', 'browser_scroll',
     'email_send', 'remember', 'message_bot', 'screen_click_text',
+    // A rehearsal describes a hand-over instead of stopping to wait for one.
+    'wait_for_user',
     // Stepping onto the user's screen moves their real mouse, so a rehearsal
     // describes it rather than doing it.
     'use_my_screen', 'use_own_screen',
@@ -269,6 +272,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'maximize_window': return `put "${a.title}" back to full size`;
       case 'screen_read': return `read ${a.title || 'the window in front'} as text`;
       case 'browser_navigate': return `open ${a.url}`;
+      case 'wait_for_user': return `your turn: ${a.what}`;
       case 'browser_click_text': return `click "${a.text}" in the browser`;
       case 'browser_click_xy': return `click (${a.x}, ${a.y}) in the browser`;
       case 'browser_type_into': return `type "${String(a.text || '').slice(0, 50)}" into "${a.target}"`;
@@ -636,6 +640,19 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
   /* ── the browser ─────────────────────────────────────────────── */
 
   function buildBrowserTools(t, web) {
+    // A field found by its label is sometimes the label or a wrapper rather
+    // than the box itself — "Element is not an <input>" on TikTok's sign-up.
+    // The click has already put the cursor in the box, so type into that.
+    const fillOrType = async (p, field, text) => {
+      try {
+        await field.fill(text);
+      } catch (err) {
+        if (!/not an <input>|not editable|contenteditable/i.test(String(err && err.message))) throw err;
+        await p.keyboard.press('Control+A');
+        await p.keyboard.type(text, { delay: 15 });
+      }
+    };
+
     return [
     t('browser_navigate', 'Open a URL in the agent browser.', { url: z.string() }, async ({ url }) => {
       const p = await web.page();
@@ -665,7 +682,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
           .or(p.getByRole('textbox', { name: target }))
           .first();
         await field.click({ timeout: 8000 });
-        await field.fill(text);
+        await fillOrType(p, field, text);
         if (enter) await p.keyboard.press('Enter');
         return web.afterWeb(`Typed into "${target}"${enter ? ' and pressed Enter' : ''}`);
       }),
@@ -688,7 +705,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
             .or(p.getByRole('textbox', { name: f.target }))
             .first();
           await field.click({ timeout: 8000 });
-          await field.fill(f.text);
+          await fillOrType(p, field, f.text);
           filled.push(f.target);
         }
         if (submit) await p.keyboard.press('Enter');
@@ -696,8 +713,8 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       }),
 
     t('browser_wait_for',
-      'Wait for the page to move on, then carry on. Use this whenever a step is not yours to do — a code the user types on their phone, a QR they scan, an approval they tap, a slow upload or payment. ' +
-      'Say in one line what you are waiting for, call this, and continue when it returns. Do NOT end your turn to report that something needs doing; wait for it.',
+      'Wait for the page to move on by itself, then carry on — a slow upload, a payment going through, a page that is still loading. ' +
+      'For anything the USER has to do (a code, a CAPTCHA, a password, a QR, an approval) use wait_for_user instead: it shows them the tab and what to do. Do NOT end your turn to report that something needs doing; wait for it.',
       {
         until: z.enum(['gone', 'appears', 'url', 'change']).describe('gone: the text disappears. appears: the text shows up. url: the address changes. change: anything changes.'),
         text: z.string().optional().describe('the text to watch, for gone/appears — e.g. "Verify it is you"'),
@@ -707,6 +724,66 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         const res = await web.waitForChange({ until, text, seconds });
         if (!res.ok) return { content: [{ type: 'text', text: `${res.error} Look at the page and decide what to do.` }] };
         return web.afterWeb(`Waited ${res.waited}s — ${res.why}`);
+      }),
+
+    // The user's turn, without ending the task: see handover.js.
+    t('wait_for_user',
+      'Hand ONE step to the user and wait while they do it, then carry on with the task. Use it for anything that is theirs to do: a verification code you cannot fetch, a CAPTCHA or "are you human" check, a password, a phone or identity check, accepting terms, paying. ' +
+      'Operator shows them this tab with what to do and an "I\'ve done it" button, and this returns as soon as they have done it or the page moves on. NEVER end your turn or the task at one of these steps — call this instead.',
+      {
+        what: z.string().describe('exactly what they need to do, in one short sentence — e.g. "Type the 6-digit code Instagram emailed to you and press Next"'),
+        until_gone: z.string().optional().describe('text on the page that will disappear once they have done it, e.g. "Enter the confirmation code"'),
+        minutes: z.number().int().min(1).max(30).optional().describe('how long to wait; 10 by default'),
+      },
+      async ({ what, until_gone, minutes }) => {
+        const first = await web.page();
+        const h = handover.open(first);
+        const startUrl = first.url();
+        const visible = async (p, text) => {
+          try { return await p.getByText(text, { exact: false }).first().isVisible({ timeout: 500 }); }
+          catch { return false; }
+        };
+        // "Gone" only counts if it was there to begin with — a guessed text
+        // that never appeared must not end the wait at once.
+        let sawText = until_gone ? await visible(first, until_gone) : false;
+
+        web.say({ type: 'handover', id: h.id, what, url: startUrl });
+        first.bringToFront().catch(() => {});
+
+        const limit = Date.now() + (minutes || 10) * 60 * 1000;
+        const signal = web.signal();
+        let outcome = null;
+        h.done.then((o) => { if (!outcome) outcome = o; });
+
+        while (!outcome) {
+          if (signal && signal.aborted) { outcome = 'stopped'; break; }
+          if (Date.now() > limit) { outcome = 'timeout'; break; }
+          await new Promise((r) => setTimeout(r, 1000));
+          if (outcome) break;
+          try {
+            const p = await web.page();       // a helper's tab may have moved to a pop-up
+            if (!p || p.isClosed()) continue;
+            if (p.url() !== startUrl) { outcome = 'moved'; break; }
+            if (until_gone) {
+              const there = await visible(p, until_gone);
+              if (there) sawText = true;
+              else if (sawText) { outcome = 'gone'; break; }
+            }
+          } catch { /* mid-navigation; look again next second */ }
+        }
+
+        handover.finish(h.id, outcome);          // tidy up if it ended on the watcher's side
+        web.say({ type: 'handover_end', id: h.id, outcome });
+
+        if (outcome === 'skipped') {
+          return { content: [{ type: 'text', text: 'The user chose to skip this step. Do not try it again; carry on with anything else, then report what is left here.' }] };
+        }
+        if (outcome === 'timeout') {
+          return { content: [{ type: 'text', text: `Waited ${minutes || 10} minutes and it was not done. Stop this part here and report exactly what is left for the user.` }] };
+        }
+        if (outcome === 'stopped') return { content: [{ type: 'text', text: 'Stopped.' }] };
+        const why = outcome === 'user' ? 'the user says they have done it' : outcome === 'moved' ? 'the page moved on' : `"${until_gone}" is gone`;
+        return web.afterWeb(`Your turn is over — ${why}. Look at the page and carry on with the task.`);
       }),
 
     t('browser_select',
@@ -762,6 +839,8 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
     snap: () => browser.snap(),
     pickOption: (field, option) => browser.pickOption(field, option),
     waitForChange: (o) => browser.waitForChange(o),
+    say: (e) => ctx.onEvent(e),
+    signal: () => ctx.abortController && ctx.abortController.signal,
   });
 
   /* ── what it keeps ───────────────────────────────────────────── */
@@ -914,13 +993,15 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
 
 You only have browser tools${hasEmail ? ' and get_verification_code' : ''}. Do only your task, and quickly: every browser action already returns the page as text, so do not screenshot or re-read after acting. Fill a whole form with one browser_fill_form. Use browser_select for every dropdown.
 
-STOP and hand back — leave the tab exactly where it is — when you reach anything that is the user's to do: choosing or typing a password, a phone number or a code sent to a phone, a CAPTCHA or "are you human" check, accepting terms, paying, or publishing anything. Do not try to get past these; they are not yours.${hasEmail ? '\nIf the site emails a code, call get_verification_code with "from" set to this site, so you never pick up a code meant for another helper.' : ''}
+When you reach something that is the user's to do — a verification code you cannot fetch, a CAPTCHA or "are you human" check, choosing a password (unless your task gives you one to use), a phone or identity check, accepting terms, paying — call wait_for_user with exactly what they need to do, and carry on with your task when it returns. Do NOT stop, and do NOT end your task, at one of these steps: waiting is the whole point. Publishing or posting anything publicly also waits for them.${hasEmail ? '\nIf the site emails a code, call get_verification_code first, with "from" set to this site so you never pick up a code meant for another helper — only hand it to the user if nothing arrives.' : ''}
 
-Finish with a short report. Its first word is DONE if your task is complete, or NEEDS YOU if the user has to finish something. Then one or two lines: what you did, and exactly what is left for them on which site.`;
+Finish with a short report. Its first word is DONE if your task is complete, or NEEDS YOU if something is still left for the user (only when wait_for_user timed out or they skipped it). Then one or two lines: what you did, and exactly what is left for them on which site.`;
 
   // A helper's hands: its own tab, and a small picture of it for its lane in
   // the chat instead of the live view (which stays the main agent's).
-  const laneWeb = (lane, frame) => ({
+  const laneWeb = (lane, frame, say, stop) => ({
+    say,
+    signal: () => stop.signal,
     page: async () => lane.page,
     snap: () => browser.snap(lane.page, null),
     pickOption: (field, option) => browser.pickOption(field, option, lane.page),
@@ -967,7 +1048,7 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
     try {
       lane = await browser.openLane(userDataDir);
       const tools = [
-        ...buildBrowserTools(t, laneWeb(lane, (b64) => say({ type: 'helper_frame', b64 }))),
+        ...buildBrowserTools(t, laneWeb(lane, (b64) => say({ type: 'helper_frame', b64 }), say, stop)),
         ...(hasEmail ? [codeToolFor(t, hctx)] : []),
       ];
       const step = (toolName, input) => say({ type: 'helper_step', name: toolName, text: describeStep(toolName, input || {}) });
@@ -1013,7 +1094,9 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
         }
       }
       report = String(report || last || 'Finished without a report.').trim();
-      const state = stop.signal.aborted ? 'stopped' : /^\s*NEEDS YOU/i.test(report) ? 'needs' : /^\s*DONE/i.test(report) ? 'done' : 'done';
+      // Anywhere in it: the YouTube helper wrote two sentences before "NEEDS
+      // YOU" and was shown as Done.
+      const state = stop.signal.aborted ? 'stopped' : /\bNEEDS YOU\b/i.test(report) ? 'needs' : 'done';
       say({ type: 'helper_done', state, report });
       return { name, state, report };
     } catch (err) {
@@ -1029,7 +1112,7 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
   const helperTools = [
     tool('run_helpers',
       `Hand 2 to ${MAX_HELPERS} SEPARATE web jobs to helper agents that do them AT THE SAME TIME, each in its own browser tab — for example one account sign-up per site, or the same lookup on several shops. ` +
-      'Much faster than doing them one after another. Each helper only has the browser, sees nothing but its task, and stops at anything that is the user\'s to do (passwords, phone codes, CAPTCHAs, terms, payments). ' +
+      'Much faster than doing them one after another. Each helper only has the browser, sees nothing but its task, and at anything that is the user\'s to do (codes, CAPTCHAs, passwords, phone checks, terms, payments) waits for them in its tab and then carries on. ' +
       'Returns one short report per helper. Do not use it for desktop work, or for jobs that depend on each other\'s results.',
       {
         tasks: z.array(z.object({
