@@ -67,6 +67,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
           </button>
 
+          <button class="rail-btn" id="findBtn" type="button" title="Find an agent (Ctrl+K)" aria-label="Find an agent">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+          </button>
+
           <button class="rail-btn" id="newThreadBtn" type="button" title="New chat (Ctrl+N)" aria-label="New chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.5 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5"/><path d="M17.8 3.7a1.9 1.9 0 0 1 2.7 2.7L13 13.9l-3.6.9.9-3.6Z"/></svg>
           </button>
@@ -372,7 +376,7 @@
         <span class="launch-mark" aria-hidden="true">
           <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="13" rx="3"/><path d="M9.5 20.5h5"/><circle cx="14.2" cy="11.4" r="1.5"/></svg>
         </span>
-        <h1>Welcome to Operator</h1>
+        <h1 id="launchTitle">Welcome to Operator</h1>
         <p>Make a new agent, or pick up one you already have.</p>
 
         <button class="launch-new" id="launchNew" type="button">
@@ -389,7 +393,7 @@
 
         <div class="launch-list" id="launchList" role="listbox" aria-label="Your agents"></div>
 
-        <button class="launch-skip" id="launchSkip" type="button">Skip — just start a chat <kbd>Esc</kbd></button>
+        <button class="launch-skip" id="launchSkip" type="button"><span id="launchSkipText">Skip — just start a chat</span> <kbd>Esc</kbd></button>
       </div>
     </div>
 

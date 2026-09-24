@@ -2433,14 +2433,22 @@ const stillMotion = () =>
 // A hidden or minimised window gets no frames at all, so never wait past 100ms.
 const painted = () => new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 100); });
 
-function showLaunch() {
+// `quick`: opened again as a switcher (Ctrl+K), not as the welcome. It fades
+// in without the staggered entrance, and the highlight starts on the agent
+// before the one you are in — Alt+Tab, so Enter alone swaps back.
+function showLaunch(quick) {
   clearTimeout(launchTimer);
   launchBusy = false;
   launchSearch.value = '';
   launchPick = 0;
+  // Opening an agent does not make it recent — talking to it does — so look
+  // for it rather than assuming it is at the top.
+  if (quick === true && bot) launchPick = Math.max(0, launchMatches().findIndex((b) => b.id !== bot.id));
   paintLaunch();
+  document.getElementById('launchTitle').textContent = quick === true ? 'Your agents' : 'Welcome to Operator';
+  document.getElementById('launchSkipText').textContent = quick === true ? 'Back to where you were' : 'Skip — just start a chat';
   launchEl.classList.remove('leaving');
-  launchEl.classList.add('arriving');
+  launchEl.classList.toggle('arriving', quick !== true);
   launchEl.hidden = false;
   launchSearch.focus();
 }
@@ -2581,6 +2589,23 @@ document.querySelectorAll('.mode').forEach((m) => m.addEventListener('click', ()
 
 // An agent made or renamed by voice or a routine shows up while you look.
 window.operator.onBotsChanged(() => { if (launchOpen()) loadBots().then(() => paintLaunch(true)); });
+
+// Ctrl+K, or the magnifier in the rail: the start screen again, as a way to
+// jump to any agent. Works from Code mode too — it brings you back to Agents.
+// Pressed again it closes. Not over a panel or the full-screen view.
+function findAgent() {
+  if (!sheet.hidden || !document.getElementById('settingsSheet').hidden || window.__watchOpen) return;
+  if (launchOpen()) { hideLaunch(); return; }
+  const shell = document.querySelector('.shell');
+  if (shell && shell.hidden) document.querySelector('.mode[data-mode="agents"]').click();
+  showLaunch(true);
+}
+document.getElementById('findBtn').addEventListener('click', findAgent);
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'k') return;
+  e.preventDefault();
+  findAgent();
+});
 
 /* the moving background: colour drifting behind, motes rising through it, and
    a glow that trails the pointer. Everything moves by transform alone, so it
