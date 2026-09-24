@@ -1,0 +1,49 @@
+# Every change that lands on main becomes a Windows installer, published on the
+# repo's Releases page, so it can be downloaded and tested on any PC. Run it by
+# hand from the Actions tab to build another branch (marked as a pre-release).
+name: Build installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A newer push makes an older build that is still running pointless.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --win --publish never
+      - name: Publish to Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          title="Operator ${version} (build ${GITHUB_RUN_NUMBER})"
+          flags="--latest"
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            tag="${tag}-${GITHUB_REF_NAME//\//-}"
+            title="${title} from ${GITHUB_REF_NAME}"
+            flags="--prerelease"
+          fi
+          gh release create "$tag" dist/*.exe \
+            --target "$GITHUB_SHA" \
+            --title "$title" \
+            --notes "Built from ${GITHUB_SHA::7}: $(git log -1 --format=%s)" \
+            $flags

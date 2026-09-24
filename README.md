@@ -228,11 +228,11 @@ wide, and click coordinates use that same space — so what it sees is what it h
 
 ## Install it (it's a real app)
 
-Double-click the installer:
-
-```
-C:\Users\c3645\operator\dist\Operator Setup 0.2.0.exe
-```
+Download the newest installer from the repo's **Releases** page
+(github.com/ragnar9990/operator/releases) and double-click it. A new one is
+built automatically every time a change lands on `main`. Windows may say it
+"protected your PC", because the installer is not signed: click **More info**
+→ **Run anyway**. Installing a newer build over an older one is fine.
 
 It installs Operator and drops a **desktop shortcut**. From then on you just open
 Operator like any other app — no terminal, no `npm start`.
@@ -240,7 +240,9 @@ Operator like any other app — no terminal, no `npm start`.
 Type a task and hit Run, then watch it work in the live view.
 
 You need to be logged into your Claude account (the same login Claude Code uses)
-for the brain to work — you already are.
+for the brain to work. On a new PC, install Claude Code and run `claude login`
+once, or add a free NVIDIA key in Settings → Models. The browser it drives is
+your installed Google Chrome, so that PC needs Chrome too.
 
 ## Rebuild the app (after code changes)
 
