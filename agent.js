@@ -18,6 +18,7 @@ const { z } = require('zod');
 const browser = require('./browser');
 const desktop = require('./desktop');
 const nim = require('./nim');
+const modelOptions = require('./model-options');
 const codes = require('./codes');
 const phone = require('./phone');
 
@@ -204,6 +205,7 @@ function makeCtx({ onEvent, abortController, dryRun }) {
 // screen_do does the same job in one round trip. The tools are still here and
 // still correct; pass textPath:true to use them.
 async function createSession({ userDataDir, model, resume, bot, teammates, messageBot, codeChats, email, alwaysSkills, skillIndex, dryRun, textPath = false,
+                               tuning = {},
                                hasMessageBot = Boolean(messageBot), hasCodeChats = Boolean(codeChats), hasEmail = Boolean(email) }) {
   const ctx = makeCtx({ dryRun });
   ctx.messageBot = messageBot; ctx.codeChats = codeChats; ctx.email = email;
@@ -1008,6 +1010,7 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
         return nim.runTask({
           prompt: text, model: chosen, systemPrompt, tools,
           onEvent: ctx.onEvent, abortController: ctx.abortController, resume,
+          params: tuning,
         });
       },
       close() {},
@@ -1045,14 +1048,13 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
       // talking about skills that have nothing to do with it. Operator's own
       // skills are injected into the system prompt above, not through the SDK.
       skills: [],
-      // The single biggest thing that makes driving a screen feel slow. `effort`
-      // defaults to 'high' — deep reasoning — and that runs before EVERY click,
-      // keystroke and screenshot. But this loop is perception plus a short
-      // decision, repeated; the thinking is nearly all wasted, and the user is
-      // sitting there watching the cursor not move. 'low' is minimal thinking
-      // and the fastest responses, which is exactly the right trade here.
-      // Pick a deeper model in the command bar when a task genuinely needs care.
-      effort: 'low',
+      // Effort and thinking, as set with the dial beside the model picker
+      // (model-options.js). Effort defaults to 'low' on this side, and that is
+      // the single biggest thing that makes driving a screen feel slow or not:
+      // the model's own default is 'high' — deep reasoning — and it runs before
+      // EVERY click, keystroke and screenshot, in a loop that is perception plus
+      // a short decision, repeated. Turn it up when a task genuinely needs care.
+      ...tuning,
       permissionMode: 'bypassPermissions',
       maxTurns: 150,
     },
@@ -1244,6 +1246,9 @@ function sessionKey(o) {
     (o.alwaysSkills || []).map((s) => s.id || s.name),
     (o.teammates || []).map((t) => t.name),
     (o.skillIndex || []).map((s) => s.name),
+    // Effort and thinking are fixed when a session starts, so changing them on
+    // the dial has to start a new one.
+    o.tuning || {},
   ]);
 }
 
@@ -1255,6 +1260,15 @@ function closeSession() {
 }
 
 async function runTask(prompt, opts) {
+  // The dial's settings for the model that will actually run — the same
+  // fallback createSession applies — as SDK options or NVIDIA request fields.
+  // `opts.modelOptions` is this side's saved map, model id → values.
+  const chosen = isModel(opts.model) ? opts.model : DEFAULT_MODEL;
+  const saved = (opts.modelOptions || {})[chosen];
+  opts.tuning = nim.isNimModel(chosen)
+    ? modelOptions.nimParams('agents', chosen, saved)
+    : modelOptions.sdkOptions('agents', chosen, saved);
+
   const key = sessionKey(opts);
 
   // Reuse the open session when nothing that shaped it has changed. This is

@@ -102,6 +102,50 @@
   });
   const sync = () => put(BOTS);
 
+  // A compact copy of model-options.js for the preview.
+  const MO = (() => {
+    const E5 = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const E4 = ['low', 'medium', 'high', 'max'];
+    const CAP = {
+      'claude-fable-5-1': [E5, 'always'], 'claude-fable-5': [E5, 'always'], 'claude-opus-5': [E5, 'always'],
+      'claude-sonnet-5': [E5, 'toggle'], 'claude-opus-4-8': [E5, 'toggle'], 'claude-opus-4-7': [E5, 'toggle'],
+      'claude-opus-4-6': [E4, 'toggle'], 'claude-sonnet-4-6': [E4, 'toggle'], 'claude-haiku-4-5': [null, 'budget'],
+    };
+    const L = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+    const spec = (id) => {
+      const c = CAP[id];
+      const out = [];
+      if (c) {
+        if (c[0]) out.push({ key: 'effort', label: 'Effort', type: 'choice', choices: ['auto', ...c[0]].map((v) => ({ v, label: L[v] })), default: { agents: 'low', code: 'auto' }, hint: 'How hard it thinks before each step. Lower is faster and uses less of your plan; higher is more careful. Auto leaves it to the model.' });
+        if (c[1] === 'toggle') out.push({ key: 'thinking', label: 'Thinking', type: 'toggle', default: { agents: true, code: true }, hint: 'Off answers a touch sooner. On is steadier on anything that needs a plan.' });
+        if (c[1] === 'budget') out.push({ key: 'thinking', label: 'Thinking', type: 'toggle', default: { agents: false, code: false }, hint: 'Lets it think before it acts. Slower, but better at jobs with several steps.' });
+      } else if (String(id).startsWith('nim:')) {
+        out.push({ key: 'temperature', label: 'Temperature', type: 'range', min: 0, max: 1.5, step: 0.1, default: { agents: 0.2, code: 0.2 }, hint: 'Low sticks to the likeliest answer, which is what driving a computer wants. Higher is more varied.' });
+        out.push({ key: 'maxTokens', label: 'Reply length', type: 'choice', choices: [{ v: 1024, label: 'Short' }, { v: 4096, label: 'Normal' }, { v: 8192, label: 'Long' }], default: { agents: 4096, code: 4096 }, hint: 'The most it may write in one go. If a model refuses a long setting, pick a shorter one.' });
+      }
+      return out;
+    };
+    const KEY = 'preview.modelOptions';
+    const all = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || {}; } catch { return {}; } };
+    const state = (mode, id) => {
+      const saved = ((all()[mode] || {})[id]) || {};
+      const s = spec(id);
+      const values = {};
+      for (const o of s) values[o.key] = saved[o.key] !== undefined ? saved[o.key] : o.default[mode === 'code' ? 'code' : 'agents'];
+      const summary = s.some((o) => o.key === 'effort') ? L[values.effort]
+        : s.some((o) => o.key === 'temperature') ? 'Temp ' + Number(values.temperature).toFixed(1)
+        : s.some((o) => o.key === 'thinking') ? (values.thinking ? 'Thinking' : 'Quick') : '';
+      return { spec: s, values, summary };
+    };
+    const save = (mode, id, patch) => {
+      const a = all();
+      a[mode] = a[mode] || {};
+      a[mode][id] = { ...(a[mode][id] || {}), ...patch };
+      try { sessionStorage.setItem(KEY, JSON.stringify(a)); } catch { /* fine */ }
+    };
+    return { state, save };
+  })();
+
   const WS_KEY = 'preview.workspaces';
   let WS = (() => { try { return JSON.parse(sessionStorage.getItem(WS_KEY)) || []; } catch { return []; } })();
   const putWS = () => { try { sessionStorage.setItem(WS_KEY, JSON.stringify(WS)); } catch { /* fine */ } };
@@ -153,6 +197,11 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     onBotsChanged: (cb) => listeners.bots.push(cb),
 
     openBrowser: async () => ({ ok: true, chrome: true }),
+
+    // The dial beside the picker, mirroring model-options.js closely enough to
+    // draw and exercise it. Saved per side in sessionStorage.
+    modelOptions: async (mode, id) => MO.state(mode, id),
+    setModelOptions: async (mode, id, patch) => { MO.save(mode, id, patch); return MO.state(mode, id); },
 
     // A snapshot of a real NIM catalog, so the picker's grouping, search and
     // locked rows can be exercised without a key. NVIDIA_KEY below flips

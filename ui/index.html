@@ -178,6 +178,15 @@
                     </div>
                   </div>
 
+                  <!-- the dial for whichever model is picked: effort, thinking, … -->
+                  <div class="tuner" id="tuner" hidden>
+                    <button type="button" class="picker-btn tuner-btn" aria-haspopup="dialog" aria-expanded="false" title="Model settings">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+                      <span class="tuner-label"></span>
+                    </button>
+                    <div class="tuner-pop" role="dialog" aria-label="Model settings" hidden></div>
+                  </div>
+
                   <button type="button" class="round halt" id="stopBtn" title="Stop this task" aria-label="Stop" hidden>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.5" y="7.5" width="9" height="9" rx="1.6" fill="currentColor" stroke="none"/></svg><span class="halt-ring" aria-hidden="true"></span>
                   </button>
@@ -300,6 +309,14 @@
                   </div>
                   <div class="menu-list" id="codeMenuList" role="listbox" aria-label="Model"></div>
                 </div>
+              </div>
+
+              <div class="tuner" id="codeTuner" hidden>
+                <button type="button" class="picker-btn tuner-btn" aria-haspopup="dialog" aria-expanded="false" title="Model settings">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+                  <span class="tuner-label"></span>
+                </button>
+                <div class="tuner-pop" role="dialog" aria-label="Model settings" hidden></div>
               </div>
 
               <button type="button" class="round halt" id="codeStop" title="Stop this chat" aria-label="Stop" hidden>

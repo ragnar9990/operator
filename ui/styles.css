@@ -3169,3 +3169,50 @@ body.working .composer::before { filter: blur(11px); }
 
 :root[data-motion="off"] .undo { animation: none; }
 @media (prefers-reduced-motion: reduce) { .undo { animation: none; } }
+
+/* ── the dial beside a model picker ───────────────────────────────────
+   A small button showing the setting that matters most (effort, usually), and
+   a card above it with whatever the chosen model lets you turn. Same surface
+   as the model menu it sits next to. */
+
+.tuner { position: relative; flex: none; }
+.tuner[hidden] { display: none; }
+.tuner-btn { gap: 6px; padding: 0 10px; font-size: 13px; color: var(--ink-3); }
+.tuner-btn svg { width: 15px; height: 15px; }
+.tuner-btn:hover, .tuner.open .tuner-btn { color: var(--ink); background: var(--raise-hi); }
+
+.tuner-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 20;
+  width: 336px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border: 1px solid var(--line-hi);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  animation: menu-in 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.tuner-pop[hidden] { display: none; }
+:root[data-theme="light"] .tuner-pop { box-shadow: 0 18px 44px rgba(20, 20, 30, 0.16); }
+
+.tuner-top { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; }
+.tuner-top b { font-size: 14px; font-weight: 550; letter-spacing: -0.2px; }
+.tuner-top span { font-size: 12px; color: var(--ink-4); }
+
+.tuner-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.tuner-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.tuner-name { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.tuner-value { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+/* Up to six choices on the effort row: two even rows of three, not a ragged wrap. */
+.tuner-seg { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
+.tuner-seg .seg-btn { padding: 6px 8px; font-size: 12px; white-space: nowrap; }
+
+.tuner-range { width: 100%; margin: 0; accent-color: var(--accent); }
+.tuner-hint { margin: 7px 0 0; font-size: 12px; line-height: 1.45; color: var(--ink-4); }
+.tuner-foot { margin: 6px 0 0; padding-top: 9px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-4); }
+
+:root[data-motion="off"] .tuner-pop { animation: none; }

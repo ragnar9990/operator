@@ -17,6 +17,14 @@ and press Enter to take the top match.
 
 **Claude** is there by default and needs nothing set up.
 
+**The dial beside the picker** sets how the chosen model works, and only shows
+what that model actually has: **effort** (Auto, Low → Max — lower is faster,
+higher is more careful) and **thinking** on the Claude models that let you
+switch it, **temperature** and **reply length** on NVIDIA models. It is kept per
+model and per side: Agents defaults to Low effort, because the agent thinks
+before every click; Code defaults to Auto. An agent with a model pinned in its
+own settings shows and edits that model instead of the global one.
+
 **NVIDIA NIM** adds everyone else. NVIDIA hosts every other vendor's weights
 behind one OpenAI-compatible endpoint and one API key, so a single key gets you
 Meta's Llama, Google's Gemma, Mistral, DeepSeek, Qwen, Microsoft's Phi, IBM

@@ -1,5 +1,15 @@
 // main.js — Electron main process. Wires the UI to the agent + its browser.
 
+// Every Claude brain here — the agent, the checker, Code, the voice — is a
+// Claude Code subprocess, and each one inherits this environment. By default
+// that subprocess checks for updates and reports telemetry before it answers,
+// and writes a turn summary after: measured on this machine, 6.1s from start
+// to first answer with it and 2.3s without, and about a second off the end of
+// every turn. Only set when the user has not chosen for themselves.
+if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined) {
+  process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+}
+
 const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -15,6 +25,7 @@ const agent = require('./agent');
 const store = require('./store');
 const audit = require('./audit');
 const verify = require('./verify');
+const modelOptions = require('./model-options');
 const errors = require('./errors');
 const phone = require('./phone');
 const email = require('./email');
@@ -173,6 +184,23 @@ ipcMain.handle('list-models', async () => {
     current: agent.DEFAULT_MODEL,
     nvidia: nvidiaStatus(),
   };
+});
+
+// The dial beside the picker: which controls a model has, and what they are
+// set to on this side (Agents or Code). Setting returns the new state so the
+// window never has to guess what was kept.
+const modelOptionsState = (mode, id) => {
+  const saved = store.getModelOptions(mode)[id];
+  return {
+    spec: modelOptions.specFor(id),
+    values: modelOptions.resolve(mode, id, saved),
+    summary: modelOptions.summary(mode, id, saved),
+  };
+};
+ipcMain.handle('model-options:get', async (_e, mode, id) => modelOptionsState(mode, id));
+ipcMain.handle('model-options:set', async (_e, mode, id, patch) => {
+  store.setModelOptions(mode, id, patch);
+  return modelOptionsState(mode, id);
 });
 
 /* ── NVIDIA NIM key ──────────────────────────────────────────────── */
@@ -432,6 +460,8 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       userDataDir: profileDir(),
       abortController,
       model: model || (bot && bot.model) || undefined,
+      // Effort, thinking and the rest, as set on the dial for this side.
+      modelOptions: store.getModelOptions('agents'),
       resume,
       bot,
       // Part of the session key: a session IS the conversation, so a different
@@ -786,7 +816,11 @@ async function runCodeTask(chatId, prompt, refs = []) {
       cwd: chat.cwd,
       reach,
       places: codePlaces(),
-      model: chat.model || undefined,
+      // Named, never left to the SDK: the picker has to show what actually runs.
+      // Unset used to mean "Claude Code's default" (Sonnet 5 here) while the
+      // picker showed the top of its list instead.
+      model: chat.model || agent.DEFAULT_MODEL,
+      saved: store.getModelOptions('code')[chat.model || agent.DEFAULT_MODEL],
       resume: chat.sessionId || undefined,
       bot: chat.botId ? store.getBot(chat.botId) : null,
       abortController,

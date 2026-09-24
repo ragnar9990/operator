@@ -611,7 +611,9 @@ function keepThread(id, history) {
    prompt, and emits the same events, so the UI cannot tell which brain is
    driving. */
 
-async function runTask({ prompt, model, systemPrompt, tools, onEvent, abortController, resume, maxTurns = 80 }) {
+// `params`: temperature and max_tokens from the dial beside the picker
+// (model-options.js). Missing ones keep the values this always used.
+async function runTask({ prompt, model, systemPrompt, tools, onEvent, abortController, resume, maxTurns = 80, params = {} }) {
   const info = describe(bareId(model));
   const spec = toOpenAITools(tools);
   const byName = new Map(tools.map((t) => [t.name, t]));
@@ -654,8 +656,8 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
       // rather than being the first thing a long conversation drops.
       messages: [history[0], ...history.slice(1).slice(1 - MAX_HISTORY)],
       model: info.modelId,
-      temperature: 0.2,
-      max_tokens: 4096,
+      temperature: typeof params.temperature === 'number' ? params.temperature : 0.2,
+      max_tokens: params.max_tokens || 4096,
       stream: true,
     };
     if (!toolsOff && spec.length) { body.tools = spec; body.tool_choice = 'auto'; }

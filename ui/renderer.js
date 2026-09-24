@@ -461,6 +461,7 @@ async function loadBots(select) {
   keep(LAST_BOT, bot.id);
   paintRoster();
   paintFaces();
+  if (window.__refreshModelUI) window.__refreshModelUI();   // its pinned model, if it has one
 }
 
 /* ── what a row in the rail is ───────────────────────────────────────
@@ -1618,7 +1619,7 @@ async function run(override) {
 
   if (override === undefined) { input.value = ''; resize(); }
   startRun();
-  await window.operator.runTask(task, chosenModel, bot.id, chat.id, dryRun);
+  await window.operator.runTask(task, runModel(), bot.id, chat.id, dryRun);
 }
 
 composer.addEventListener('submit', (e) => { e.preventDefault(); run(); });
@@ -1648,6 +1649,136 @@ document.querySelectorAll('.chip').forEach((b) => {
 
 /* ── model picker ────────────────────────────────────────────────── */
 
+/* ── the dial beside a model picker ──────────────────────────────────
+ * Effort, thinking, temperature — whichever of them the chosen model actually
+ * has, remembered per model and per side. main.js owns the rules
+ * (model-options.js); this only draws them and saves what you pick. One
+ * instance beside each picker, Agents and Code.
+ */
+
+function makeTuner({ root, mode, current, nameOf }) {
+  const btn = root.querySelector('.tuner-btn');
+  const labelEl = root.querySelector('.tuner-label');
+  const pop = root.querySelector('.tuner-pop');
+  let id = null;
+  let state = null;
+
+  async function refresh() {
+    id = current();
+    if (!id) { root.hidden = true; return; }
+    const asked = id;
+    const s = await window.operator.modelOptions(mode, asked);
+    if (asked !== id) return;               // the model changed while this was on its way
+    state = s;
+    root.hidden = !state.spec.length;
+    labelEl.textContent = state.summary;
+    btn.title = nameOf(id) + ' settings — ' + state.spec.map((o) => o.label.toLowerCase()).join(', ');
+    if (!pop.hidden) paint();
+  }
+
+  function row(spec) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tuner-row';
+    const head = document.createElement('div');
+    head.className = 'tuner-row-head';
+    const name = document.createElement('span');
+    name.className = 'tuner-name';
+    name.textContent = spec.label;
+    head.appendChild(name);
+    wrap.appendChild(head);
+    const value = state.values[spec.key];
+
+    if (spec.type === 'choice') {
+      const seg = document.createElement('div');
+      seg.className = 'seg tuner-seg';
+      for (const c of spec.choices) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'seg-btn';
+        b.textContent = c.label;
+        b.setAttribute('aria-pressed', String(c.v === value));
+        b.addEventListener('click', () => set(spec.key, c.v));
+        seg.appendChild(b);
+      }
+      wrap.appendChild(seg);
+    } else if (spec.type === 'toggle') {
+      const sw = document.createElement('label');
+      sw.className = 'switch';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = Boolean(value);
+      box.setAttribute('aria-label', spec.label);
+      box.addEventListener('change', () => set(spec.key, box.checked));
+      const knob = document.createElement('span');
+      knob.className = 'knob';
+      sw.append(box, knob);
+      head.appendChild(sw);
+    } else if (spec.type === 'range') {
+      const out = document.createElement('span');
+      out.className = 'tuner-value';
+      out.textContent = Number(value).toFixed(1);
+      head.appendChild(out);
+      const r = document.createElement('input');
+      r.type = 'range';
+      r.className = 'tuner-range';
+      r.min = spec.min; r.max = spec.max; r.step = spec.step;
+      r.value = value;
+      r.setAttribute('aria-label', spec.label);
+      r.addEventListener('input', () => { out.textContent = Number(r.value).toFixed(1); });
+      r.addEventListener('change', () => set(spec.key, Number(r.value)));
+      wrap.appendChild(r);
+    }
+
+    const hint = document.createElement('p');
+    hint.className = 'tuner-hint';
+    hint.textContent = spec.hint;
+    wrap.appendChild(hint);
+    return wrap;
+  }
+
+  function paint() {
+    pop.textContent = '';
+    const top = document.createElement('div');
+    top.className = 'tuner-top';
+    const title = document.createElement('b');
+    title.textContent = nameOf(id);
+    const side = document.createElement('span');
+    side.textContent = mode === 'code' ? 'in Code' : 'in Agents';
+    top.append(title, side);
+    pop.appendChild(top);
+    for (const s of state.spec) pop.appendChild(row(s));
+    const note = document.createElement('p');
+    note.className = 'tuner-foot';
+    note.textContent = 'Kept for this model. Applies from the next message.';
+    pop.appendChild(note);
+  }
+
+  async function set(key, value) {
+    state = await window.operator.setModelOptions(mode, id, { [key]: value });
+    labelEl.textContent = state.summary;
+    paint();
+  }
+
+  function open() {
+    if (!state) return;
+    paint();
+    pop.hidden = false;
+    root.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  function close() {
+    pop.hidden = true;
+    root.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  btn.addEventListener('click', () => (pop.hidden ? open() : close()));
+  document.addEventListener('pointerdown', (e) => { if (!pop.hidden && !root.contains(e.target)) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { close(); btn.focus(); } });
+
+  return { refresh, close };
+}
+
 const picker = document.getElementById('picker');
 const pickerBtn = document.getElementById('pickerBtn');
 const pickerName = document.getElementById('pickerName');
@@ -1676,22 +1807,38 @@ function remember(id) {
 // one sends you to Settings instead of pretending.
 const locked = (m) => m.vendor === 'nvidia' && !nvidia.configured;
 
+// The agent's own model when one is pinned in its panel — that is what runs,
+// so it is what the picker shows and edits. Pinning used to change nothing:
+// the picker's choice was always sent instead.
+const pinnedModel = () => (bot && bot.model && models.some((m) => m.id === bot.model) ? bot.model : null);
+const runModel = () => pinnedModel() || chosenModel;
+
 function paintPicker() {
-  const m = models.find((x) => x.id === chosenModel);
+  const shown = runModel();
+  const m = models.find((x) => x.id === shown);
   // A remembered NIM id before the catalog has loaded still has a readable
   // name in it — better than the button saying "Model" for a second.
   pickerName.textContent = m ? m.name
-    : chosenModel && chosenModel.startsWith('nim:') ? chosenModel.split('/').pop()
+    : shown && shown.startsWith('nim:') ? shown.split('/').pop()
     : 'Model';
   // The label is clipped when the name is long, so the full one lives here.
-  pickerBtn.title = m ? `${m.providerName} · ${m.note}` : 'Which model runs the task';
-  menuList.querySelectorAll('.opt').forEach((o) => o.classList.toggle('on', o.dataset.id === chosenModel));
+  pickerBtn.title = m
+    ? `${m.providerName} · ${m.note}` + (pinnedModel() ? ` — pinned to ${bot.name} in its settings` : '')
+    : 'Which model runs the task';
+  menuList.querySelectorAll('.opt').forEach((o) => o.classList.toggle('on', o.dataset.id === shown));
 }
 
-function choose(id) {
-  chosenModel = id;
-  remember(id);
+async function choose(id) {
+  if (pinnedModel()) {
+    // Changing the model on an agent that has its own changes its own.
+    await window.operator.updateBot(bot.id, { model: id });
+    bot.model = id;
+  } else {
+    chosenModel = id;
+    remember(id);
+  }
   paintPicker();
+  tuner.refresh();
   closeMenu();
   pickerBtn.focus();
 }
@@ -1854,7 +2001,18 @@ async function loadModels() {
   if (!chosenModel) chosenModel = models.some((m) => m.id === saved) ? saved : res.current;
   if (!menu.hidden) buildMenu();
   paintPicker();
+  tuner.refresh();
 }
+
+const tuner = makeTuner({
+  root: document.getElementById('tuner'),
+  mode: 'agents',
+  current: runModel,
+  nameOf: (id) => (models.find((m) => m.id === id) || { name: 'This model' }).name,
+});
+// Another agent, or its pinned model changed in its panel: repaint both.
+window.__refreshModelUI = () => { paintPicker(); tuner.refresh(); };
+
 window.__reloadModels = loadModels;
 loadModels();
 
@@ -3845,9 +4003,21 @@ document.addEventListener('keydown', (e) => {
     try {
       const info = await window.operator.listModels();
       models = (info && info.models) || [];
+      codeDefault = (info && info.current) || null;
       buildCodeMenu();
+      paintModel();
     } catch (_) {}
   }
+
+  // What a chat with no model of its own runs on — main.js passes the same one.
+  let codeDefault = null;
+  const codeModel = () => (chat ? chat.model : draft.model) || codeDefault || (models[0] && models[0].id) || null;
+  const codeTuner = makeTuner({
+    root: document.getElementById('codeTuner'),
+    mode: 'code',
+    current: codeModel,
+    nameOf: (id) => (models.find((m) => m.id === id) || { name: 'This model' }).name,
+  });
 
   function buildCodeMenu() {
     const shown = models.filter((m) => {
@@ -3895,9 +4065,10 @@ document.addEventListener('keydown', (e) => {
   }
 
   function paintModel() {
-    const mid = (chat ? chat.model : draft.model) || (models[0] && models[0].id);
+    const mid = codeModel();
     const m = models.find((x) => x.id === mid) || models[0];
     if (m) pickerName.textContent = m.name;
+    codeTuner.refresh();
   }
 
   /* ── code as one of your bots ── */

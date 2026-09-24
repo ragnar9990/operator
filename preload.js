@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('operator', {
   runTask: (prompt, model, botId, chatId, dryRun) => ipcRenderer.invoke('run-task', prompt, model, botId, chatId, dryRun),
   stopTask: () => ipcRenderer.invoke('stop-task'),
   listModels: () => ipcRenderer.invoke('list-models'),
+  // The dial beside the picker: { spec, values, summary } for a model, per side.
+  modelOptions: (mode, id) => ipcRenderer.invoke('model-options:get', mode, id),
+  setModelOptions: (mode, id, patch) => ipcRenderer.invoke('model-options:set', mode, id, patch),
 
   // NVIDIA NIM — one key, every vendor's models
   nvidiaStatus: () => ipcRenderer.invoke('nvidia:status'),

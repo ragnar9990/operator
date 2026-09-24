@@ -146,6 +146,27 @@ function setPrefs(patch) {
   return getPrefs();
 }
 
+/* ── per-model settings ─────────────────────────────────────────────
+   Effort, thinking, temperature and so on, per model and per side (Agents or
+   Code). Only what model-options.js recognises for that model is kept. */
+
+const modelOptions = require('./model-options');
+
+function getModelOptions(mode) {
+  const all = settings.modelOptions || {};
+  return { ...(all[mode === 'code' ? 'code' : 'agents'] || {}) };
+}
+
+function setModelOptions(mode, modelId, patch) {
+  const side = mode === 'code' ? 'code' : 'agents';
+  if (!settings.modelOptions) settings.modelOptions = {};
+  if (!settings.modelOptions[side]) settings.modelOptions[side] = {};
+  const next = modelOptions.clean(modelId, { ...(settings.modelOptions[side][modelId] || {}), ...(patch || {}) });
+  settings.modelOptions[side][modelId] = next;
+  flushSettings();
+  return next;
+}
+
 function getConnector(id) { return (settings.connectors || {})[id] || null; }
 
 function setConnector(id, cfg) {
@@ -753,7 +774,7 @@ module.exports = {
   addRoutine, updateRoutine, removeRoutine, allRoutines,
   listChats, getChat, createChat, saveChat, removeChat,
   sessionOf, setSession, forgetSession,
-  getPrefs, setPrefs,
+  getPrefs, setPrefs, getModelOptions, setModelOptions,
   listConnectors, getConnector, setConnector, removeConnector, getGoogle, setGoogle,
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,

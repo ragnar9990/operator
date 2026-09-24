@@ -10,6 +10,7 @@
 
 const path = require('path');
 const nim = require('./nim');
+const modelOptions = require('./model-options');
 const { buildCodeTools } = require('./code-tools');
 
 const CODE_SYSTEM = `You are Operator's coding assistant. You work exactly like Claude Code: you have the user's real files, a shell, and search. Your working folder is where you start, not a fence — you can read, create and edit files anywhere the user points you. Be decisive and finish the task.
@@ -87,11 +88,13 @@ Call tools rather than describing what you would do, and keep going until the ta
 
 // `reach` is the folders beyond the working one that the model may touch — the
 // user's home and whatever they dragged in. `places` names the usual ones.
-async function runCode(prompt, { cwd, onEvent, abortController, resume, model, bot, reach = [], places = null }) {
+// `saved` is the dial's settings for this model on the Code side.
+async function runCode(prompt, { cwd, onEvent, abortController, resume, model, bot, reach = [], places = null, saved = null }) {
   // A NIM model takes the same job through chat-completions, with the toolset
   // built here instead of borrowed from the SDK.
   if (nim.isNimModel(model)) {
     return nim.runTask({
+      params: modelOptions.nimParams('code', model, saved),
       prompt,
       model,
       systemPrompt: nimSystemFor(bot, cwd, places),
@@ -124,6 +127,9 @@ async function runCode(prompt, { cwd, onEvent, abortController, resume, model, b
       maxTurns: 200,
       resume,
       abortController,
+      // Effort and thinking from the dial. Nothing for "Auto", so by default
+      // Code runs exactly as Claude Code would.
+      ...modelOptions.sdkOptions('code', model, saved),
     },
   });
 

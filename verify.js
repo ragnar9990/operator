@@ -117,9 +117,11 @@ function verdict(raw) {
 }
 
 // One turn on the Agent SDK: no tools, no session, no memory of the last check.
-// This pays the SDK's ~7s subprocess start every time, exactly as askBot does.
-// The alternative is a second CLI kept warm for the life of the app, which is a
-// lot of machinery to save seconds on something the user can switch off.
+// This pays the SDK's subprocess start every time, exactly as askBot does —
+// about 2–3s now that main.js switches off Claude Code's non-essential traffic
+// (it was ~6s). Pre-starting it with the SDK's startup() was tried and dropped:
+// in 0.3.251 a pre-started session sometimes ignored this system prompt and ran
+// slower than a cold one, and the check has to follow its rules every time.
 async function askClaude({ system, body, image, abortController }) {
   const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
