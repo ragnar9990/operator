@@ -54,7 +54,7 @@ const RULES = [
   {
     test: /context (length|window)|too long|maximum.*tokens/i,
     title: 'The conversation got too long for the model',
-    fix: 'Start a new chat. The bot keeps what it remembered; only the transcript is dropped.',
+    fix: 'Start a new chat. The agent keeps what it remembered; only the transcript is dropped.',
   },
 ];
 

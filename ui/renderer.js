@@ -953,7 +953,7 @@ newBotBtn.addEventListener('click', async () => {
 function setRail(open) {
   rail.classList.toggle('open', open);
   historyBtn.setAttribute('aria-expanded', String(open));
-  historyBtn.title = open ? 'Hide bots' : 'Show bots';
+  historyBtn.title = open ? 'Hide agents' : 'Show agents';
   keep(RAIL_OPEN, open ? '1' : '0');
 }
 
@@ -1231,7 +1231,7 @@ const sheetDone = document.getElementById('sheetDone');
 
 function openSheet(isNew) {
   sheet.hidden = false;
-  sheetDone.textContent = isNew ? 'Create bot' : 'Done';
+  sheetDone.textContent = isNew ? 'Create agent' : 'Done';
   paintSheet();
   // A new one's name is a placeholder, so typing should replace it.
   setTimeout(() => { fName.focus(); if (isNew) fName.select(); }, 40);
@@ -2498,7 +2498,7 @@ function growSheet(from, name) {
   fName.value = name;
   fTitle.value = '';
   fPersona.value = '';
-  sheetDone.textContent = 'Create bot';
+  sheetDone.textContent = 'Create agent';
   sheet.classList.add('grow');
   sheet.hidden = false;
   setTimeout(() => sheet.classList.remove('grow'), 1100);   // after the fields have risen in
@@ -3896,7 +3896,7 @@ document.addEventListener('keydown', (e) => {
     try {
       botList = (await window.operator.listBots()) || [];
     } catch (_) { botList = []; }
-    const opts = [{ id: null, name: 'No bot', title: 'Plain coding assistant' }].concat(botList);
+    const opts = [{ id: null, name: 'No agent', title: 'Plain coding assistant' }].concat(botList);
     botMenu.innerHTML = opts.map((b) =>
       '<button class="opt" type="button" role="option" data-id="' + (b.id || '') + '">' +
       '<span class="opt-name">' + esc2(b.name) + '</span>' +
@@ -3915,7 +3915,7 @@ document.addEventListener('keydown', (e) => {
   function paintBot() {
     const want = chat ? chat.botId : draft.botId;
     const b = want ? botList.find((x) => x.id === want) : null;
-    botNameEl.textContent = b ? b.name : 'No bot';
+    botNameEl.textContent = b ? b.name : 'No agent';
     botBtn.classList.toggle('set', Boolean(b));
   }
 

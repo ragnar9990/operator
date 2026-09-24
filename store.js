@@ -443,7 +443,7 @@ function getBot(botId) { return find(botId); }
 
 function createBot({ name, title, persona, model } = {}) {
   if (bots.length >= MAX_BOTS) return null;
-  const bot = blank((name || 'New bot').slice(0, 40), (title || '').slice(0, 60));
+  const bot = blank((name || 'New agent').slice(0, 40), (title || '').slice(0, 60));
   if (persona) bot.persona = String(persona).slice(0, 4000);
   if (model) bot.model = model;
   bots.unshift(bot);
