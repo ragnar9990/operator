@@ -44,12 +44,41 @@
 
   // Code chats, and which of them are mid-run — a Set, because more than one
   // can be, which is the thing worth exercising.
+  const HOUR = 36e5;
   let CODE = [
-    { id: 'cc1', title: 'Tetris', cwd: 'C:/demo/tetris', cwdName: 'tetris', model: null, botId: null, turns: [] },
-    { id: 'cc2', title: 'Landing page', cwd: 'C:/demo/site', cwdName: 'site', model: null, botId: null, turns: [] },
+    {
+      id: 'cc1', title: 'Make a Tetris game I can play in the browser', cwd: 'C:/demo', cwdName: 'Operator Projects', project: 'C:/demo/tetris',
+      model: null, botId: null, updatedAt: Date.now() - 0.2 * HOUR,
+      turns: [
+        { k: 'you', text: 'Make a Tetris game I can play in the browser. One HTML file, with a score and levels.' },
+        { k: 'steps', items: [
+          { name: 'Write', input: { file: 'index.html', abs: 'C:/demo/tetris/index.html' } },
+          { name: 'Write', input: { file: 'style.css', abs: 'C:/demo/tetris/style.css' } },
+          { name: 'Write', input: { file: 'game.js', abs: 'C:/demo/tetris/game.js' } },
+          { name: 'Bash', input: { command: 'npx html-validate index.html' } },
+        ] },
+        { k: 'says', text: "## Tetris is ready\n\nOpen `tetris/index.html` in your browser — nothing to install.\n\n**Controls**\n\n| Key | Does |\n|---|---|\n| ← → | Move |\n| ↑ | Rotate |\n| Space | Hard drop |\n\nWhat's in it:\n\n- Seven pieces with the standard colours\n- Score, lines and a level that speeds up every 10 lines\n  - clears pay 100 / 300 / 500 / 800\n- [x] Next-piece preview\n- [ ] Hold piece (say if you want it)\n\nThe scoring lives in `clearLines()`:\n\n```js\nthis.score += [0, 100, 300, 500, 800][cleared] * this.level;\n```\n\nSee https://tetris.wiki/Scoring for the classic rules." },
+      ],
+    },
+    { id: 'cc2', title: '# BUILD A LANDING PAGE FOR A BAKERY WITH A MENU AND HOURS', cwd: 'C:/demo/site', cwdName: 'site', model: null, botId: null, updatedAt: Date.now() - 26 * HOUR, turns: [{ k: 'you', text: 'Landing page' }] },
+    { id: 'cc3', title: 'Rename my photos by date', cwd: 'C:/demo', cwdName: 'Operator Projects', model: null, botId: null, updatedAt: Date.now() - 4 * 24 * HOUR, turns: [{ k: 'you', text: 'x' }] },
+    { id: 'cc4', title: 'New chat', cwd: 'C:/demo', cwdName: 'Operator Projects', model: null, botId: null, updatedAt: Date.now() - 1 * HOUR, turns: [] },
   ];
   const CODE_RUNS = new Set();
   const CODE_LISTENERS = [];
+  const FS_LISTENERS = [];
+
+  // A pretend disk: path -> contents, or null for an empty folder.
+  const FILES = {
+    'C:/demo/tetris/index.html': '<!doctype html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <title>Tetris</title>\n  <link rel="stylesheet" href="style.css" />\n</head>\n<body>\n  <!-- the board is drawn into this -->\n  <canvas id="board" width="300" height="600"></canvas>\n  <p class="score">Score: <span id="score">0</span></p>\n  <script type="module" src="game.js"></script>\n</body>\n</html>\n',
+    'C:/demo/tetris/style.css': 'body {\n  margin: 0;\n  display: grid;\n  place-items: center;\n  min-height: 100vh;\n  background: #0a0a12;\n  color: #eee;\n  font-family: system-ui, sans-serif;\n}\n\ncanvas { border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }\n.score { font-size: 18px; letter-spacing: 0.02em; }\n',
+    'C:/demo/tetris/game.js': "// Tetris, in one file.\nconst COLS = 10;\nconst ROWS = 20;\nconst SIZE = 30;\n\nconst SHAPES = {\n  I: [[1, 1, 1, 1]],\n  O: [[1, 1], [1, 1]],\n  T: [[0, 1, 0], [1, 1, 1]],\n};\n\nclass Board {\n  constructor(canvas) {\n    this.ctx = canvas.getContext('2d');\n    this.grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));\n    this.score = 0;\n  }\n\n  clearLines() {\n    let cleared = 0;\n    this.grid = this.grid.filter((row) => {\n      const full = row.every(Boolean);\n      if (full) cleared++;\n      return !full;\n    });\n    while (this.grid.length < ROWS) this.grid.unshift(Array(COLS).fill(0));\n    this.score += [0, 100, 300, 500, 800][cleared];\n    return cleared;\n  }\n}\n\nconst board = new Board(document.getElementById('board'));\nconsole.log(`Ready: ${COLS}x${ROWS}`, board.score === 0 ? true : null);\n",
+    'C:/demo/tetris/README.md': '# Tetris\n\nA single-page **Tetris** — open `index.html` in a browser.\n\n- Arrow keys move\n- Space drops\n',
+    'C:/demo/tetris/package.json': '{\n  "name": "tetris",\n  "version": "1.0.0",\n  "private": true,\n  "scripts": { "start": "npx serve ." }\n}\n',
+    'C:/demo/tetris/assets/logo.png': '',
+    'C:/demo/tetris/node_modules': null,
+    'C:/demo/site/index.html': '<h1>Landing page</h1>\n',
+  };
 
   let BOTS = load();
   put(BOTS);
@@ -208,10 +237,11 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     /* ── the coding side ──────────────────────────────────────────
        Enough of it to exercise the real renderer: several chats, each able
        to run at the same time, each emitting the same events main.js does. */
-    codeChatsList: async () => CODE.map((c) => ({ id: c.id, title: c.title, cwd: c.cwd, cwdName: c.cwdName, model: c.model, botId: c.botId })),
+    codeChatsList: async () => CODE.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      .map((c) => ({ id: c.id, title: c.title, cwd: c.cwd, cwdName: c.cwdName, project: c.project || null, model: c.model, botId: c.botId, turns: c.turns.length, updatedAt: c.updatedAt || Date.now() })),
     codeChatGet: async (id) => CODE.find((c) => c.id === id) || null,
     codeChatCreate: async () => {
-      const c = { id: uid('cc'), title: 'New chat', cwd: 'C:/demo', cwdName: 'demo', model: null, botId: null, turns: [] };
+      const c = { id: uid('cc'), title: 'New chat', cwd: 'C:/demo', cwdName: 'Operator Projects', model: null, botId: null, turns: [], updatedAt: Date.now() };
       CODE.unshift(c);
       return c;
     },
@@ -224,6 +254,12 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     codeRun: async (chatId, prompt) => {
       if (CODE_RUNS.has(chatId)) return { ok: false, error: 'This chat is already working on something.' };
       CODE_RUNS.add(chatId);
+      const mine = CODE.find((c) => c.id === chatId);
+      if (mine) {
+        mine.turns.push({ k: 'you', text: prompt });
+        if (mine.title === 'New chat') mine.title = prompt.slice(0, 60);
+        mine.updatedAt = Date.now();
+      }
       const say = (e) => CODE_LISTENERS.forEach((cb) => cb({ ...e, chatId }));
       say({ type: 'status', text: 'running' });
 
@@ -235,8 +271,17 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
         say({ type: 'tool', name: 'LS', input: {} });
         await step(900);
         if (!CODE_RUNS.has(chatId)) return;
-        say({ type: 'tool', name: 'Read', input: { file: 'app.js' } });
+        say({ type: 'tool', name: 'Read', input: { file: 'index.html', abs: 'C:/demo/tetris/index.html' } });
         await step(900);
+        if (!CODE_RUNS.has(chatId)) return;
+        // A write, the way the real agent does it: the tool is announced, then
+        // the file changes on disk and the watcher says so.
+        const out = 'C:/demo/tetris/score.js';
+        say({ type: 'tool', name: 'Write', input: { file: 'score.js', abs: out } });
+        await step(400);
+        FILES[out] = '// Best score, kept between games.\nconst KEY = \'tetris.best\';\n\nexport function best() {\n  return Number(localStorage.getItem(KEY) || 0);\n}\n\nexport function record(score) {\n  if (score > best()) localStorage.setItem(KEY, String(score));\n}\n';
+        FS_LISTENERS.forEach((cb) => cb({ root: 'C:/demo/tetris', paths: [out] }));
+        await step(700);
         if (!CODE_RUNS.has(chatId)) return;
         say({ type: 'say_start' });
         for (const word of ('Finished: ' + prompt).split(' ')) {
@@ -262,6 +307,47 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       return { ok: true };
     },
     onCode: (cb) => CODE_LISTENERS.push(cb),
+    codeSetFolder: async (id, dir) => {
+      const c = CODE.find((x) => x.id === id);
+      if (c) { c.cwd = dir; c.cwdName = dir.split('/').pop(); c.project = null; }
+      return { ok: true, cwd: dir, name: dir.split('/').pop() };
+    },
+
+    /* ── a small disk, for the editor ─────────────────────────────── */
+    fsList: async (dir) => {
+      const d = dir.replace(/\/+$/, '');
+      const kids = new Map();
+      for (const p of Object.keys(FILES)) {
+        if (!p.startsWith(d + '/')) continue;
+        const rest = p.slice(d.length + 1);
+        const name = rest.split('/')[0];
+        const isDir = rest.includes('/') || FILES[p] === null;
+        if (!kids.has(name) || isDir) kids.set(name, { name, path: d + '/' + name, dir: isDir });
+      }
+      const entries = [...kids.values()].sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
+      return { ok: true, entries };
+    },
+    fsStat: async (p) => ({ ok: true, dir: FILES[p] === null || Object.keys(FILES).some((k) => k.startsWith(p + '/')) }),
+    fsRead: async (p) => {
+      if (/\.(png|jpg)$/.test(p)) return { ok: true, kind: 'image', url: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="220" height="140"><rect width="220" height="140" rx="16" fill="#299fff"/><text x="110" y="80" font-size="24" text-anchor="middle" fill="#fff" font-family="sans-serif">preview</text></svg>'), size: 2048 };
+      return typeof FILES[p] === 'string' ? { ok: true, kind: 'text', text: FILES[p], size: FILES[p].length } : { ok: false, error: 'That file is gone.' };
+    },
+    fsWrite: async (p, text) => { FILES[p] = text; return { ok: true }; },
+    fsCreate: async (dir, name, isDir) => { const p = dir + '/' + name; FILES[p] = isDir ? null : ''; return { ok: true, path: p }; },
+    fsRename: async (from, name) => {
+      const to = from.replace(/[^/]+$/, name);
+      for (const k of Object.keys(FILES)) if (k === from || k.startsWith(from + '/')) { FILES[to + k.slice(from.length)] = FILES[k]; delete FILES[k]; }
+      return { ok: true, path: to };
+    },
+    fsTrash: async (p) => { for (const k of Object.keys(FILES)) if (k === p || k.startsWith(p + '/')) delete FILES[k]; return { ok: true }; },
+    fsReveal: async () => ({ ok: true }),
+    fsOpenExternal: async () => ({ ok: true }),
+    openUrl: async () => ({ ok: true }),
+    fsPickFolder: async () => ({ ok: true, path: 'C:/demo/site' }),
+    fsPickFiles: async () => ({ ok: true, paths: ['C:/demo/site/index.html'] }),
+    fsWatch: async () => ({ ok: true }),
+    onFsChanged: (cb) => FS_LISTENERS.push(cb),
+    pathForFile: (f) => 'C:/demo/dropped/' + f.name,
 
     nvidiaStatus: async () => NVIDIA,
     // The sweep that finds out which models a key can actually run. Here it

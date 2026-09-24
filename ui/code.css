@@ -1,0 +1,518 @@
+/* Code mode, the page around the conversation: the sidebar, the empty state,
+   formatted replies and the card of files a turn changed. Loaded after
+   styles.css and editor.css, so where it restates something, this wins. */
+
+/* ── the sidebar ────────────────────────────────────────────────────── */
+
+.code-side { width: 264px; padding-bottom: 6px; }
+
+.code-new {
+  margin: 12px 12px 8px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 11px;
+  font-size: 13.5px;
+}
+
+.code-find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 0 10px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--raise);
+  color: var(--ink-4);
+  cursor: text;
+  transition: border-color 0.15s, background 0.15s;
+}
+.code-find:focus-within { border-color: var(--line-hi); background: var(--raise-hi); }
+.code-find svg { flex: none; width: 14px; height: 14px; }
+.code-find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.code-find input::placeholder { color: var(--ink-4); }
+.code-find input::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.5); }
+
+/* One scroller, and never sideways: a long title ends in an ellipsis. */
+.code-history { overflow-x: hidden; padding: 0 8px 12px; }
+
+.code-history-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 14px 10px 6px;
+  background: var(--panel);
+  color: var(--ink-4);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.code-chat-row {
+  position: relative;
+  min-width: 0;
+  margin-bottom: 1px;
+  border-radius: 9px;
+}
+.code-chat-row.on { background: var(--raise-hi); }
+.code-chat-row.on::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.code-chat-open {
+  min-width: 0;
+  overflow: hidden;
+  gap: 2px;
+  padding: 8px 56px 8px 11px;
+}
+.code-chat-title, .code-chat-folder {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.code-chat-title { font-size: 13px; line-height: 1.35; color: var(--ink-2); }
+.code-chat-row.on .code-chat-title, .code-chat-row:hover .code-chat-title { color: var(--ink); }
+.code-chat-folder {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+.code-chat-folder svg { flex: none; width: 11px; height: 11px; }
+
+/* The time sits where the delete button appears, and gives way to it. */
+.code-chat-when {
+  position: absolute;
+  right: 10px;
+  top: 9px;
+  color: var(--ink-4);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.code-chat-row:hover .code-chat-when { opacity: 0; }
+.code-chat-del { position: absolute; right: 4px; top: 5px; margin: 0; width: 26px; height: 26px; }
+.code-chat-spin { position: absolute; right: 14px; top: 13px; margin: 0; }
+.code-chat-row.working:hover .code-chat-spin { opacity: 0; }
+.code-history-empty { padding: 18px 12px; color: var(--ink-4); font-size: 12.5px; line-height: 1.5; }
+
+/* ── the top bar ────────────────────────────────────────────────────── */
+
+.code-top {
+  height: 50px;
+  padding: 0 14px 0 24px;
+  border-bottom: 1px solid transparent;
+}
+.code-main:not(:has(#codeIntro:not([hidden]))) .code-top { border-bottom-color: var(--line); }
+.code-title { font-size: 14px; }
+.code-path { padding: 3px 8px; border-radius: 7px; background: var(--raise); color: var(--ink-3); }
+.code-path:hover { background: var(--raise-hi); color: var(--ink); }
+
+/* ── the empty state: a heading, the box, and somewhere to start ────── */
+
+.code-starters { display: none; }
+
+.code-main:has(#codeIntro:not([hidden])) .code-thread {
+  flex: 0 0 auto;
+  display: block;
+  margin-top: auto;
+  overflow: visible;
+  padding: 0 0 26px;
+}
+.code-main:has(#codeIntro:not([hidden])) .code-thread .intro { margin: 0 auto; max-width: 52ch; }
+.code-main:has(#codeIntro:not([hidden])) .dock { padding-bottom: 0; }
+.code-main:has(#codeIntro:not([hidden])) .code-starters {
+  display: block;
+  width: 100%;
+  max-width: calc(var(--col) + 44px);
+  margin: 18px auto auto;
+  padding: 0 22px 40px;
+}
+
+.code-thread .intro h1 { font-size: 27px; letter-spacing: -0.6px; margin-bottom: 10px; }
+.code-thread .intro p { font-size: 14px; color: var(--ink-3); }
+
+/* ── the cube ───────────────────────────────────────────────────────
+   Six faces in real 3D (preserve-3d), slightly see-through, so as it turns
+   you catch the far sides through the near ones. It spins on one axis, tilted
+   towards you so the top face shows; a slower bob lifts it off its own glow on
+   the floor, which shrinks as it rises. All in the edge-light colour. */
+
+.code-glyph {
+  --cube: 48px;
+  position: relative;
+  display: block;
+  width: 110px;
+  height: 104px;
+  margin: 0 auto 8px;
+  perspective: 560px;
+  perspective-origin: 50% 30%;
+}
+
+.cube-float {
+  position: absolute;
+  left: 50%;
+  top: 20px;
+  width: var(--cube);
+  height: var(--cube);
+  margin-left: calc(var(--cube) / -2);
+  transform-style: preserve-3d;
+  animation: cube-bob 4.5s ease-in-out infinite alternate;
+}
+
+.cube {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(-24deg) rotateY(-30deg);
+  animation: cube-spin 16s linear infinite;
+}
+
+.face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--edge) 55%, transparent);
+  border-radius: 7px;
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--edge) 22%, transparent), transparent 60%),
+    color-mix(in srgb, var(--panel) 72%, transparent);
+  box-shadow: inset 0 0 14px color-mix(in srgb, var(--edge) 16%, transparent);
+  color: var(--edge-head);
+}
+.face svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--edge) 70%, transparent));
+}
+
+/* A face is its own shade, so the turn reads as light moving across a solid. */
+.f-front  { transform: translateZ(calc(var(--cube) / 2)); }
+.f-back   { transform: rotateY(180deg) translateZ(calc(var(--cube) / 2)); filter: brightness(0.75); }
+.f-right  { transform: rotateY(90deg) translateZ(calc(var(--cube) / 2)); filter: brightness(0.85); }
+.f-left   { transform: rotateY(-90deg) translateZ(calc(var(--cube) / 2)); filter: brightness(1.1); }
+.f-top    {
+  transform: rotateX(90deg) translateZ(calc(var(--cube) / 2));
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--edge) 55%, transparent) 1px, transparent 1.6px) 0 0 / 8px 8px,
+    color-mix(in srgb, var(--edge) 12%, color-mix(in srgb, var(--panel) 70%, transparent));
+}
+.f-bottom { transform: rotateX(-90deg) translateZ(calc(var(--cube) / 2)); filter: brightness(0.6); }
+
+/* the glow it floats above */
+.cube-floor {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  width: 64px;
+  height: 12px;
+  margin-left: -32px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--edge) 45%, transparent), transparent);
+  filter: blur(3px);
+  animation: cube-floor 4.5s ease-in-out infinite alternate;
+}
+
+@keyframes cube-spin {
+  from { transform: rotateX(-24deg) rotateY(-30deg); }
+  to   { transform: rotateX(-24deg) rotateY(330deg); }
+}
+@keyframes cube-bob {
+  from { transform: translateY(2px); }
+  to   { transform: translateY(-6px); }
+}
+@keyframes cube-floor {
+  from { transform: scale(1); opacity: 0.9; }
+  to   { transform: scale(0.72); opacity: 0.5; }
+}
+
+:root[data-theme="light"] .face { background: linear-gradient(150deg, color-mix(in srgb, var(--edge) 18%, transparent), transparent 60%), rgba(255, 255, 255, 0.72); color: var(--edge); }
+
+/* Still, it keeps its three-quarter pose, so it reads as a cube, not a square. */
+:root[data-motion="off"] .cube, :root[data-motion="off"] .cube-float, :root[data-motion="off"] .cube-floor { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cube, .cube-float, .cube-floor { animation: none; }
+}
+
+.starter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.starter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--raise);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.starter:hover { border-color: var(--line-max); background: var(--raise-hi); transform: translateY(-1px); }
+.starter:active { transform: translateY(0); }
+.starter-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c) 15%, transparent);
+  color: var(--c);
+}
+.starter-ic svg { width: 19px; height: 19px; }
+.starter-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.starter-text b { font-size: 13.5px; font-weight: 550; letter-spacing: -0.2px; }
+.starter-text small { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.starter-recent { margin-top: 22px; }
+.starter-label {
+  display: block;
+  margin: 0 2px 8px;
+  color: var(--ink-4);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.starter-projects { display: flex; flex-wrap: wrap; gap: 8px; }
+.starter-project {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: 240px;
+  padding: 7px 12px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.starter-project:hover { border-color: var(--line-hi); background: var(--raise); }
+.starter-project svg { flex: none; width: 16px; height: 16px; color: var(--accent); }
+.starter-project span { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.starter-project b { font-size: 12.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.starter-project small { font-size: 11px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@container (max-width: 560px) {
+  .starter-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── the conversation ───────────────────────────────────────────────── */
+
+.code-thread { padding-top: 22px; }
+.code-thread .turn { margin-bottom: 18px; }
+.code-thread .turn.you span { padding: 10px 15px; border-radius: 18px 18px 6px 18px; }
+.code-thread .says { font-size: 14.5px; line-height: 1.7; color: var(--ink); }
+
+/* formatted replies */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 10px; }
+.md h3, .md h4, .md h5, .md h6 { margin: 18px 0 8px; line-height: 1.3; letter-spacing: -0.2px; }
+.md h3 { font-size: 17px; font-weight: 600; }
+.md h4 { font-size: 15px; font-weight: 600; }
+.md h5, .md h6 { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.md strong { font-weight: 600; color: var(--ink); }
+.md em { font-style: italic; }
+.md del { color: var(--ink-3); }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md ul, .md ol { margin: 4px 0 12px; padding-left: 22px; }
+.md li { margin: 3px 0; padding-left: 2px; }
+.md li::marker { color: var(--ink-4); }
+.md ul ul, .md ol ol, .md ul ol, .md ol ul { margin: 2px 0 4px; }
+.md hr { margin: 16px 0; border: 0; border-top: 1px solid var(--line-hi); }
+.md blockquote { margin: 8px 0 12px; padding: 2px 0 2px 14px; border-left: 3px solid var(--line-max); color: var(--ink-2); }
+
+.md code {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raise-hi);
+  font-family: var(--mono);
+  font-size: 0.86em;
+  letter-spacing: 0;
+}
+.md code.md-path {
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s;
+}
+.md code.md-path:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.md-task {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin: 0 7px -2px 0;
+  border: 1.5px solid var(--line-max);
+  border-radius: 4px;
+}
+.md-task.done {
+  border-color: var(--accent);
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12.5 4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 11px no-repeat;
+}
+
+.md-code {
+  margin: 8px 0 14px;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-4);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+.md-copy {
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.md-copy:hover { background: var(--raise-hi); color: var(--ink); }
+.md-code pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  tab-size: 2;
+  scrollbar-width: thin;
+}
+.md-code pre code { padding: 0; border: 0; background: none; font-size: inherit; }
+
+.md-table { margin: 8px 0 14px; overflow-x: auto; border: 1px solid var(--line-hi); border-radius: 10px; }
+.md table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.md th, .md td { padding: 7px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.md th { background: var(--raise); color: var(--ink-2); font-weight: 600; }
+.md tr:last-child td { border-bottom: 0; }
+
+/* ── what a turn changed ────────────────────────────────────────────── */
+
+.code-files {
+  border: 1px solid var(--line-hi);
+  border-radius: 14px;
+  background: var(--raise);
+  overflow: hidden;
+}
+.code-files-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.code-files-head > svg { flex: none; width: 16px; height: 16px; color: var(--accent); }
+.code-files-head b { font-weight: 550; }
+.code-files-head .where { color: var(--ink-4); }
+.code-files-head .grow { flex: 1; }
+.code-files-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line-hi);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.13s, border-color 0.13s, background 0.13s;
+}
+.code-files-btn:hover { color: var(--ink); border-color: var(--line-max); background: var(--raise-hi); }
+.code-files-btn svg { width: 11px; height: 11px; fill: currentColor; stroke: none; }
+
+.code-files-list { padding: 4px; max-height: 260px; overflow-y: auto; scrollbar-width: thin; }
+.code-file {
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.code-file:hover { background: var(--raise-hi); }
+.code-file svg { width: 15px; height: 15px; color: var(--ink-3); }
+.code-file .nm { font-size: 13px; font-weight: 500; white-space: nowrap; }
+.code-file .dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-4); font-family: var(--mono); font-size: 11px; }
+.code-file .verb {
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: var(--raise-hi);
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.code-file .verb.new { background: color-mix(in srgb, #46d17f 16%, transparent); color: #46d17f; }
+
+@media (prefers-reduced-motion: reduce) {
+  .starter { transition: none; }
+}
+
+:root[data-theme="light"] .code-file .verb.new { color: #1b8a4b; }
+:root[data-theme="light"] .md-code { background: #fbfbfa; }
+
+/* The starter icons stay neutral and take the edge colour when you point at
+   them — four different hues in a row was a rainbow by another name. */
+.starter-ic { background: var(--raise-hi); color: var(--ink-2); transition: background 0.15s, color 0.15s; }
+.starter:hover .starter-ic { background: color-mix(in srgb, var(--edge) 16%, transparent); color: var(--edge); }
+:root[data-edge="silver"] .starter:hover .starter-ic { color: var(--ink); }
+.starter-project svg { color: var(--ink-3); }
+.starter-project:hover svg { color: var(--edge); }

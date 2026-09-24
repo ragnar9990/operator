@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('operator', {
   runTask: (prompt, model, botId, chatId, dryRun) => ipcRenderer.invoke('run-task', prompt, model, botId, chatId, dryRun),
@@ -92,7 +92,26 @@ contextBridge.exposeInMainWorld('operator', {
   codeSetModel: (id, model) => ipcRenderer.invoke('codeChats:setModel', id, model),
   codeSetBot: (id, botId) => ipcRenderer.invoke('codeChats:setBot', id, botId),
   codePickFolder: (id) => ipcRenderer.invoke('code:pickFolder', id),
-  codeRun: (chatId, prompt) => ipcRenderer.invoke('code:run', chatId, prompt),
+  codeRun: (chatId, prompt, refs) => ipcRenderer.invoke('code:run', chatId, prompt, refs),
+  codeSetFolder: (id, dir) => ipcRenderer.invoke('code:setFolder', id, dir),
+
+  // the editor panel's view of the disk (files.js)
+  fsList: (dir) => ipcRenderer.invoke('fs:list', dir),
+  fsStat: (p) => ipcRenderer.invoke('fs:stat', p),
+  fsRead: (file) => ipcRenderer.invoke('fs:read', file),
+  fsWrite: (file, text) => ipcRenderer.invoke('fs:write', file, text),
+  fsCreate: (dir, name, isDir) => ipcRenderer.invoke('fs:create', dir, name, isDir),
+  fsRename: (from, name) => ipcRenderer.invoke('fs:rename', from, name),
+  fsTrash: (p) => ipcRenderer.invoke('fs:trash', p),
+  fsReveal: (p) => ipcRenderer.invoke('fs:reveal', p),
+  fsOpenExternal: (p) => ipcRenderer.invoke('fs:openExternal', p),
+  openUrl: (url) => ipcRenderer.invoke('fs:openUrl', url),
+  fsPickFolder: () => ipcRenderer.invoke('fs:pickFolder'),
+  fsPickFiles: () => ipcRenderer.invoke('fs:pickFiles'),
+  fsWatch: (root) => ipcRenderer.invoke('fs:watch', root),
+  onFsChanged: (cb) => ipcRenderer.on('fs-changed', (_e, payload) => cb(payload)),
+  // Electron 32 took File.path away; this is how a dropped file says where it is.
+  pathForFile: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch (_) { return ''; } },
   codeStop: (chatId) => ipcRenderer.invoke('code:stop', chatId),
   codeRunningChats: () => ipcRenderer.invoke('code:running'),
   onCode: (cb) => ipcRenderer.on('code-event', (_e, payload) => cb(payload)),

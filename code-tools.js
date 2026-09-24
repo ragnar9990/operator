@@ -37,7 +37,13 @@ function inside(cwd, p) {
   return full;
 }
 
-const show = (cwd, full) => path.relative(path.resolve(cwd), full).replace(/\\/g, '/') || '.';
+// Relative when it is in the project, absolute when it is somewhere the user
+// pointed it at — "../../Desktop/x" helps nobody.
+const show = (cwd, full) => {
+  const rel = path.relative(path.resolve(cwd), full);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return full;
+  return rel.replace(/\\/g, '/') || '.';
+};
 
 /* ── globbing, without a dependency ───────────────────────────────── */
 
@@ -141,10 +147,23 @@ function runCommand(command, cwd, signal) {
 
 /* ── the toolset ─────────────────────────────────────────────────── */
 
-function buildCodeTools(cwd) {
+// `reach` is every other folder the file tools may touch: the ones the user
+// dragged into the chat, and their home folder, so "put it on my desktop"
+// works the way it does for Claude. Relative paths still mean the project.
+function buildCodeTools(cwd, reach = []) {
   const root = path.resolve(cwd);
+  const roots = [root, ...reach.filter(Boolean).map((r) => path.resolve(r))];
+  // Shadows the module-level check: inside the project OR any reachable root.
+  const inside = (_root, p) => {
+    const full = path.resolve(root, String(p || ''));
+    for (const r of roots) {
+      const rel = path.relative(r, full);
+      if (!rel.startsWith('..') && !path.isAbsolute(rel)) return full;
+    }
+    return null;
+  };
 
-  const refuse = (p) => text(`"${p}" is outside this chat's project folder, so it is out of bounds. Work inside ${root}.`);
+  const refuse = (p) => text(`"${p}" is outside the folders this chat can reach. Work inside ${root}, or ask the user to drag the folder into the chat.`);
 
   return [
     {

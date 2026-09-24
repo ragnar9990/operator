@@ -396,3 +396,109 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; }
 }
+
+/* ── the live demo's stage ────────────────────────────────────────────
+   The one place the page borrows the app's lit ring: a soft bloom behind the
+   demo, so the eye lands on the thing you can actually touch. */
+
+.hero { position: relative; overflow: hidden; }
+.hero::before {
+  content: "";
+  position: absolute; left: 50%; top: 420px;
+  width: min(1200px, 120vw); height: 760px;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(40% 45% at 25% 50%, rgba(41, 159, 255, 0.22), transparent 70%),
+    radial-gradient(38% 42% at 75% 45%, rgba(139, 92, 255, 0.2), transparent 70%),
+    radial-gradient(30% 35% at 55% 80%, rgba(255, 61, 209, 0.12), transparent 70%);
+  filter: blur(20px);
+  pointer-events: none;
+}
+.hero > .wrap { position: relative; }
+
+.kicker { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kicker span {
+  padding: 2px 9px;
+  border: 1px solid rgba(41, 159, 255, 0.45);
+  border-radius: 99px;
+  background: rgba(41, 159, 255, 0.1);
+  color: var(--signal-hi);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+}
+
+.hero h1 .hl {
+  background: linear-gradient(95deg, #7cc4ff 0%, #a98bff 45%, #ff7ad9 90%);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+
+.stage { margin-top: clamp(40px, 6vw, 68px); padding-bottom: clamp(60px, 8vw, 100px); }
+.stage-note {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 auto 16px;
+  max-width: 760px;
+  padding: 10px 16px;
+  border: 1px solid var(--line-hi);
+  border-radius: 99px;
+  background: rgba(14, 13, 13, 0.6);
+  backdrop-filter: blur(8px);
+  font-size: 14px; color: var(--ash); line-height: 1.45;
+}
+.stage-note b { color: var(--bone); font-weight: 600; }
+.stage-pulse {
+  flex: none; position: relative;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--signal);
+}
+.stage-pulse::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1.5px solid var(--signal);
+  animation: stage-pulse 1.8s ease-out infinite;
+}
+@keyframes stage-pulse { from { transform: scale(0.6); opacity: 1; } to { transform: scale(1.8); opacity: 0; } }
+@media (max-width: 720px) { .stage-note { border-radius: 14px; align-items: flex-start; } .stage-pulse { margin-top: 6px; } }
+@media (prefers-reduced-motion: reduce) { .stage-pulse::after { animation: none; } }
+
+/* ── safety: three numbered cards rather than three loose columns ─────── */
+
+.safe { counter-reset: safe; }
+.safe article {
+  counter-increment: safe;
+  padding: 24px 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--raise), transparent 80%);
+  transition: border-color 0.2s, transform 0.2s;
+}
+.safe article:hover { border-color: var(--line-max); transform: translateY(-2px); }
+.safe article::before {
+  content: "0" counter(safe);
+  display: block; margin-bottom: 14px;
+  font-family: var(--mono); font-size: 12px; color: var(--signal);
+}
+.safe h3 { border-bottom: 0; padding-bottom: 0; }
+.safe p { margin-top: 10px; }
+
+/* ── price: the card you are meant to pick carries a lit edge ─────────── */
+
+.card-buy { position: relative; }
+.card-buy::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px;
+  background: linear-gradient(135deg, rgba(41, 159, 255, 0.8), rgba(139, 92, 255, 0.5) 40%, transparent 70%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Buttons get a lift, so pressing one feels like pressing something. */
+.btn { transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s; }
+.btn:not(.btn-ghost):hover { transform: translateY(-1px); box-shadow: 0 8px 24px -8px rgba(41, 159, 255, 0.6); }
+.btn:active { transform: translateY(0); }
+
+/* The screenshot viewer tabs read as one control. */
+.viewer-tabs { display: inline-flex; padding: 4px; gap: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.vtab { border-color: transparent; }
+.vtab.is-on { border-color: var(--line-hi); }
+
+.faq summary:hover { color: var(--signal-hi); }

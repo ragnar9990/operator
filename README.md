@@ -245,6 +245,8 @@ npm run dist     # produces dist\Operator Setup <version>.exe
 | `nim.js` | The other brain — NVIDIA's catalog, and the tool-calling loop that drives it |
 | `code.js` | The coding side — Claude Code's own toolset, or NIM with the one below |
 | `code-tools.js` | Read/Write/Edit/Bash/Grep/Glob/LS in plain Node, for models that bring none |
+| `files.js` | The disk, for the editor: list, read, write, create, rename, Recycle Bin, and one folder watcher |
+| `ui/editor.js` + `ui/editor.css` | The editor panel in Code mode — file tree, tabs, highlighter, find — built here, no library |
 | `ui/` | Front end (command box + activity log + live view) |
 
 `agent.js` builds the toolset and the system prompt once and only then decides

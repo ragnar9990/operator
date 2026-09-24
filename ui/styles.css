@@ -19,16 +19,13 @@
 
   --accent: #299fff;
 
-  /* The lit edge. One hue per stop, walked in order around the window and
-     around a hovered button, starting and ending on the accent so the loop
-     closes without a seam. */
-  --lit-1: #1fa8ff;
-  --lit-2: #8b5cff;
-  --lit-3: #ff3dd1;
-  --lit-4: #ff7a2b;
-  --lit-5: #ffe14d;
-  --lit-6: #2bffb0;
-  --lit-7: #16e0ff;
+  /* The edge light: one colour, not a spectrum. A point of it travels round
+     the task box and round a hovered button, brightest at the head and fading
+     down its tail. It is the accent unless Settings says silver, so the one
+     colour choice the user makes is the one the whole app lights up in. */
+  --edge: var(--accent);
+  --edge-head: color-mix(in srgb, var(--edge) 40%, #fff);
+  --edge-rest: color-mix(in srgb, var(--edge) 14%, var(--line-hi));
   --on-accent: #050505;
   --fail: #f4685f;
 
@@ -176,66 +173,171 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 /* ── hands-free: the voice that runs the app ───────────────────────── */
 
-/* Floats over the app and is dragged by its bar, so it can be parked wherever
-   it is not in the way. Position is kept between sessions. */
+/* Floats over the app and is dragged by its top row, so it can be parked
+   wherever it is not in the way. Position is kept between sessions.
+   Deliberately small: one orb that says whose turn it is, one line that says
+   what is going on, and the conversation. Everything diagnostic is folded
+   into the drawer behind the sliders button. */
 .vox {
+  --vox-hue: var(--accent);
+  --lvl: 0;
   position: fixed;
   z-index: 60;
-  width: 320px;
+  width: 300px;
   border: 1px solid var(--line-hi);
-  border-radius: 14px;
-  background: var(--panel);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  transition: box-shadow 0.2s;
 }
+.vox.lifted { box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 28px 70px rgba(0, 0, 0, 0.62); }
+
+.vox[data-state="talking"]  { --vox-hue: var(--ink); }
+.vox[data-state="stopped"]  { --vox-hue: var(--fail); }
+.vox[data-state="starting"] { --vox-hue: var(--ink-4); }
+
 .vox-bar {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 10px 9px 12px;
-  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  padding: 12px 10px 12px 12px;
   cursor: grab;
   user-select: none;
   -webkit-app-region: no-drag;
 }
 .vox-bar:active { cursor: grabbing; }
-.vox.lifted { box-shadow: 0 26px 64px rgba(0, 0, 0, 0.62); }
 
-/* The dotted handle, so the bar reads as something you can pick up. */
-.vox-grip {
-  flex: 1;
-  height: 12px;
-  background-image: radial-gradient(circle, var(--line-max) 1px, transparent 1px);
-  background-size: 6px 6px;
-  opacity: 0.55;
+/* The orb. The halo swells with the microphone level, so it is the meter you
+   actually look at; the dot in the middle carries the state. */
+.vox-orb {
+  position: relative;
+  flex: none;
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--vox-hue) 14%, transparent);
+  transition: background 0.2s;
 }
+.vox-orb i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--vox-hue) 55%, transparent);
+  transform: scale(calc(1 + var(--lvl) * 0.45));
+  opacity: calc(0.35 + var(--lvl) * 0.65);
+  transition: transform 0.08s linear, opacity 0.08s linear, border-color 0.2s;
+}
+.vox-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--vox-hue);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--vox-hue) 60%, transparent);
+  transition: background 0.2s;
+}
+
+/* Listening breathes, hearing and thinking pulse faster, talking is solid.
+   The dot is the only thing telling you whether it is your turn. */
+.vox[data-state="listening"] .vox-dot { animation: voxBreathe 2.2s ease-in-out infinite; }
+.vox[data-state="hearing"] .vox-dot,
+.vox[data-state="thinking"] .vox-dot { animation: voxBreathe 0.7s ease-in-out infinite; }
+.vox[data-state="talking"] .vox-orb i { animation: voxTalk 1.1s ease-out infinite; }
+@keyframes voxBreathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.8); } }
+@keyframes voxTalk { from { transform: scale(1); opacity: 0.8; } to { transform: scale(1.5); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .vox-dot, .vox-orb i { animation: none !important; transition: none; } }
+
+.vox-status { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.vox-state { color: var(--ink); font-size: 14px; font-weight: 550; letter-spacing: -0.25px; line-height: 1.3; }
+.vox-hint {
+  color: var(--ink-4);
+  font-size: 11.5px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.vox-hint.bad { color: var(--fail); }
+
 .vox-x {
   flex: none;
-  width: 24px; height: 24px;
+  width: 28px; height: 28px;
   display: grid; place-items: center;
-  border: 0; border-radius: 7px;
+  border: 0; border-radius: 8px;
   background: transparent;
   color: var(--ink-4);
   cursor: pointer;
+  transition: color 0.13s, background 0.13s;
 }
-.vox-x svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-.vox-x:hover { color: var(--fail); background: rgba(244, 104, 95, 0.12); }
+.vox-x svg { width: 15px; height: 15px; }
+.vox-x:hover, .vox-x.on { color: var(--ink); background: var(--raise-hi); }
+.vox-x.close:hover { color: var(--fail); background: color-mix(in srgb, var(--fail) 14%, transparent); }
 
-.vox-body { padding: 10px 12px 11px; }
+/* The conversation, newest at the bottom. */
+.vox-log {
+  max-height: 188px;
+  overflow-y: auto;
+  padding: 2px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(252, 252, 252, 0.14) transparent;
+}
+.vox-log:empty { padding: 0 14px 12px; }
+.vox-log:empty::before {
+  content: 'Try “make an agent called Receipts” or “what did the invoices one say?”';
+  color: var(--ink-4);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.vox-line { font-size: 13px; line-height: 1.45; letter-spacing: -0.2px; overflow-wrap: anywhere; }
+.vox-line.you {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 6px 11px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--raise-hi);
+  color: var(--ink);
+}
+.vox-line.said { color: var(--ink-2); }
+/* What it did, as opposed to what it said — quieter, and set apart. */
+.vox-line.did {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--ink-4);
+  font-size: 11.5px;
+}
+.vox-line.did::before {
+  content: '';
+  flex: none;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateY(-1px);
+}
 
-/* ── is the microphone actually hearing me? ───────────────────────── */
+/* ── the drawer: is the microphone actually hearing me? ─────────────── */
 
-.vox-in { padding-bottom: 9px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
-.vox-in select {
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 5px 7px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+.vox-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
   background: var(--raise);
+}
+.vox-setup select {
+  width: 100%;
+  padding: 7px 30px 7px 10px;
+  border: 1px solid var(--line-hi);
+  border-radius: 9px;
+  background-color: var(--raise);
   color: var(--ink-2);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 /* The bar moves with your voice. The mark is where it starts counting as
@@ -243,10 +345,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
    point of showing it. */
 .vox-meter {
   position: relative;
-  height: 8px;
+  height: 6px;
   border-radius: 9999px;
   background: var(--raise-hi);
-  overflow: hidden;
 }
 .vox-meter i {
   display: block;
@@ -259,50 +360,29 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .vox.loud .vox-meter i { background: var(--accent); }
 .vox-meter b {
   position: absolute;
-  top: -2px; bottom: -2px;
+  top: -3px; bottom: -3px;
   width: 2px;
-  background: var(--ink-3);
-  opacity: 0.7;
+  border-radius: 2px;
+  background: var(--ink-2);
 }
-.vox-hint { margin: 6px 0 0; color: var(--ink-4); font-size: 11.5px; line-height: 1.4; }
-.vox-hint.bad { color: var(--fail); }
 
-.vox-top {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--line);
-}
-.vox-dot {
+.vox-setup-row { display: flex; align-items: center; gap: 10px; }
+.vox-test {
   flex: none;
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--line-hi);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.13s, border-color 0.13s, background 0.13s;
 }
-/* Listening breathes, talking is solid, thinking pulses faster. The dot is the
-   only thing telling you whether it is your turn. */
-.vox[data-state="listening"] .vox-dot { animation: voxBreathe 2.2s ease-in-out infinite; }
-.vox[data-state="hearing"] .vox-dot,
-.vox[data-state="thinking"] .vox-dot { animation: voxBreathe 0.7s ease-in-out infinite; }
-.vox[data-state="talking"] .vox-dot { animation: none; background: var(--ink); }
-@keyframes voxBreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-@media (prefers-reduced-motion: reduce) { .vox-dot { animation: none !important; } }
-
-.vox-state { flex: none; color: var(--ink-2); font-size: 13px; font-weight: 500; letter-spacing: -0.2px; }
-.vox-voice { flex: 1; min-width: 0; color: var(--ink-4); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.vox-log { max-height: 168px; overflow-y: auto; scrollbar-width: thin; }
-.vox-foot { margin: 8px 0 0; padding-top: 7px; border-top: 1px solid var(--line); color: var(--ink-4); font-size: 11px; }
+.vox-test svg { width: 14px; height: 14px; }
+.vox-test:hover { color: var(--ink); border-color: var(--line-max); background: var(--raise); }
+.vox-foot { flex: 1; min-width: 0; color: var(--ink-4); font-size: 11px; line-height: 1.35; }
 .vox-foot:empty { display: none; }
-.vox-line { font-size: 13px; line-height: 1.5; letter-spacing: -0.2px; padding: 1px 0; }
-.vox-line.you { color: var(--ink); }
-.vox-line.you::before { content: '“'; }
-.vox-line.you::after { content: '”'; }
-.vox-line.said { color: var(--ink-2); }
-/* What it did, as opposed to what it said — quieter, and set apart. */
-.vox-line.did { color: var(--ink-4); font-size: 12px; padding-left: 13px; position: relative; }
-.vox-line.did::before { content: '·'; position: absolute; left: 3px; }
 
 /* ── workspaces: named folders of agents ───────────────────────────── */
 
@@ -364,7 +444,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 /* Where a dragged agent would land. */
 .space-head.drop, .rail-head.drop {
-  background: rgba(41, 159, 255, 0.16);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .rail-head.drop { border-radius: 9px; }
@@ -402,7 +482,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
   background: var(--raise-hi);
   color: var(--ink-4);
 }
-.role-tag.is-coordinator { background: rgba(41, 159, 255, 0.16); color: var(--accent); }
+.role-tag.is-coordinator { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 
 /* A coding chat working in the background, while you read another one. */
 .code-chat-spin {
@@ -690,7 +770,7 @@ body:not(.started) .thread { flex: 0 1 auto; overflow: visible; padding-bottom: 
 .mic:hover { background: var(--raise-hi); color: var(--ink); }
 
 /* listening: accent, with a ring breathing out of it */
-.mic.on { color: var(--accent); background: rgba(41, 159, 255, 0.12); }
+.mic.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .mic .ring {
   position: absolute;
   inset: 0;
@@ -926,7 +1006,7 @@ body:not(.started) .thread { flex: 0 1 auto; overflow: visible; padding-bottom: 
 }
 
 .send { background: var(--accent); color: var(--on-accent); }
-.send:hover:not(:disabled) { background: #46adff; }
+.send:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, white); }
 .send:disabled { background: var(--raise-hi); color: var(--ink-4); cursor: default; }
 
 .heard {
@@ -1033,7 +1113,7 @@ body:not(.has-screen) .computer { display: none; }
 
 /* suggestions and the opening question only belong on an empty thread */
 body.started .suggestions,
-body.started .intro { display: none; }
+body.started #intro { display: none; }
 
 @media (max-width: 1080px) {
   .computer { width: 42%; min-width: 340px; }
@@ -1158,7 +1238,7 @@ body.started .intro { display: none; }
 }
 .mini:hover { color: var(--ink); border-color: var(--line-max); background: var(--raise); }
 .solid-mini { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 500; }
-.solid-mini:hover { background: #46adff; border-color: #46adff; color: var(--on-accent); }
+.solid-mini:hover { background: color-mix(in srgb, var(--accent) 85%, white); border-color: color-mix(in srgb, var(--accent) 85%, white); color: var(--on-accent); }
 
 /* ── who you are talking to ──────────────────────────────────────── */
 
@@ -1369,7 +1449,7 @@ body.started .intro { display: none; }
   cursor: pointer;
   transition: background 0.14s, border-color 0.14s;
 }
-.solid-btn:hover { background: #46adff; border-color: #46adff; }
+.solid-btn:hover { background: color-mix(in srgb, var(--accent) 85%, white); border-color: color-mix(in srgb, var(--accent) 85%, white); }
 
 /* a routine that cannot run right now should say so rather than do nothing */
 .note .mini[disabled] { opacity: 0.4; cursor: default; }
@@ -1540,10 +1620,13 @@ body.started .intro { display: none; }
 /* A small badge in the topbar showing the current computer. */
 .target-badge {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 9px; border: 1px solid var(--line-hi); border-radius: 20px;
-  font-size: 12px; color: var(--ink-2); cursor: pointer;
+  padding: 4px 10px; border: 1px solid var(--line-hi); border-radius: 20px;
+  background: transparent; font: inherit; font-size: 12px; color: var(--ink-2); cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: border-color .15s, color .15s, background .15s;
 }
-.target-badge:hover { border-color: var(--line-max); color: var(--ink); }
+.target-badge:hover { border-color: var(--line-max); color: var(--ink); background: var(--raise); }
+.target-badge:not(.remote) i { background: #46d17f; }
 .target-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
 .target-badge.remote i { background: var(--accent); }
 
@@ -1688,7 +1771,7 @@ body.started .intro { display: none; }
 .acct-avatar {
   flex: none; width: 34px; height: 34px; border-radius: 50%;
   display: grid; place-items: center; font-size: 15px; font-weight: 650; color: #fff;
-  background: linear-gradient(135deg, #299fff, #7b5cff);
+  background: var(--accent);
 }
 .acct-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .acct-email { font-size: 13.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1697,7 +1780,7 @@ body.started .intro { display: none; }
 .acct-check svg { width: 14px; height: 14px; fill: none; stroke: #46d17f; stroke-width: 2.4; }
 
 /* ── skills ─────────────────────────────────────────────────────── */
-.pill.solid { background: var(--accent); color: #fff; border: 1px solid transparent; padding: 8px 16px; border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 550; }
+.pill.solid { background: var(--accent); color: var(--on-accent); border: 1px solid transparent; padding: 8px 16px; border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 550; }
 .pill.solid:hover { filter: brightness(1.08); }
 .pill.solid:disabled { opacity: .5; cursor: default; }
 .pill.sm { padding: 5px 11px; font-size: 12px; }
@@ -1762,10 +1845,10 @@ body.started .intro { display: none; }
 }
 .dry-toggle svg { width: 15px; height: 15px; }
 .dry-toggle:hover { color: var(--ink); border-color: var(--line-max); }
-.dry-toggle.on { color: var(--accent); border-color: var(--accent); background: rgba(41, 159, 255, 0.1); }
+.dry-toggle.on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
 /* while armed, the composer says what will happen */
-body.rehearsing #input { border-color: rgba(41, 159, 255, 0.35); }
+body.rehearsing #input { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
 
 /* the plan card */
 .plan { border: 1px solid var(--line-hi); border-radius: 13px; background: var(--raise); overflow: hidden; }
@@ -2051,13 +2134,15 @@ html, body { display: flex; flex-direction: column; }
   inset: -1px;
   border-radius: inherit;
   padding: 1.5px;
+  /* A comet: nothing for most of the way round, then a tail that brightens
+     into a hard, bright head. The head is at the leading edge of the sweep. */
   background: conic-gradient(from var(--lit-angle),
     transparent 0deg,
-    var(--lit-1) 18deg,
-    var(--lit-3) 42deg,
-    var(--lit-4) 66deg,
-    transparent 92deg,
-    transparent 360deg);
+    transparent 200deg,
+    color-mix(in srgb, var(--edge) 35%, transparent) 290deg,
+    var(--edge) 345deg,
+    var(--edge-head) 358deg,
+    transparent 359.5deg);
   opacity: 0;
   transition: opacity 0.18s ease;
   pointer-events: none;
@@ -2123,38 +2208,56 @@ html, body { display: flex; flex-direction: column; }
    composer is the thing you are actually looking at — and unlike a border round
    the window, it can mean something.
 
-   Two layers make the neon: ::before is the same ring blurred out into a bloom,
-   ::after is the hard line on top. A single sharp line reads as a border; the
-   bloom underneath is what makes it glow. */
+   Two lights chase each other round a quiet ring, half a turn apart. The
+   ring is always there, so the box has an edge even between the lights.
+   ::before is the lights alone, blurred into a bloom; ::after is the ring
+   and the lights drawn sharp on top. A single sharp line reads as a border;
+   the bloom underneath is what makes it glow. */
 
 .composer { position: relative; }
+
+/* Declared on the pseudo-elements, not the box: a variable is resolved where
+   it is declared, and the angle only animates here. On .composer the lights
+   would be frozen at 0deg. */
+.composer::before,
+.composer::after {
+  --comets: conic-gradient(from var(--lit-angle),
+    transparent 0%, transparent 16%,
+    color-mix(in srgb, var(--edge) 45%, transparent) 38%,
+    var(--edge) 47%,
+    var(--edge-head) 49.4%,
+    transparent 49.7%, transparent 66%,
+    color-mix(in srgb, var(--edge) 45%, transparent) 88%,
+    var(--edge) 97%,
+    var(--edge-head) 99.4%,
+    transparent 99.7%);
+}
 
 .composer::before,
 .composer::after {
   content: '';
   position: absolute;
   border-radius: inherit;
-  background: conic-gradient(from var(--lit-angle),
-    var(--lit-1), var(--lit-2), var(--lit-3), var(--lit-4),
-    var(--lit-5), var(--lit-6), var(--lit-7), var(--lit-1));
-  animation: lit-sweep 5s linear infinite;
+  animation: lit-sweep 6s linear infinite;
   transition: opacity 0.25s ease;
   pointer-events: none;
 }
 
-/* the bloom */
+/* the bloom: the lights only, never the ring, or the whole box would haze */
 .composer::before {
   inset: -2px;
   padding: 3px;
-  filter: blur(8px);
-  opacity: 0.6;
+  background: var(--comets);
+  filter: blur(9px);
+  opacity: 0.55;
 }
 
 /* the line itself */
 .composer::after {
   inset: -1px;
   padding: 1.5px;
-  opacity: 0.9;
+  background: var(--comets), linear-gradient(var(--edge-rest), var(--edge-rest));
+  opacity: 0.95;
 }
 
 .composer:focus-within::before { opacity: 0.85; }
@@ -2229,6 +2332,14 @@ body.working .composer::before { filter: blur(11px); }
 :root[data-accent="green"]  { --accent: #22c07a; }
 :root[data-accent="pink"]   { --accent: #ff4ea8; }
 :root[data-accent="amber"]  { --accent: #f0a12e; --on-accent: #1a1204; }
+
+/* ── the edge light's colour ────────────────────────────────────────
+   Silver is for anyone who wants the movement without the colour. On a light
+   page a white head would vanish, so there the head is the colour itself. */
+
+:root[data-edge="silver"] { --edge: #d4d8de; }
+:root[data-theme="light"] { --edge-head: var(--edge); }
+:root[data-theme="light"][data-edge="silver"] { --edge: #6b7078; }
 
 /* ── glow ───────────────────────────────────────────────────────────
    "subtle" keeps the colour but drops the bloom, which is what most of the
@@ -2335,4 +2446,667 @@ body.working .composer::before { filter: blur(11px); }
   margin: 7px 0 0;
   font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
   color: var(--ink-4); white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── polish pass ─────────────────────────────────────────────────────
+   Small things, gathered in one place so each is easy to find and undo. */
+
+/* Native controls — select popups, date and time pickers, scrollbars — follow
+   the theme instead of arriving white on a dark app. */
+:root { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Every select gets the same drawn chevron. The native arrow sat at a
+   different size and weight from every other icon in the app. */
+.field select,
+.audit-filters select,
+.routine-row select,
+.vox-setup select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  cursor: pointer;
+}
+.field select:hover, .audit-filters select:hover { border-color: var(--line-max); }
+
+/* Focus says where you are typing, in the accent, without shouting. */
+.field input:focus, .field textarea:focus, .field select:focus,
+.audit-filters select:focus, .audit-filters input:focus,
+.vox-setup select:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.field input, .field textarea, .field select { transition: border-color .14s, box-shadow .14s; }
+
+/* Labels read as labels, a step above the hint text under them. */
+.field > span { color: var(--ink-2); font-weight: 500; }
+
+/* The scrim softens what is behind it rather than only dimming it. */
+.sheet-scrim { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(3px); }
+:root[data-theme="light"] .sheet-scrim { background: rgba(20, 20, 24, 0.28); }
+:root[data-theme="light"] .sheet-card,
+:root[data-theme="light"] .menu,
+:root[data-theme="light"] .vox { box-shadow: 0 24px 60px rgba(20, 20, 30, 0.18); }
+:root[data-theme="light"] .slash-menu { background: var(--panel); }
+
+/* Settings keeps one height whichever tab is open. Sized to its content it
+   grew and shrank on every click, and the tab you were aiming at moved out
+   from under the pointer. */
+#settingsSheet .sheet-card { height: min(86vh, 680px); }
+.settings-split .sheet-body { flex: 1; }
+
+/* The agent sheet reads as sections rather than one long form. */
+#sheet .sheet-body { gap: 20px; padding: 18px 20px 22px; }
+#sheet .sheet-body > .field:nth-child(4),
+#sheet .sheet-body > .field:nth-child(n + 7) {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* A routine is a sentence first and a schedule second: the task gets the
+   whole line, and when it runs goes underneath. */
+.routine-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.routine-row input[type="text"] { grid-column: 1 / -1; }
+.routine-row select, .routine-row input[type="time"] { width: 100%; }
+.add-row input[type="text"], .routine-row select, .routine-row input[type="time"] {
+  padding: 8px 11px;
+  border: 1px solid var(--line-hi);
+  border-radius: 10px;
+  background-color: var(--raise);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+.add-row .mini { padding: 6px 13px; font-size: 12.5px; }
+
+/* A theme swatch is a tiny window in that theme: ground, a sidebar, a line
+   of text. The old diagonal split read as a broken icon. */
+.swatch-chip {
+  position: relative;
+  width: 30px; height: 20px;
+  border-radius: 5px;
+  background: var(--a);
+  overflow: hidden;
+}
+.swatch-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 8px;
+  background: var(--b);
+  border-right: 1px solid color-mix(in srgb, var(--c) 12%, transparent);
+}
+.swatch-chip::after {
+  content: '';
+  position: absolute;
+  left: 12px; right: 5px; top: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--c);
+  opacity: 0.8;
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--c) 45%, transparent);
+}
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* Segmented controls: a sliding-pill look instead of joined boxes. */
+.seg { padding: 3px; gap: 2px; border-radius: 10px; background: var(--raise); }
+.seg-btn { border-right: 0; border-radius: 7px; padding: 6px 15px; }
+.seg-btn[aria-pressed="true"] { color: var(--ink); background: var(--raise-hi); box-shadow: inset 0 0 0 1px var(--line-hi); }
+
+/* The active settings tab carries a small accent bar, so it is findable at a
+   glance down a long sidebar. */
+.tab.active::before {
+  content: '';
+  position: absolute;
+  left: -10px; top: 9px; bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+/* Cards in Settings lift a touch on hover, so what is clickable says so. */
+.connector { transition: border-color .15s; }
+.connector:hover { border-color: var(--line-max); }
+
+/* Code mode: an empty chat centres its intro, the way the Agents side does,
+   rather than leaving it stranded at the top of an empty page. */
+.code-thread:has(> #codeIntro:not([hidden])) { display: flex; flex-direction: column; justify-content: center; }
+.code-thread:has(> #codeIntro:not([hidden])) .intro { margin: 0 auto 8vh; }
+
+/* The New chat button reads as the primary action of that sidebar. */
+.code-new { justify-content: center; }
+
+/* Rail section headings: small caps, so they read as headings and not as rows. */
+.rail-head {
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.rail-head .mini { text-transform: none; letter-spacing: -0.1px; font-weight: 400; }
+.chats-empty, .space-empty { font-size: 12.5px; }
+
+/* Suggestions: a touch more room to breathe. */
+.suggestions { gap: 8px 10px; margin-top: 16px; }
+.chip { padding: 8px 15px; }
+
+/* The live-view header gets the same weight as the rest of the chrome. */
+.comp-head { height: 44px; }
+.screen { padding: 14px; }
+#frame { box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45); }
+
+/* Tool steps: the current step gets a soft highlight, not just a colour. */
+.step.now { margin: 0 -8px; padding: 5px 8px; border-radius: 7px; background: var(--raise-hi); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-scrim { backdrop-filter: none; }
+}
+
+/* Settings → Appearance: the edge light's colour, shown as a tiny lit ring. */
+.edge-swatches { margin-top: 6px; }
+.edge-chip {
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border: 1.5px solid transparent;
+  border-radius: 99px;
+  background:
+    linear-gradient(var(--panel), var(--panel)) padding-box,
+    conic-gradient(from 180deg, color-mix(in srgb, var(--e) 18%, transparent) 0 35%, var(--e) 92%, #fff 99%, color-mix(in srgb, var(--e) 18%, transparent) 99.5%) border-box;
+}
+
+/* The start screen: the agent's face above the question, so you can see who
+   you are about to talk to. */
+.intro-face { display: block; width: 44px; height: 44px; margin: 0 auto 14px; }
+.intro-face .av { width: 44px; height: 44px; }
+
+/* ── the start screen ─────────────────────────────────────────────────
+   Covers everything under the mode bar when the app opens. One column: make
+   an agent, or search the ones you have. */
+
+.launch {
+  position: fixed;
+  inset: 40px 0 0 0;          /* under the mode bar, which keeps the window buttons */
+  z-index: 40;                /* below .sheet, which opens straight after Create */
+  display: flex;
+  justify-content: center;
+  overflow: hidden;           /* the background layers are bigger than the window */
+  background: var(--bg);
+  animation: fade 0.18s both;
+}
+.launch[hidden] { display: none; }
+
+.launch-inner {
+  position: relative;
+  z-index: 1;                 /* above the glow */
+  width: min(600px, 100%);
+  max-height: 100%;
+  overflow-y: auto;           /* only a very short window needs it to scroll */
+  margin: auto 0;
+  padding: 48px 16px 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: center;
+}
+
+.launch-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  border: 1px solid var(--line-hi);
+  border-radius: 14px;
+  background: var(--raise);
+  color: var(--accent);
+}
+.launch-mark svg { width: 24px; height: 24px; }
+
+.launch h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 550;
+  letter-spacing: -0.48px;
+}
+.launch p { margin: 0 0 26px; color: var(--ink-3); font-size: 14px; }
+
+.launch kbd { font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); }
+
+/* the one big action */
+.launch-new {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line-hi));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.launch-new:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); transform: translateY(-1px); }
+.launch-new:active { transform: translateY(0); }
+.launch-new-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.launch-new-ic svg { width: 20px; height: 20px; stroke-width: 2; }
+.launch-new-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.launch-new-text b { font-size: 14px; font-weight: 550; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-new-text small { font-size: 12px; color: var(--ink-3); }
+
+/* search */
+.launch-find {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 22px 0 8px;
+  padding: 0 12px;
+  height: 42px;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: var(--raise);
+  color: var(--ink-4);
+  cursor: text;
+  transition: border-color 0.15s, background 0.15s;
+}
+.launch-find:focus-within { border-color: var(--line-max); background: var(--raise-hi); }
+.launch-find svg { flex: none; width: 16px; height: 16px; }
+.launch-find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+.launch-find input::placeholder { color: var(--ink-4); }
+.launch-find input::-webkit-search-cancel-button { display: none; }
+.launch-count { flex: none; font-size: 12px; color: var(--ink-4); }
+
+/* the agents you have */
+.launch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(40vh, 420px);
+  overflow-y: auto;
+  padding: 2px;
+  text-align: left;
+}
+.launch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.launch-row.on { background: var(--raise-hi); border-color: var(--line); }
+.launch-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.launch-name { display: flex; align-items: center; min-width: 0; }
+.launch-name b { min-width: 0; font-size: 13.5px; font-weight: 550; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-text small { font-size: 12px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-meta { flex: none; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-4); }
+.launch-ws {
+  max-width: 120px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: var(--raise-hi);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.launch-empty { margin: 0; padding: 18px 10px; color: var(--ink-4); font-size: 13px; text-align: center; }
+
+.launch-skip {
+  align-self: center;
+  margin-top: 18px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 13px;
+  cursor: pointer;
+}
+.launch-skip:hover { color: var(--ink); background: var(--raise); }
+
+@media (max-width: 520px) {
+  .launch-new kbd, .launch-ws { display: none; }
+}
+
+/* ── the start screen, moving ─────────────────────────────────────────
+   Arrives in order — the mark, the words, the button, the search, then the
+   agents one after another — and leaves by lifting away over the chat it
+   opened. In between: the lit edge runs round Create the way it runs round
+   the task box, and whichever agent is highlighted wakes up and looks about. */
+
+/* a soft pool of the accent behind the mark, breathing slowly */
+.launch::before {
+  content: '';
+  position: absolute;
+  top: -180px;
+  left: 50%;
+  width: 920px;
+  height: 620px;
+  translate: -50% 0;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 10%, transparent), transparent);
+  pointer-events: none;
+  animation: launch-aura 9s ease-in-out infinite;
+}
+@keyframes launch-aura {
+  0%, 100% { opacity: 0.75; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.08); }
+}
+
+/* arriving */
+.launch.arriving .launch-inner > * { animation: launch-rise 0.62s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.launch.arriving .launch-mark    { animation-name: launch-pop; animation-delay: 0.02s; }
+.launch.arriving h1              { animation-delay: 0.08s; }
+.launch.arriving p               { animation-delay: 0.13s; }
+.launch.arriving .launch-new     { animation-delay: 0.19s; }
+.launch.arriving .launch-find    { animation-delay: 0.25s; }
+.launch.arriving .launch-list    { animation: none; }
+.launch.arriving .launch-skip    { animation-delay: 0.5s; }
+.launch.arriving .launch-row {
+  animation: launch-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(0.3s + var(--i, 0) * 0.045s);
+}
+@keyframes launch-rise { from { opacity: 0; transform: translateY(14px); } }
+@keyframes launch-pop  { from { opacity: 0; transform: scale(0.6) rotate(-12deg); } }
+
+/* rows repainted by the search: quick, no stagger */
+.launch .launch-list .launch-row.typed,
+.launch .launch-list .launch-empty.typed { animation: launch-row-in 0.18s ease-out both; animation-delay: 0s; }
+@keyframes launch-row-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* Leaving. Only opacity on the screen and transform on its content, so the
+   GPU can run it without the page repainting, and it starts fast (ease-out)
+   so it answers the click at once instead of seeming to hang first.
+   The screen is already on its own layer while it is up, so the exit does not
+   have to build one on its first frame. */
+.launch { will-change: opacity; }
+.launch.leaving { animation: launch-out 0.24s ease-out both; }
+.launch.leaving .launch-inner { animation: launch-lift 0.24s cubic-bezier(0.32, 0.72, 0, 1) both; will-change: transform; }
+@keyframes launch-out  { to { opacity: 0; } }
+@keyframes launch-lift { to { transform: translateY(-12px) scale(0.985); } }
+
+/* Everything inside freezes where it is for the exit. The lit edge and the
+   blurred bloom under it repaint on every frame they move, which is what kept
+   the exit from being a cheap fade of a still picture. */
+.launch.leaving::before,
+.launch.leaving .launch-bg *,
+.launch.leaving .launch-inner *,
+.launch.leaving .launch-inner *::before,
+.launch.leaving .launch-inner *::after { animation-play-state: paused !important; }
+
+/* ── the moving background ────────────────────────────────────────────
+   Kept quiet on purpose — the ground is still the warm near-black, and blue
+   is still the one colour. Two faint pools of the accent and one of plain
+   light drift on long, out-of-step loops; a few motes rise through them; a
+   glow trails the pointer; grain over the lot. Each piece is painted once and
+   then only moved (transform / opacity), so it is GPU work. */
+
+.launch-bg {
+  position: absolute;
+  inset: -40px;               /* room for the parallax, so no edge ever shows */
+  pointer-events: none;
+  opacity: 0.95;
+  will-change: transform;
+}
+:root[data-theme="light"] .launch-bg { opacity: 0.6; }
+
+.launch-blob {
+  position: absolute;
+  width: 58vmax;
+  height: 58vmax;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--c), transparent);
+  will-change: transform;
+}
+.launch-blob.b1 {
+  --c: color-mix(in srgb, var(--accent) 14%, transparent);
+  left: -16vmax; top: -24vmax;
+  animation: launch-drift-1 50s ease-in-out infinite alternate;
+}
+.launch-blob.b2 {
+  --c: color-mix(in srgb, var(--ink) 5%, transparent);
+  right: -22vmax; top: 4vh;
+  animation: launch-drift-2 64s ease-in-out infinite alternate;
+}
+.launch-blob.b3 {
+  --c: color-mix(in srgb, var(--accent) 8%, transparent);
+  left: 12vw; bottom: -34vmax;
+  animation: launch-drift-3 56s ease-in-out infinite alternate;
+}
+@keyframes launch-drift-1 {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(8vw, 5vh) scale(1.08); }
+  100% { transform: translate(15vw, -1vh) scale(0.96); }
+}
+@keyframes launch-drift-2 {
+  0%   { transform: translate(0, 0) scale(1.02); }
+  50%  { transform: translate(-9vw, 8vh) scale(0.95); }
+  100% { transform: translate(-3vw, 15vh) scale(1.07); }
+}
+@keyframes launch-drift-3 {
+  0%   { transform: translate(0, 0) scale(0.97); }
+  50%  { transform: translate(11vw, -6vh) scale(1.06); }
+  100% { transform: translate(-5vw, -10vh) scale(1); }
+}
+
+/* motes — placed and timed by renderer.js */
+.launch-motes { position: absolute; inset: 0; }
+.launch-motes i {
+  position: absolute;
+  width: var(--s, 2px);
+  height: var(--s, 2px);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 80%, var(--accent));
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: launch-mote 24s linear infinite;
+}
+:root[data-theme="light"] .launch-motes i { background: var(--ink-3); }
+@keyframes launch-mote {
+  0%   { transform: translate3d(0, 20px, 0); opacity: 0; }
+  20%  { opacity: 0.35; }
+  70%  { opacity: 0.2; }
+  100% { transform: translate3d(8px, -120px, 0); opacity: 0; }
+}
+
+/* the glow that trails the pointer — moved by renderer.js, faded in here */
+.launch-spot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 560px;
+  height: 560px;
+  margin: -280px 0 0 -280px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 6%, transparent), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+  will-change: transform;
+}
+.launch.pointer .launch-spot { opacity: 1; }
+
+/* grain, and a vignette that pulls the eye to the middle */
+.launch-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.28)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  opacity: 0.16;
+}
+:root[data-theme="light"] .launch-grain {
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.06)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .35 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* ── Create → its panel ───────────────────────────────────────────────
+   The card grows out of the button (renderer.js animates its transform from
+   the button's box). A wash of the button's colour covers it while it moves,
+   so it reads as the button opening up, and fades as the fields rise in. The
+   start screen settles back behind it. */
+
+#sheet.grow .sheet-card { animation: none; }
+#sheet.grow .sheet-scrim { animation-duration: 0.35s; }
+#sheet.grow .sheet-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  pointer-events: none;
+  animation: grow-wash 0.5s ease-out both;
+}
+@keyframes grow-wash {
+  0%, 30% { opacity: 1; }
+  100%    { opacity: 0; }
+}
+#sheet.grow .sheet-top,
+#sheet.grow .sheet-body > *,
+#sheet.grow .sheet-foot { animation: grow-field 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: 0.2s; }
+#sheet.grow .sheet-body > :nth-child(1) { animation-delay: 0.24s; }
+#sheet.grow .sheet-body > :nth-child(2) { animation-delay: 0.27s; }
+#sheet.grow .sheet-body > :nth-child(3) { animation-delay: 0.3s; }
+#sheet.grow .sheet-body > :nth-child(4) { animation-delay: 0.33s; }
+#sheet.grow .sheet-body > :nth-child(n+5) { animation-delay: 0.36s; }
+#sheet.grow .sheet-foot { animation-delay: 0.3s; }
+@keyframes grow-field { from { opacity: 0; transform: translateY(10px); } }
+
+/* closing, from anywhere: a short fade and settle instead of a blink */
+#sheet.closing .sheet-scrim { animation: sheet-fade-out 0.18s ease-in both; }
+#sheet.closing .sheet-card { animation: sheet-card-out 0.18s ease-in both; }
+@keyframes sheet-fade-out { to { opacity: 0; } }
+@keyframes sheet-card-out { to { opacity: 0; transform: translateY(6px) scale(0.98); } }
+
+/* the start screen, with the panel over it: pushed back a little, and its own
+   little lights stilled — the scrim blurs what is behind it, and a still
+   picture is far cheaper to keep blurred. The colour behind keeps drifting. */
+.launch-inner { transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.45s ease; }
+.launch.behind .launch-inner { transform: scale(0.96); opacity: 0.5; }
+.launch.behind .launch-inner *,
+.launch.behind .launch-inner *::before,
+.launch.behind .launch-inner *::after { animation-play-state: paused !important; }
+
+/* the mark floats, and sends out a slow ring now and then */
+.launch-mark { position: relative; }
+.launch-mark svg { animation: launch-float 4.5s ease-in-out infinite; }
+@keyframes launch-float { 50% { transform: translateY(-2px); } }
+.launch-mark::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--accent);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  animation: launch-ring 3.6s cubic-bezier(0.22, 1, 0.36, 1) 1s infinite;
+}
+@keyframes launch-ring {
+  0%       { opacity: 0.55; transform: scale(1); }
+  60%, 100% { opacity: 0; transform: scale(1.6); }
+}
+
+/* Create carries the lit edge — the task box's comet, one head instead of two */
+.launch-new { position: relative; }
+.launch-new::before,
+.launch-new::after {
+  --comets: conic-gradient(from var(--lit-angle),
+    transparent 0%, transparent 52%,
+    color-mix(in srgb, var(--edge) 45%, transparent) 84%,
+    var(--edge) 97%,
+    var(--edge-head) 99.4%,
+    transparent 99.7%);
+  content: '';
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: lit-sweep 5s linear infinite;
+  transition: opacity 0.25s ease;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+}
+.launch-new::before { inset: -2px; padding: 3px; background: var(--comets); filter: blur(8px); opacity: 0.5; }
+.launch-new::after  { inset: -1px; padding: 1.5px; background: var(--comets); opacity: 0.9; }
+.launch-new:hover::before,
+.launch-new:hover::after { animation-duration: 1.8s; opacity: 1; }
+.launch-new-ic { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s; }
+.launch-new:hover .launch-new-ic { transform: rotate(90deg) scale(1.06); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent); }
+.launch-new:active .launch-new-ic { transform: rotate(90deg) scale(0.94); }
+
+:root[data-glow="subtle"] .launch-new::before { opacity: 0; }
+:root[data-glow="off"] .launch-new::before,
+:root[data-glow="off"] .launch-new::after { content: none; }
+
+/* the search box lights up a little when it has you */
+.launch-find { transition: border-color 0.2s, background 0.2s, box-shadow 0.25s; }
+.launch-find:focus-within { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 11%, transparent); }
+.launch-find:focus-within svg { color: var(--accent); transition: color 0.2s; }
+
+/* the highlighted agent: the row eases in, the face lifts and glances about,
+   and the Enter arrow slides in on the right */
+.launch-row { transition: background 0.18s, border-color 0.18s; }
+.launch-row .av { transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.launch-row.on .av { transform: scale(1.08) translateY(-1px); }
+.launch-row.on .av .av-eyes { animation: av-glance 2.4s ease-in-out infinite; }
+.launch-go {
+  width: 15px;
+  height: 15px;
+  color: var(--ink-3);
+  opacity: 0;
+  transform: translateX(-5px);
+  transition: opacity 0.18s, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.launch-row.on .launch-go { opacity: 1; transform: none; }
+
+/* Motion off, from Settings or the OS: everything above holds still, and
+   the screen just appears and goes. */
+:root[data-motion="off"] .launch,
+:root[data-motion="off"] .launch *,
+:root[data-motion="off"] .launch::before,
+:root[data-motion="off"] .launch *::before,
+:root[data-motion="off"] .launch *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .launch, .launch *, .launch::before, .launch *::before, .launch *::after { animation: none !important; transition: none !important; }
+}
+
+/* Motion off: the panel just appears and goes (renderer.js skips the grow and
+   the close wait too). */
+:root[data-motion="off"] #sheet.grow *,
+:root[data-motion="off"] #sheet.grow *::after { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  #sheet.grow *, #sheet.grow *::after { animation: none !important; }
 }

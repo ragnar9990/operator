@@ -338,6 +338,9 @@ const whoTitle = document.getElementById('whoTitle');
 let bots = [];
 let bot = null;        // the bot you are talking to
 let chat = null;       // its open chat, or null until you say something
+// On the start screen: the next message begins a new conversation instead of
+// carrying on whichever one this agent had last.
+let fresh = false;
 let stepsRec = null;
 let saveTimer = null;
 
@@ -364,8 +367,15 @@ function paintFaces() {
 
     // you are talking to a particular bot, so say its name
     input.placeholder = 'Give ' + bot.name + ' a task';
-    const h1 = document.querySelector('.intro h1');
+    const h1 = document.querySelector('#intro h1');
     if (h1) h1.textContent = 'What should ' + bot.name + ' do?';
+    // The start screen shows who you are about to talk to.
+    const introFace = document.getElementById('introFace');
+    if (introFace && introFace.dataset.for !== bot.id + JSON.stringify(bot.face)) {
+      introFace.innerHTML = '';
+      introFace.appendChild(Avatar.el(bot.face, 44, 'idle'));
+      introFace.dataset.for = bot.id + JSON.stringify(bot.face);
+    }
   }
   rosterEl.querySelectorAll('.bot-row').forEach((row) => {
     const av = row.querySelector('.av');
@@ -401,9 +411,25 @@ function save() {
 // made agent out of the way until you actually say something to it.
 async function ensureChat() {
   if (chat) return chat;
-  const made = await window.operator.agentThread(bot.id);
+  const made = fresh ? await window.operator.createChat(bot.id) : await window.operator.agentThread(bot.id);
+  fresh = false;
   chat = { id: made.id, title: made.title, turns: [] };
   return chat;
+}
+
+// The start screen, the way a chat app opens: the agent's name, the box and
+// some suggestions, with no conversation behind it yet. The first message
+// makes one, and it lands at the top of the rail.
+async function startFresh(botId) {
+  if (busy) window.operator.stopTask();
+  chat = null;
+  fresh = true;
+  clearThread();
+  await loadBots(botId || (bot && bot.id));
+  await paintRail();
+  input.value = '';
+  resize();
+  input.focus();
 }
 
 /* the roster */
@@ -448,9 +474,10 @@ function rowsOf(list) {
 const looseRows = () => rowsOf(bots.filter((b) => !b.workspaceId));
 const rowsIn = (wsId) => rowsOf(bots.filter((b) => b.workspaceId === wsId));
 
+// Nothing is highlighted on the start screen: no conversation is open yet.
 const isOpen = (row) =>
   Boolean(bot && row.bot.id === bot.id &&
-    ((chat && row.thread && chat.id === row.thread.id) || (!chat && !row.thread)));
+    ((chat && row.thread && chat.id === row.thread.id) || (!chat && !row.thread && !fresh)));
 
 // All three lists in one call. Which row is highlighted depends on the open
 // thread, so painting one without the others leaves a stale selection behind.
@@ -508,6 +535,7 @@ async function openAgent(botId, threadId) {
   if (busy) window.operator.stopTask();
 
   chat = null;
+  fresh = false;
   clearThread();
   await loadBots(botId);
 
@@ -1150,7 +1178,8 @@ function openSheet(isNew) {
   sheet.hidden = false;
   sheetDone.textContent = isNew ? 'Create bot' : 'Done';
   paintSheet();
-  setTimeout(() => fName.focus(), 40);
+  // A new one's name is a placeholder, so typing should replace it.
+  setTimeout(() => { fName.focus(); if (isNew) fName.select(); }, 40);
 }
 
 // Text still sitting in one of the add rows is something you meant to keep, so
@@ -1179,8 +1208,20 @@ async function commitPending() {
   await pushField();
 }
 
-async function closeSheet() {
-  await commitPending();
+// `discard` (strictly true — as a click handler this gets the event) skips
+// saving: Delete closes it on an agent that is already gone, and saving the
+// fields back to that is what used to throw and leave the panel stuck open.
+async function closeSheet(discard) {
+  if (sheet.hidden || sheet.classList.contains('closing')) return;
+  if (discard !== true) await commitPending();
+  // Opened from the start screen: that screen leaves as this closes, together.
+  if (launchOpen()) settleLaunch();
+  // Out the way it came in — a short fade and settle rather than a blink.
+  if (!stillMotion()) {
+    sheet.classList.add('closing');
+    await new Promise((r) => setTimeout(r, 180));
+    sheet.classList.remove('closing');
+  }
   sheet.hidden = true;
   loadBots();
 }
@@ -1249,7 +1290,7 @@ document.getElementById('routForm').addEventListener('submit', async (e) => {
 document.getElementById('deleteBot').addEventListener('click', async () => {
   if (!bot) return;
   await window.operator.deleteBot(bot.id);
-  closeSheet();
+  closeSheet(true);
   chat = null;
   clearThread();
   bot = null;
@@ -1792,6 +1833,20 @@ const voxFill = document.getElementById('voxFill');
 const voxMark = document.getElementById('voxMark');
 const voxHint = document.getElementById('voxHint');
 const voxDevice = document.getElementById('voxDevice');
+const voxSetup = document.getElementById('voxSetup');
+const voxGear = document.getElementById('voxGear');
+
+// The microphone picker, the exact meter and the speaker test are for when
+// something is wrong, so they stay folded away until asked for — or until
+// something is wrong.
+function voxShowSetup(open) {
+  if (!voxSetup) return;
+  voxSetup.hidden = !open;
+  voxGear.setAttribute('aria-expanded', String(open));
+  voxGear.classList.toggle('on', open);
+  if (!voxEl.hidden) placeVox();
+}
+if (voxGear) voxGear.addEventListener('click', () => voxShowSetup(voxSetup.hidden));
 
 const VOX_POS = 'operator.voxPos';
 const VOX_MIC = 'operator.voxMic';
@@ -1806,7 +1861,7 @@ function placeVox() {
   const w = voxEl.offsetWidth || 320;
   const h = voxEl.offsetHeight || 260;
   const x = at ? Math.min(Math.max(8, at.x), window.innerWidth - w - 8) : window.innerWidth - w - 24;
-  const y = at ? Math.min(Math.max(8, at.y), window.innerHeight - h - 8) : window.innerHeight - h - 110;
+  const y = at ? Math.min(Math.max(8, at.y), window.innerHeight - h - 8) : window.innerHeight - h - 136;
   voxEl.style.left = x + 'px';
   voxEl.style.top = y + 'px';
 }
@@ -1851,6 +1906,7 @@ function voxLevel({ level, threshold, speaking: talking }) {
   if (voxEl.hidden) return;
   voxFill.style.width = (voxScale(level) * 100).toFixed(1) + '%';
   voxMark.style.left = (voxScale(threshold) * 100).toFixed(1) + '%';
+  voxEl.style.setProperty('--lvl', voxScale(level).toFixed(3));
   voxEl.classList.toggle('loud', Boolean(talking));
   if (level > voxSeen) voxSeen = level;
   micBtn.classList.toggle('hearing', Boolean(talking));
@@ -1866,12 +1922,13 @@ function watchForSilence() {
   voxWatch = setInterval(() => {
     if (voxEl.hidden) return;
     if (voxSeen > 0.004) {
-      voxHint.textContent = 'Microphone is working.';
+      voxHint.textContent = 'Microphone is working — just talk.';
       voxHint.classList.remove('bad');
       clearInterval(voxWatch);
     } else if (Date.now() - started > 6000) {
-      voxHint.textContent = 'Nothing coming in. Try another input above, or check Windows sound settings.';
+      voxHint.textContent = 'Nothing coming in. Try another microphone below, or check Windows sound settings.';
       voxHint.classList.add('bad');
+      if (voxSetup.hidden) voxShowSetup(true);
     }
   }, 700);
 }
@@ -1906,7 +1963,7 @@ if (voxDevice) {
     voxHint.classList.remove('bad');
     try {
       await MicListener.start({ onUtterance: heardSomething, onState: voxLevel, deviceId: voxDevice.value || undefined });
-      voxHint.textContent = 'Say something — the bar should move.';
+      voxHint.textContent = 'Say something — the ring should move.';
       watchForSilence();
     } catch (err) {
       voxHint.textContent = 'Could not open that microphone: ' + err.message;
@@ -1923,6 +1980,9 @@ function voxSay(kind, text) {
   voxLog.appendChild(line);
   while (voxLog.children.length > 8) voxLog.firstChild.remove();
   voxLog.scrollTop = voxLog.scrollHeight;
+  // The panel grows as the log fills; re-placing keeps it clear of the window
+  // edge (and, when it has never been moved, clear of the composer).
+  placeVox();
   return line;
 }
 
@@ -1969,6 +2029,7 @@ async function setVoice(on) {
     voxLog.textContent = '';
     voxVoiceEl.textContent = '';
     voxHint.classList.remove('bad');
+    voxShowSetup(false);
     voxStatus('Starting');
 
     // The microphone comes FIRST. It is the part that actually fails — a denied
@@ -1983,6 +2044,7 @@ async function setVoice(on) {
       voxFail(err && err.name === 'NotAllowedError'
         ? 'Windows or Electron blocked the microphone. Check Settings → Privacy → Microphone.'
         : 'Could not open the microphone: ' + (err && err.message ? err.message : err));
+      voxShowSetup(true);
       paintMic();
       return;
     }
@@ -1990,7 +2052,7 @@ async function setVoice(on) {
     voiceOn = true;
     paintMic();
     await fillDevices();
-    voxHint.textContent = 'Say something — the bar should move.';
+    voxHint.textContent = 'Say something — the ring should move.';
     watchForSilence();
     voxStatus('Listening');
 
@@ -2182,18 +2244,353 @@ function speak(text) {
 
 input.focus();
 
+/* ── the start screen ────────────────────────────────────────────────
+ * What the app opens on: make a new agent, or search the ones you already
+ * have and open one. The main agent's fresh chat is set up underneath before
+ * this shows, so skipping it (Esc) is instant.
+ */
+
+const launchEl = document.getElementById('launch');
+const launchSearch = document.getElementById('launchSearch');
+const launchList = document.getElementById('launchList');
+const launchCount = document.getElementById('launchCount');
+const launchNewLabel = document.getElementById('launchNewLabel');
+let launchPick = 0;   // the highlighted row, for the arrow keys
+
+// On its way out counts as gone, so a key pressed mid-exit is the chat's.
+const launchOpen = () => !launchEl.hidden && !launchEl.classList.contains('leaving');
+
+// Most recent conversation first — the same order the rail reads in.
+const lastTouched = (b) => Math.max(b.updatedAt || 0, ...b.threads.map((t) => t.updatedAt || 0));
+
+function ago(ms) {
+  const s = (Date.now() - ms) / 1000;
+  if (!ms || s < 0) return '';
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 86400 * 7) return Math.floor(s / 86400) + 'd ago';
+  return when(ms);
+}
+
+// Every word typed has to turn up somewhere: the name, what it does, what it
+// last said, its workspace or the title of one of its conversations.
+function launchMatches() {
+  const words = launchSearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = bots.slice().sort((a, z) => lastTouched(z) - lastTouched(a));
+  if (!words.length) return list;
+  return list.filter((b) => {
+    const ws = spaces.find((w) => w.id === b.workspaceId);
+    const hay = [b.name, b.title, b.lastLine, b.role, ws && ws.name, ...b.threads.map((t) => t.title)]
+      .filter(Boolean).join(' ').toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+function markPick() {
+  launchList.querySelectorAll('.launch-row').forEach((row, i) => {
+    row.classList.toggle('on', i === launchPick);
+    row.setAttribute('aria-selected', String(i === launchPick));
+    if (i === launchPick) row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+// `typed`: repainted by the search, so the rows get a quick fade of their own.
+// It is a class on the rows rather than taking `arriving` off the screen, because
+// swapping that restarts every row's animation — they all blinked on exit.
+function paintLaunch(typed) {
+  const q = launchSearch.value.trim();
+  const found = launchMatches();
+  launchPick = Math.min(launchPick, Math.max(0, found.length - 1));
+  // Searching for something that is not there is usually the name of the
+  // agent you were about to make, so the button offers exactly that.
+  launchNewLabel.textContent = q && !found.length ? 'Create "' + trim(q, 40) + '"' : 'Create a new agent';
+  launchCount.textContent = q ? found.length + ' of ' + bots.length : bots.length + (bots.length === 1 ? ' agent' : ' agents');
+  launchList.textContent = '';
+
+  if (!found.length) {
+    const p = document.createElement('p');
+    p.className = 'launch-empty' + (typed ? ' typed' : '');
+    p.textContent = 'No agent matches "' + q + '". Press Enter to make one called that.';
+    launchList.appendChild(p);
+    return;
+  }
+
+  found.forEach((b, i) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'launch-row' + (i === launchPick ? ' on' : '') + (typed ? ' typed' : '');
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(i === launchPick));
+    row.style.setProperty('--i', Math.min(i, 10));   // its place in the rise-in; the tail arrives together
+    row.appendChild(Avatar.el(b.face, 32, 'idle'));
+
+    const text = document.createElement('span');
+    text.className = 'launch-text';
+    const name = document.createElement('span');
+    name.className = 'launch-name';
+    const label = document.createElement('b');
+    label.textContent = b.name;
+    name.appendChild(label);
+    if (b.role) {
+      const tag = document.createElement('span');
+      tag.className = 'role-tag is-' + b.role;
+      tag.textContent = b.role === 'coordinator' ? 'coord' : 'main';
+      name.appendChild(tag);
+    }
+    const line = document.createElement('small');
+    line.textContent = b.lastLine || b.title || 'Nothing yet';
+    text.append(name, line);
+
+    const meta = document.createElement('span');
+    meta.className = 'launch-meta';
+    const ws = spaces.find((w) => w.id === b.workspaceId);
+    if (ws) {
+      const chip = document.createElement('span');
+      chip.className = 'launch-ws';
+      chip.textContent = ws.name;
+      meta.appendChild(chip);
+    }
+    const at = document.createElement('span');
+    at.textContent = ago(lastTouched(b));
+    meta.appendChild(at);
+    // Shown on the highlighted row only: Enter opens this one.
+    meta.insertAdjacentHTML('beforeend', '<svg class="launch-go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v4.5a2 2 0 0 0 2 2h8M15.5 10l3.5 3.5-3.5 3.5"/></svg>');
+
+    row.append(text, meta);
+    row.addEventListener('click', () => launchInto(b));
+    row.addEventListener('mousemove', () => { if (launchPick !== i) { launchPick = i; markPick(); } });
+    launchList.appendChild(row);
+  });
+}
+
+let launchTimer = null;
+let launchBusy = false;   // a choice is loading underneath; ignore a second one
+
+const EXIT_MS = 240;      // matches .launch.leaving in styles.css
+const stillMotion = () =>
+  document.documentElement.dataset.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Two frames: the first lets the new content be laid out, the second paints it.
+// A hidden or minimised window gets no frames at all, so never wait past 100ms.
+const painted = () => new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 100); });
+
+function showLaunch() {
+  clearTimeout(launchTimer);
+  launchBusy = false;
+  launchSearch.value = '';
+  launchPick = 0;
+  paintLaunch();
+  launchEl.classList.remove('leaving');
+  launchEl.classList.add('arriving');
+  launchEl.hidden = false;
+  launchSearch.focus();
+}
+
+// Lifts away over whatever was chosen. Resolves once it has gone, for the one
+// caller that has to wait (the new agent's panel). `now` skips the animation:
+// motion off, or a switch to Code where the whole view changes underneath.
+function hideLaunch(now) {
+  if (!launchOpen()) return Promise.resolve();
+  clearTimeout(launchTimer);
+  return new Promise((done) => {
+    const gone = () => {
+      launchEl.hidden = true;
+      launchEl.classList.remove('leaving', 'arriving', 'behind', 'pointer');
+      input.focus();
+      done();
+    };
+    if (now === true || stillMotion()) return gone();
+    launchEl.classList.add('leaving');
+    launchTimer = setTimeout(gone, EXIT_MS);
+  });
+}
+
+// Opens the conversation the agent had last, the same one its rail row opens.
+// The chat is built under the start screen first and only then does the
+// screen lift off it — building it mid-exit is what made the exit stutter.
+async function launchInto(b) {
+  if (launchBusy || !launchOpen()) return;
+  launchBusy = true;
+  await openAgent(b.id, b.threads[0] ? b.threads[0].id : null);
+  await painted();
+  hideLaunch();
+}
+
+let launchMade = null;   // the agent Create made, while its panel is up
+
+// The panel grows out of the Create button, over the start screen, in the same
+// frame as the click — the agent is made while it moves, rather than the
+// screen leaving first and the panel turning up a beat later.
+// The card is animated from the button's box to its own by transform alone.
+function growSheet(from, name) {
+  const card = sheet.querySelector('.sheet-card');
+  // What can be shown before the agent exists, so the card is never blank or
+  // still showing whichever agent was open last.
+  sheetFace.textContent = '';
+  sheetTitle.textContent = name;
+  fName.value = name;
+  fTitle.value = '';
+  fPersona.value = '';
+  sheetDone.textContent = 'Create bot';
+  sheet.classList.add('grow');
+  sheet.hidden = false;
+  setTimeout(() => sheet.classList.remove('grow'), 1100);   // after the fields have risen in
+  if (stillMotion()) return Promise.resolve();
+
+  const to = card.getBoundingClientRect();
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  return card.animate([
+    { transform: `translate(${dx}px, ${dy}px) scale(${from.width / to.width}, ${from.height / to.height})` },
+    { transform: 'none' },
+  ], { duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }).finished.catch(() => {});
+}
+
+// Made the way the rail's New makes one, then into its panel so it gets a real
+// name and a job rather than staying "New agent". The start screen stays put
+// behind the panel and only leaves once the panel is done with.
+async function launchCreate() {
+  if (launchBusy || !launchOpen()) return;
+  launchBusy = true;
+  const q = launchSearch.value.trim();
+  const name = q && !launchMatches().length ? q.slice(0, 40) : 'New agent';
+
+  launchEl.classList.add('behind');
+  const grown = growSheet(document.getElementById('launchNew').getBoundingClientRect(), name);
+  const made = await makeAgent({ name, title: '' });
+  if (!made) {                      // at the limit: nothing was made, so put it all back
+    sheet.hidden = true;
+    launchEl.classList.remove('behind');
+    launchBusy = false;
+    return;
+  }
+  launchMade = made.id;
+  openSheet(true);                  // fills in the card that is already on screen
+  await grown;
+}
+
+// Its panel has closed. If the agent is still there, the start screen has done
+// its job and lifts off that agent's chat; if it was deleted from the panel,
+// stay here, with the list as it now is.
+async function settleLaunch() {
+  const id = launchMade;
+  launchMade = null;
+  if (id && await window.operator.getBot(id)) return hideLaunch();
+  launchEl.classList.remove('behind');
+  launchBusy = false;
+  await loadBots();
+  paintLaunch(true);
+  launchSearch.focus();
+}
+
+document.getElementById('launchNew').addEventListener('click', launchCreate);
+document.getElementById('launchSkip').addEventListener('click', () => hideLaunch());
+launchSearch.addEventListener('input', () => { launchPick = 0; paintLaunch(true); });
+launchSearch.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = launchMatches().length;
+    if (!n) return;
+    launchPick = (launchPick + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    markPick();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const found = launchMatches();
+    if (found.length) launchInto(found[launchPick]);
+    else launchCreate();
+  }
+});
+
+// Esc clears the search first, then leaves. Ctrl+N here means a new agent,
+// not the new-chat it means everywhere else, so the later handler never sees it.
+document.addEventListener('keydown', (e) => {
+  if (!launchOpen() || !sheet.hidden) return;   // a panel over it takes the keys
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (launchSearch.value) { launchSearch.value = ''; launchPick = 0; paintLaunch(true); }
+    else hideLaunch();
+  } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    launchCreate();
+  }
+});
+
+// Switching to Code is also a way out — at once, since the whole view is
+// being swapped underneath anyway.
+document.querySelectorAll('.mode').forEach((m) => m.addEventListener('click', () => hideLaunch(true)));
+
+// An agent made or renamed by voice or a routine shows up while you look.
+window.operator.onBotsChanged(() => { if (launchOpen()) loadBots().then(() => paintLaunch(true)); });
+
+/* the moving background: colour drifting behind, motes rising through it, and
+   a glow that trails the pointer. Everything moves by transform alone, so it
+   is the GPU's work and the page never repaints for it. */
+
+const launchBg = document.getElementById('launchBg');
+const launchSpot = document.getElementById('launchSpot');
+
+// Motes: scattered once, each on its own slow loop, started part-way through
+// (negative delays) so they never rise in step.
+for (let i = 0; i < 12; i++) {
+  const m = document.createElement('i');
+  m.style.left = (Math.random() * 100).toFixed(1) + '%';
+  m.style.top = (15 + Math.random() * 85).toFixed(1) + '%';
+  m.style.setProperty('--s', (1 + Math.random()).toFixed(1) + 'px');
+  m.style.animationDuration = (18 + Math.random() * 14).toFixed(1) + 's';
+  m.style.animationDelay = (-Math.random() * 32).toFixed(1) + 's';
+  document.getElementById('launchMotes').appendChild(m);
+}
+
+// The glow eases after the pointer and the colour behind shifts a little the
+// other way, which is what gives it depth. Two transforms a frame, and only
+// while the glow is still catching up — nothing runs once it has arrived.
+let spot = null;      // where the glow is
+let aim = null;       // where it is heading
+let spotFrame = 0;
+
+function spotStep() {
+  spot.x += (aim.x - spot.x) * 0.12;
+  spot.y += (aim.y - spot.y) * 0.12;
+  launchSpot.style.transform = `translate3d(${spot.x}px, ${spot.y}px, 0)`;
+  launchBg.style.transform = `translate3d(${(spot.x / innerWidth - 0.5) * -12}px, ${(spot.y / innerHeight - 0.5) * -8}px, 0)`;
+  const moving = Math.abs(aim.x - spot.x) + Math.abs(aim.y - spot.y) > 0.4;
+  spotFrame = moving && launchOpen() ? requestAnimationFrame(spotStep) : 0;
+}
+
+launchEl.addEventListener('pointermove', (e) => {
+  if (stillMotion()) return;
+  aim = { x: e.clientX, y: e.clientY - launchEl.offsetTop };   // the screen starts under the mode bar
+  if (!spot) spot = { ...aim };
+  launchEl.classList.add('pointer');
+  if (!spotFrame) spotFrame = requestAnimationFrame(spotStep);
+});
+launchEl.addEventListener('pointerleave', () => launchEl.classList.remove('pointer'));
+
 /* ── start ───────────────────────────────────────────────────────── */
 
 (async () => {
   setRail(recall(RAIL_OPEN) === '1');
   await loadSpaces();
   await loadBots();
-  // An agent is its conversation, so opening the app opens the one you left
-  // rather than an empty box with the transcript a click away.
-  if (bot && bot.threads && bot.threads.length) await openAgent(bot.id, bot.threads[0].id);
-  else await paintRail();
-  input.focus();
+  // Opening the app opens a new chat, the way a chat app does: the main agent,
+  // an empty box and suggestions. Everything from before is one click away in
+  // the rail, and nothing is created until the first message is sent.
+  const home = bots.find((b) => b.pinned && b.role === 'main') || bots.find((b) => b.pinned) || bot;
+  await startFresh(home && home.id);
+  // …with the start screen over the top, so the first choice is which agent.
+  showLaunch();
 })();
+
+// New chat: back to the start screen with whoever you are talking to now.
+const newThreadBtn = document.getElementById('newThreadBtn');
+if (newThreadBtn) newThreadBtn.addEventListener('click', () => startFresh(bot && bot.id));
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'n') return;
+  if (!document.querySelector('.shell') || document.querySelector('.shell').hidden) return;  // Code mode has its own
+  e.preventDefault();
+  startFresh(bot && bot.id);
+});
 
 /* ── watch full screen ─────────────────────────────────────────────── */
 
@@ -2913,8 +3310,212 @@ input.focus();
   const pickerBtn = document.getElementById('codePickerBtn');
   const pickerName = document.getElementById('codePickerName');
   const menu = document.getElementById('codeMenu');
+  const codeMain = document.getElementById('codeMain');
+  const titleEl = document.getElementById('codeTitle');
+  const pathEl = document.getElementById('codePath');
+  const edBtn = document.getElementById('codeEditorBtn');
+  const refsEl = document.getElementById('codeRefs');
+  const dropEl = document.getElementById('codeDrop');
+  const attachBtn = document.getElementById('codeAttachBtn');
+  const attachMenu = document.getElementById('codeAttachMenu');
+  const edEl = document.getElementById('editor');
+  const edResize = document.getElementById('edResize');
 
   let chat = null;
+  let lastList = [];            // the sidebar's chats, newest first
+  let refs = [];                // what is attached to the message being written
+  const manualRoot = new Map(); // chat id -> a folder opened in the editor by hand
+
+  const baseName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+  const samePath = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+  // C:\Users\name\… reads as ~\… — the part that is the same on every path.
+  const tilde = (p) => String(p || '').replace(/^[A-Za-z]:\\Users\\[^\\]+/, '~');
+
+  /* ── the editor panel ── */
+
+  // The folder the editor should show for a chat: whatever it built, or where
+  // it works — unless you opened something else in the editor yourself.
+  const chatRoot = (c) => (c ? (c.project || c.cwd || null) : null);
+  function syncEditorRoot() {
+    const fallback = lastList[0] ? chatRoot(lastList[0]) : null;
+    const want = (chat && manualRoot.get(chat.id)) || chatRoot(chat) || fallback;
+    if (want) editor.setRoot(want);
+  }
+
+  const editor = window.CodeEditor.mount(edEl, {
+    onReference: (r) => addRefs([r]),
+    onUseFolder: async (dir) => {
+      await ensureChat();
+      const r = await window.operator.codeSetFolder(chat.id, dir);
+      if (!r || !r.ok) return;
+      chat.cwd = r.cwd; chat.cwdName = r.name; chat.project = null;
+      manualRoot.delete(chat.id);
+      paintFolder();
+      loadHistory();
+    },
+    onRootPicked: (p) => { if (chat) manualRoot.set(chat.id, p); },
+    onToggle: (on) => {
+      edResize.hidden = !on;
+      edBtn.setAttribute('aria-pressed', String(on));
+      edBtn.title = on ? 'Hide the editor (Ctrl+E)' : 'Show the editor (Ctrl+E)';
+    },
+  });
+
+  function openEditor() {
+    syncEditorRoot();
+    editor.show();
+  }
+  edBtn.addEventListener('click', () => (editor.isOpen() ? editor.hide() : openEditor()));
+  pathEl.addEventListener('click', () => {
+    if (chat) manualRoot.delete(chat.id);
+    openEditor();
+  });
+
+  // Ctrl+E, from anywhere in Code mode.
+  document.addEventListener('keydown', (e) => {
+    if (codeView.hidden) return;
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      if (editor.isOpen()) editor.hide(); else openEditor();
+    }
+  });
+
+  // Coming back to Code mode puts the editor back the way you left it.
+  modes.forEach((m) => m.addEventListener('click', () => {
+    if (m.dataset.mode === 'code' && editor.wasOpen() && !editor.isOpen()) {
+      window.operator.codeChatsList().then((list) => { lastList = list || []; openEditor(); });
+    }
+  }));
+
+  // The split between the chat and the editor, dragged by the line between.
+  (function resizer() {
+    const KEY = 'operator.editor.width';
+    try { const w = localStorage.getItem(KEY); if (w) codeView.style.setProperty('--ed-w', w); } catch (_) { /* fine */ }
+    edResize.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      edResize.setPointerCapture(e.pointerId);
+      edResize.classList.add('dragging');
+      document.body.classList.add('ed-dragging');
+      const box = codeView.getBoundingClientRect();
+      const move = (ev) => {
+        const w = Math.min(Math.max(380, box.right - ev.clientX), box.width * 0.78);
+        codeView.style.setProperty('--ed-w', Math.round(w) + 'px');
+      };
+      const up = () => {
+        edResize.removeEventListener('pointermove', move);
+        edResize.removeEventListener('pointerup', up);
+        edResize.classList.remove('dragging');
+        document.body.classList.remove('ed-dragging');
+        try { localStorage.setItem(KEY, codeView.style.getPropertyValue('--ed-w')); } catch (_) { /* fine */ }
+      };
+      edResize.addEventListener('pointermove', move);
+      edResize.addEventListener('pointerup', up);
+    });
+  })();
+
+  /* ── references: folders and files attached to a message ── */
+
+  const REF_ICON = {
+    dir: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>',
+    file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4"/></svg>',
+    x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  };
+  const refChip = (r, extra = '') =>
+    '<span class="code-ref' + (r.dir ? ' dir' : '') + '" title="' + esc2(r.path) + '" data-p="' + esc2(r.path) + '" data-dir="' + (r.dir ? 1 : '') + '">' +
+    (r.dir ? REF_ICON.dir : REF_ICON.file) + '<span>' + esc2(baseName(r.path)) + '</span>' + extra + '</span>';
+
+  function paintRefs() {
+    refsEl.hidden = !refs.length;
+    refsEl.innerHTML = refs.map((r, i) => refChip(r, '<button type="button" data-i="' + i + '" aria-label="Remove">' + REF_ICON.x + '</button>')).join('');
+  }
+  function addRefs(list) {
+    for (const r of list || []) {
+      if (!r || !r.path || refs.some((x) => samePath(x.path, r.path))) continue;
+      refs.push({ path: r.path, dir: Boolean(r.dir) });
+    }
+    paintRefs();
+    input.focus();
+  }
+  refsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-i]');
+    if (!b) return;
+    refs.splice(Number(b.dataset.i), 1);
+    paintRefs();
+  });
+
+  // A reference under a sent message opens in the editor: a folder as the
+  // tree, a file as a tab.
+  thread.addEventListener('click', (e) => {
+    const chip = e.target.closest('.you-refs .code-ref');
+    if (!chip) return;
+    if (chip.dataset.dir) { if (chat) manualRoot.set(chat.id, chip.dataset.p); editor.setRoot(chip.dataset.p); editor.show(); }
+    else editor.openFile(chip.dataset.p);
+  });
+
+  // Anything dropped on the chat — from Explorer, or out of the editor's tree.
+  let dragDepth = 0;
+  const droppable = (e) => {
+    const types = [...((e.dataTransfer && e.dataTransfer.types) || [])];
+    return types.includes('Files') || types.includes('application/x-operator-ref');
+  };
+  codeMain.addEventListener('dragenter', (e) => {
+    if (!droppable(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    dropEl.hidden = false;
+  });
+  codeMain.addEventListener('dragover', (e) => {
+    if (!droppable(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+  codeMain.addEventListener('dragleave', (e) => {
+    if (!droppable(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dropEl.hidden = true;
+  });
+  codeMain.addEventListener('drop', async (e) => {
+    if (!droppable(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    dropEl.hidden = true;
+    // Read everything off the event before the first await; it is emptied
+    // as soon as this handler yields.
+    const internal = e.dataTransfer.getData('application/x-operator-ref');
+    const dropped = [...e.dataTransfer.files].map((f) => window.operator.pathForFile(f)).filter(Boolean);
+    const got = [];
+    if (internal) { try { got.push(JSON.parse(internal)); } catch (_) { /* not ours after all */ } }
+    for (const p of dropped) {
+      const st = await window.operator.fsStat(p);
+      got.push({ path: p, dir: Boolean(st && st.ok && st.dir) });
+    }
+    addRefs(got);
+  });
+
+  // A file dropped anywhere else must not replace the app with itself.
+  ['dragover', 'drop'].forEach((t) => document.addEventListener(t, (e) => {
+    if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault();
+  }));
+
+  attachBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    attachMenu.hidden = !attachMenu.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!attachMenu.hidden && !attachMenu.contains(e.target)) attachMenu.hidden = true;
+  });
+  attachMenu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    attachMenu.hidden = true;
+    if (b.dataset.pick === 'files') {
+      const r = await window.operator.fsPickFiles();
+      if (r && r.ok) addRefs(r.paths.map((p) => ({ path: p, dir: false })));
+    } else {
+      const r = await window.operator.fsPickFolder();
+      if (r && r.ok) addRefs([{ path: r.path, dir: true }]);
+    }
+  });
   // Which chats are mid-run, not whether "the coding side" is busy — several
   // can be working at once and the buttons belong to whichever one you are
   // looking at.
@@ -2937,31 +3538,135 @@ input.focus();
 
   async function loadHistory() {
     const list = await window.operator.codeChatsList();
-    if (!list.length) { history.innerHTML = '<p class="code-history-empty">No chats yet.</p>'; return; }
+    lastList = list || [];
+    // The sidebar is where a new title or project shows up first; keep the
+    // chat on screen in step with it.
+    const mine = chat && list.find((c) => c.id === chat.id);
+    if (mine) { chat.title = mine.title; chat.project = mine.project; chat.cwd = mine.cwd; chat.cwdName = mine.cwdName; paintFolder(); }
+    paintHistory();
+    paintRecent();
+  }
+
+  // Titles written before they were cleaned up at the source: no markdown,
+  // and not in capitals.
+  function niceTitle(t) {
+    let s = String(t || '').replace(/^[#>*\-+\s]+/, '').replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim();
+    const letters = s.replace(/[^A-Za-z]/g, '');
+    if (letters.length > 6 && letters === letters.toUpperCase()) s = s.charAt(0) + s.slice(1).toLowerCase();
+    return s || 'New chat';
+  }
+
+  // Where a chat's work lives, when it is somewhere worth naming — the
+  // default workspace is where everything starts, so saying so says nothing.
+  const placeOf = (c) => (c.project ? baseName(c.project) : c.cwdName && c.cwdName !== 'Operator Projects' ? c.cwdName : '');
+
+  function whenOf(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (ts >= start) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (ts >= start - 6 * 864e5) return d.toLocaleDateString([], { weekday: 'short' });
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  }
+  function bucketOf(ts) {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (ts >= start) return 'Today';
+    if (ts >= start - 864e5) return 'Yesterday';
+    if (ts >= start - 6 * 864e5) return 'Previous 7 days';
+    if (ts >= start - 29 * 864e5) return 'Previous 30 days';
+    return 'Older';
+  }
+
+  const findInput = document.getElementById('codeFind');
+  findInput.addEventListener('input', paintHistory);
+
+  function paintHistory() {
+    const q = findInput.value.trim().toLowerCase();
+    // A chat nobody ever typed into is not history. The one on screen stays,
+    // so it does not vanish from under you.
+    const shown = lastList.filter((c) => (c.turns !== 0 || (chat && c.id === chat.id)) &&
+      (!q || (niceTitle(c.title) + ' ' + placeOf(c)).toLowerCase().includes(q)));
+    if (!shown.length) {
+      history.innerHTML = '<p class="code-history-empty">' + (q ? 'No chats match that.' : 'Your chats will show up here.') + '</p>';
+      return;
+    }
     history.innerHTML = '';
-    list.forEach((c) => {
+    let bucket = null;
+    shown.forEach((c) => {
+      const b = bucketOf(c.updatedAt || 0);
+      if (b !== bucket) {
+        bucket = b;
+        const h = document.createElement('div');
+        h.className = 'code-history-head';
+        h.textContent = b;
+        history.appendChild(h);
+      }
       const row = document.createElement('div');
       const working = running.has(c.id);
+      const place = placeOf(c);
       row.className = 'code-chat-row' + (chat && c.id === chat.id ? ' on' : '') + (working ? ' working' : '');
       row.innerHTML =
-        '<button class="code-chat-open" type="button">' +
-        '<span class="code-chat-title">' + esc2(c.title || 'New chat') + '</span>' +
-        (c.cwdName ? '<span class="code-chat-folder">' + esc2(c.cwdName) + '</span>' : '') +
+        '<button class="code-chat-open" type="button" title="' + esc2(niceTitle(c.title)) + '">' +
+        '<span class="code-chat-title">' + esc2(niceTitle(c.title)) + '</span>' +
+        (place ? '<span class="code-chat-folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>' + esc2(place) + '</span>' : '') +
         '</button>' +
         // A chat working away in the background says so here, since its own
         // transcript is not on screen.
-        (working ? '<span class="code-chat-spin" title="Working"></span>' : '') +
-        '<button class="code-chat-del" type="button" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>';
+        (working ? '<span class="code-chat-spin" title="Working"></span>' : '<span class="code-chat-when">' + esc2(whenOf(c.updatedAt || 0)) + '</span>') +
+        '<button class="code-chat-del" type="button" aria-label="Delete" title="Delete"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>';
       row.querySelector('.code-chat-open').addEventListener('click', () => openChat(c.id));
       row.querySelector('.code-chat-del').addEventListener('click', async (e) => {
         e.stopPropagation();
         await window.operator.codeChatDelete(c.id);
-        if (chat && chat.id === c.id) { chat = null; clearThread(); }
+        if (chat && chat.id === c.id) { chat = null; clearThread(); paintFolder(); }
         loadHistory();
       });
       history.appendChild(row);
     });
   }
+
+  // On an empty chat: the projects you were last working on, one click back in.
+  function paintRecent() {
+    const box = document.getElementById('codeRecent');
+    const listEl = document.getElementById('codeRecentList');
+    const seen = new Set();
+    const recent = lastList.filter((c) => {
+      if (!c.project || c.turns === 0) return false;
+      const k = c.project.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).slice(0, 4);
+    box.hidden = !recent.length;
+    listEl.innerHTML = recent.map((c) =>
+      '<button class="starter-project" type="button" data-id="' + c.id + '" title="' + esc2(c.project) + '">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>' +
+      '<span><b>' + esc2(baseName(c.project)) + '</b><small>' + esc2(niceTitle(c.title)) + '</small></span></button>'
+    ).join('');
+  }
+  document.getElementById('codeRecentList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-id]');
+    if (b) openChat(b.dataset.id);
+  });
+
+  // The starter cards fill the box rather than sending: they are a start,
+  // and the details are yours to change.
+  document.getElementById('codeStarters').addEventListener('click', async (e) => {
+    const card = e.target.closest('.starter');
+    if (!card) return;
+    if (card.dataset.pickFolder) {
+      const r = await window.operator.fsPickFolder();
+      if (!r || !r.ok) return;
+      addRefs([{ path: r.path, dir: true }]);
+      input.value = card.dataset.pickFolder;
+    } else {
+      input.value = card.dataset.prompt;
+    }
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
 
   async function openChat(id) {
     chat = await window.operator.codeChatGet(id);
@@ -2972,30 +3677,61 @@ input.focus();
     renderChat();
     paintBusy();
     loadHistory();
+    syncEditorRoot();
+  }
+
+  // A new chat is a blank page, not a row in the sidebar: it becomes a real
+  // chat when the first message is sent. Clicking New five times used to
+  // leave five empty "New chat"s behind.
+  const draft = { model: null, botId: null };
+  async function ensureChat() {
+    if (chat) return chat;
+    chat = await window.operator.codeChatCreate();
+    if (draft.model) { chat.model = draft.model; await window.operator.codeSetModel(chat.id, draft.model); }
+    if (draft.botId) { chat.botId = draft.botId; await window.operator.codeSetBot(chat.id, draft.botId); }
+    draft.model = null;
+    draft.botId = null;
+    return chat;
   }
 
   newBtn.addEventListener('click', async () => {
-    chat = await window.operator.codeChatCreate();
+    // A chat that is still working carries on in the background.
+    chat = null;
+    refs = [];
+    paintRefs();
     clearThread();
     paintFolder();
     paintModel();
     paintBot();
     paintBusy();
     loadHistory();
+    syncEditorRoot();
     input.focus();
   });
 
+  // The chip says where it starts; the top bar says where the work is.
   function paintFolder() {
     const name = chat && chat.cwdName;
-    cwdLabel.textContent = name || 'Choose folder';
+    cwdLabel.textContent = name || 'Operator Projects';
     folderBtn.classList.toggle('set', Boolean(name));
-    folderBtn.title = chat && chat.cwd ? chat.cwd : 'Choose the project folder';
+    folderBtn.title = (chat && chat.cwd ? chat.cwd + '\n' : '') + 'Where it starts. It can still build anywhere you ask — click to change.';
+    titleEl.textContent = niceTitle(chat && chat.title);
+    const where = chatRoot(chat);
+    pathEl.hidden = !where;
+    pathEl.textContent = where ? tilde(where) : '';
+    pathEl.title = where ? where + ' — open in the editor' : '';
   }
 
   folderBtn.addEventListener('click', async () => {
-    if (!chat) { chat = await window.operator.codeChatCreate(); loadHistory(); }
+    await ensureChat();
     const r = await window.operator.codePickFolder(chat.id);
-    if (r && r.ok) { chat.cwd = r.cwd; chat.cwdName = r.name; paintFolder(); loadHistory(); }
+    if (r && r.ok) {
+      chat.cwd = r.cwd; chat.cwdName = r.name; chat.project = null;
+      manualRoot.delete(chat.id);
+      paintFolder();
+      loadHistory();
+      syncEditorRoot();
+    }
   });
 
   // The same list the agent side offers — Claude through the Agent SDK, and
@@ -3046,6 +3782,7 @@ input.focus();
     codeList.querySelectorAll('.opt').forEach((o) => o.addEventListener('click', async () => {
       const mid = o.dataset.id;
       if (chat) { chat.model = mid; await window.operator.codeSetModel(chat.id, mid); }
+      else draft.model = mid;
       paintModel();
       hideMenu();
     }));
@@ -3059,7 +3796,7 @@ input.focus();
   }
 
   function paintModel() {
-    const mid = (chat && chat.model) || (models[0] && models[0].id);
+    const mid = (chat ? chat.model : draft.model) || (models[0] && models[0].id);
     const m = models.find((x) => x.id === mid) || models[0];
     if (m) pickerName.textContent = m.name;
   }
@@ -3084,6 +3821,7 @@ input.focus();
     botMenu.querySelectorAll('.opt').forEach((o) => o.addEventListener('click', async () => {
       const id = o.dataset.id || null;
       if (chat) { chat.botId = id; await window.operator.codeSetBot(chat.id, id); }
+      else draft.botId = id;
       paintBot();
       botMenu.hidden = true;
       botBtn.setAttribute('aria-expanded', 'false');
@@ -3091,7 +3829,8 @@ input.focus();
   }
 
   function paintBot() {
-    const b = chat && chat.botId ? botList.find((x) => x.id === chat.botId) : null;
+    const want = chat ? chat.botId : draft.botId;
+    const b = want ? botList.find((x) => x.id === want) : null;
     botNameEl.textContent = b ? b.name : 'No bot';
     botBtn.classList.toggle('set', Boolean(b));
   }
@@ -3141,12 +3880,120 @@ input.focus();
     const turns = (chat && chat.turns) || [];
     if (!turns.length) { if (intro) { if (!intro.isConnected) thread.appendChild(intro); intro.hidden = false; } return; }
     if (intro) intro.hidden = true;
-    turns.forEach((t) => {
-      if (t.k === 'you') addTurn('you', esc2(t.text).replace(/\n/g, '<br>'));
-      else if (t.k === 'says') addTurn('says', esc2(t.text).replace(/\n/g, '<br>'));
-      else if (t.k === 'steps') { (t.items || []).forEach((s) => codeStep(s.name, s.input, s.err)); closeGroup(); }
+    // Each exchange ends with the card of files it changed, the same card a
+    // live run leaves behind.
+    const files = new Map();
+    const flush = () => { filesCard(files); files.clear(); };
+    turns.forEach((t, k) => {
+      if (t.k === 'you') { if (k) flush(); youTurn(t.text, t.refs); }
+      else if (t.k === 'says') addTurn('says md', md(t.text));
+      else if (t.k === 'steps') {
+        (t.items || []).forEach((s) => {
+          codeStep(s.name, s.input, s.err);
+          noteFile(files, s.name, s.input);
+        });
+        closeGroup();
+      }
     });
+    flush();
     thread.scrollTop = thread.scrollHeight;
+  }
+
+  /* ── replies, formatted ── */
+
+  const md = (text) => (window.Markdown ? window.Markdown.render(text) : esc2(text).replace(/\n/g, '<br>'));
+
+  // What a turn wrote, by path. A file both written and then edited was
+  // written, as far as anyone reading the card cares.
+  const runFiles = new Map();
+  function noteFile(map, name, inp) {
+    if ((name !== 'Write' && name !== 'Edit') || !inp || !inp.abs) return;
+    if (map.get(inp.abs) !== 'Write') map.set(inp.abs, name);
+  }
+
+  const FILE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4"/></svg>';
+
+  function filesCard(map) {
+    if (!map.size) return;
+    const root = chatRoot(chat) || '';
+    const inRoot = (p) => root && p.toLowerCase().startsWith(root.toLowerCase() + (root.includes('\\') ? '\\' : '/'));
+    const rows = [...map].map(([p, verb]) => {
+      const rel = inRoot(p) ? p.slice(root.length + 1) : tilde(p);
+      const dir = rel.replace(/[^\\/]*$/, '');
+      return '<button class="code-file" type="button" data-p="' + esc2(p) + '" title="' + esc2(p) + '">' + FILE_SVG +
+        '<span class="nm">' + esc2(baseName(p)) + '</span><span class="dir">' + esc2(dir) + '</span>' +
+        '<span class="verb ' + (verb === 'Write' ? 'new' : '') + '">' + (verb === 'Write' ? 'Written' : 'Edited') + '</span></button>';
+    }).join('');
+    const page = [...map.keys()].find((p) => /index\.html?$/i.test(p)) || [...map.keys()].find((p) => /\.html?$/i.test(p));
+    const n = map.size;
+    addTurn('files',
+      '<div class="code-files">' +
+        '<div class="code-files-head">' +
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4M9.5 13.5l2 2 3.5-4"/></svg>' +
+          '<b>' + n + (n === 1 ? ' file changed' : ' files changed') + '</b>' +
+          (chat && chat.project ? '<span class="where">in ' + esc2(baseName(chat.project)) + '</span>' : '') +
+          '<span class="grow"></span>' +
+          (page ? '<button class="code-files-btn" type="button" data-open="' + esc2(page) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.5v13l11-6.5Z"/></svg>Open ' + esc2(baseName(page)) + '</button>' : '') +
+          '<button class="code-files-btn" type="button" data-show="1">Show in editor</button>' +
+        '</div>' +
+        '<div class="code-files-list">' + rows + '</div>' +
+      '</div>');
+  }
+
+  // A file name in a reply opens in the editor, resolved against the project
+  // and then the working folder.
+  async function openPathRef(text) {
+    const t = String(text || '').trim();
+    const tries = [];
+    if (/^[A-Za-z]:[\\/]/.test(t)) tries.push(t);
+    else {
+      for (const base of [chatRoot(chat), chat && chat.cwd]) {
+        if (!base) continue;
+        const sep = base.includes('\\') ? '\\' : '/';
+        tries.push(base + sep + t.replace(/^\.[\\/]/, '').replace(/[\\/]/g, sep));
+      }
+    }
+    for (const p of tries) {
+      const st = await window.operator.fsStat(p);
+      if (!st || !st.ok) continue;
+      if (st.dir) { if (chat) manualRoot.set(chat.id, p); editor.setRoot(p); editor.show(); }
+      else editor.openFile(p);
+      return;
+    }
+  }
+
+  thread.addEventListener('click', async (e) => {
+    const copy = e.target.closest('.md-copy');
+    if (copy) {
+      const code = copy.closest('.md-code').querySelector('pre').innerText;
+      try { await navigator.clipboard.writeText(code); copy.textContent = 'Copied'; } catch (_) { copy.textContent = 'Could not copy'; }
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1400);
+      return;
+    }
+    const link = e.target.closest('a[data-url]');
+    if (link) { e.preventDefault(); window.operator.openUrl(link.dataset.url); return; }
+    const pathCode = e.target.closest('.md-path');
+    if (pathCode) { openPathRef(pathCode.textContent); return; }
+    const file = e.target.closest('.code-file');
+    if (file) { editor.openFile(file.dataset.p); return; }
+    const openBtn = e.target.closest('[data-open]');
+    if (openBtn) { window.operator.fsOpenExternal(openBtn.dataset.open); return; }
+    if (e.target.closest('[data-show]')) {
+      if (chat) manualRoot.delete(chat.id);
+      openEditor();
+    }
+  });
+
+  // The streaming reply is plain text while it arrives, and becomes formatted
+  // the moment it is complete — formatting half a code fence only flickers.
+  let liveText = '';
+  function finishLive(text) {
+    if (!live) return;
+    live.classList.remove('live');
+    live.classList.add('md');
+    live.innerHTML = md(text != null ? text : liveText);
+    live = null;
+    liveText = '';
   }
 
   const CARET_SVG = '<svg class="caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5.5 7 6.5-7 6.5"/></svg>';
@@ -3167,6 +4014,18 @@ input.focus();
     el.innerHTML = (kind === 'you') ? '<span>' + html + '</span>' : html;
     thread.appendChild(el);
     if (near) thread.scrollTop = thread.scrollHeight;
+    return el;
+  }
+
+  // What you sent, with whatever you attached shown under it as chips.
+  function youTurn(text, attached) {
+    const el = addTurn('you', esc2(text).replace(/\n/g, '<br>'));
+    if (attached && attached.length) {
+      const row = document.createElement('div');
+      row.className = 'you-refs';
+      row.innerHTML = attached.map((r) => refChip(r)).join('');
+      el.appendChild(row);
+    }
     return el;
   }
 
@@ -3222,6 +4081,12 @@ input.focus();
     row.className = 'step now' + (isErr ? ' err' : '');
     row.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + codeIcon(name) + '</svg>' +
       '<span class="what">' + esc2(pastVerb) + ' <span class="arg">' + esc2(arg) + '</span></span>';
+    // A file it touched is a link: click it and it opens in the editor.
+    if (i.abs && !isErr) {
+      row.classList.add('linkable');
+      row.title = i.abs;
+      row.querySelector('.arg').addEventListener('click', () => editor.openFile(i.abs));
+    }
     group.body.appendChild(row);
     group.n += 1;
     group.count.textContent = group.n + (group.n === 1 ? ' step' : ' steps');
@@ -3274,34 +4139,50 @@ input.focus();
     // Everything else is transcript, and belongs to the chat on screen.
     if (chat && evt.chatId && evt.chatId !== chat.id) return;
     switch (evt.type) {
+      // It built somewhere: the chat — and the editor — follow it there.
+      case 'project':
+        if (chat) {
+          chat.project = evt.path;
+          if (!manualRoot.has(chat.id)) editor.setRoot(evt.path);
+          paintFolder();
+          loadHistory();
+        }
+        break;
       // the narration, streamed like Claude Code
       case 'say_start':
+        finishLive();
+        liveText = '';
         live = addTurn('says live', '');
         break;
       case 'say_delta':
-        if (live) { appendDelta(live, evt.text); scrollSoon(); }
+        if (live) { liveText += evt.text; appendDelta(live, evt.text); scrollSoon(); }
         break;
       case 'say_end':
-        // Deltas already rendered the text; just drop the streaming cursor.
-        if (live) { live.classList.remove('live'); live = null; }
+        finishLive(evt.text);
         break;
 
-      case 'assistant': addTurn('says', esc2(evt.text).replace(/\n/g, '<br>')); break;
+      case 'assistant': addTurn('says md', md(evt.text)); break;
       case 'tool':
-        if (live) { live.classList.remove('live'); live = null; }  // finalise any open narration
+        finishLive();  // finalise any open narration
         codeStep(evt.name, evt.input, false);
+        noteFile(runFiles, evt.name, evt.input);
+        if (evt.input && evt.input.abs) editor.touched(evt.input.abs, evt.name);
         break;
       case 'tool_error': codeStep('error', { command: evt.text }, true); break;
       case 'done':
-        if (live) { live.classList.remove('live'); live = null; }
+        finishLive();
         closeGroup();
-        if (evt.text) addTurn('says', esc2(evt.text).replace(/\n/g, '<br>'));
+        if (evt.text) addTurn('says md', md(evt.text));
+        filesCard(runFiles);
+        runFiles.clear();
         if (evt.chatId) running.delete(evt.chatId);
         paintBusy();
         break;
       case 'error':
-        if (live) { live.classList.remove('live'); live = null; }
+        finishLive();
         closeGroup();
+        filesCard(runFiles);
+        runFiles.clear();
         addTurn('says', '<span style="color:var(--fail)">' + esc2(evt.text) + '</span>');
         if (evt.chatId) running.delete(evt.chatId);
         paintBusy();
@@ -3310,15 +4191,17 @@ input.focus();
   });
 
   async function run() {
-    const task = input.value.trim();
+    // Dropping a folder in and pressing Enter is a fair question on its own.
+    const task = input.value.trim() || (refs.length ? 'Have a look at this.' : '');
     if (!task || isBusy()) return;
-    if (!chat) { chat = await window.operator.codeChatCreate(); loadHistory(); }
-    if (!chat.cwd) {
-      const r = await window.operator.codePickFolder(chat.id);
-      if (!r || !r.ok) { addTurn('says', '<span style="color:var(--fail)">Choose a project folder first.</span>'); return; }
-      chat.cwd = r.cwd; chat.cwdName = r.name; paintFolder(); loadHistory();
-    }
-    addTurn('you', esc2(task).replace(/\n/g, '<br>'));
+    // No folder to choose first: a new chat starts in the projects workspace
+    // and goes wherever the work is.
+    if (!chat) { await ensureChat(); paintFolder(); syncEditorRoot(); }
+    runFiles.clear();
+    const sent = refs.slice();
+    refs = [];
+    paintRefs();
+    youTurn(task, sent);
     input.value = ''; input.style.height = 'auto';
 
     // Optimistic: the button flips before the main process answers, and this
@@ -3328,7 +4211,7 @@ input.focus();
     loadHistory();
 
     const started = chat.id;
-    const r = await window.operator.codeRun(started, task);
+    const r = await window.operator.codeRun(started, task, sent);
     if (r && r.ok === false) {
       running.delete(started);
       paintBusy();
@@ -3346,8 +4229,10 @@ input.focus();
     window.operator.codeStop(chat.id);
     // Don't wait for the run to unwind to admit it is over.
     running.delete(chat.id);
-    if (live) { live.classList.remove('live'); live = null; }
+    finishLive();
     closeGroup();
+    filesCard(runFiles);
+    runFiles.clear();
     paintBusy();
     loadHistory();
   });
@@ -3581,11 +4466,12 @@ input.focus();
     theme: document.getElementById('apTheme'),
     accent: document.getElementById('apAccent'),
     glow: document.getElementById('apGlow'),
+    edge: document.getElementById('apEdge'),
     motion: document.getElementById('apMotion'),
   };
   if (!groups.theme || !window.operator || !window.operator.prefsGet) return;
 
-  const DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', motion: 'on' };
+  const DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', edge: 'accent', motion: 'on' };
   let prefs = { ...DEFAULTS };
 
   // The <head> script already read the mirror; this keeps it honest afterwards.
@@ -3594,6 +4480,7 @@ input.focus();
     d.theme = prefs.theme;
     d.accent = prefs.accent;
     d.glow = prefs.glow;
+    d.edge = prefs.edge;
     d.motion = prefs.motion;
     try { localStorage.setItem('prefs', JSON.stringify(prefs)); } catch { /* fine */ }
     for (const [key, box] of Object.entries(groups)) {

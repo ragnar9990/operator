@@ -11,6 +11,8 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@100..900&display=swap"
     />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="editor.css" />
+    <link rel="stylesheet" href="code.css" />
     <script>
       // Runs before anything paints. The real preferences live in the profile,
       // but reading those is async — long enough for the default theme to flash
@@ -21,6 +23,7 @@
         d.theme = p.theme || 'warm';
         d.accent = p.accent || 'blue';
         d.glow = p.glow || 'full';
+        d.edge = p.edge || 'accent';
         d.motion = p.motion || 'on';
       } catch (e) { /* first run, or storage blocked */ }
     </script>
@@ -62,6 +65,10 @@
 
           <button class="rail-btn" id="historyBtn" type="button" title="Show bots" aria-expanded="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+          </button>
+
+          <button class="rail-btn" id="newThreadBtn" type="button" title="New chat (Ctrl+N)" aria-label="New chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.5 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5"/><path d="M17.8 3.7a1.9 1.9 0 0 1 2.7 2.7L13 13.9l-3.6.9.9-3.6Z"/></svg>
           </button>
 
           <button class="rail-btn" id="browserBtn" type="button" title="Open the agent's browser — sign in to sites here once" aria-label="Open the agent's browser">
@@ -118,6 +125,7 @@
           <section class="thread-col">
             <div class="thread" id="thread">
               <div class="intro" id="intro">
+                <span class="intro-face" id="introFace" aria-hidden="true"></span>
                 <h1>What should Operator do?</h1>
                 <p>It drives this computer to get it done — your apps, your desktop and its own browser.</p>
               </div>
@@ -213,29 +221,67 @@
     <!-- CODE mode: a Claude-Code-style coding workspace -->
     <div class="codeview" id="codeView" hidden>
       <aside class="code-side">
-        <button class="code-new" id="codeNewChat" type="button">
+        <button class="code-new" id="codeNewChat" type="button" title="New chat">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>
           New chat
         </button>
+        <label class="code-find">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+          <input id="codeFind" type="search" placeholder="Search chats" spellcheck="false" autocomplete="off" aria-label="Search chats" />
+        </label>
         <div class="code-history" id="codeHistory"></div>
       </aside>
 
-      <section class="code-main">
+      <section class="code-main" id="codeMain">
+        <header class="code-top">
+          <div class="code-where">
+            <span class="code-title" id="codeTitle">New chat</span>
+            <button class="code-path" id="codePath" type="button" title="Open this folder in the editor"></button>
+          </div>
+          <button class="code-tool" id="codeEditorBtn" type="button" aria-pressed="false" title="Show the editor (Ctrl+E)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M14 4.5v15"/><path d="m7 10-1.5 2L7 14M10 10l1.5 2L10 14"/></svg>
+            Editor <kbd>Ctrl E</kbd>
+          </button>
+        </header>
+
         <div class="code-thread" id="codeThread">
           <div class="intro" id="codeIntro">
-            <h1>Code</h1>
-            <p>A coding assistant with your project's files and terminal — the same engine as Claude Code. Start a chat, choose a folder, then tell it what to build or fix.</p>
+            <!-- a glass cube with the code mark on its sides, turning slowly -->
+            <span class="code-glyph" aria-hidden="true">
+              <span class="cube-float">
+                <span class="cube">
+                  <span class="face f-front"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg></span>
+                  <span class="face f-back"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg></span>
+                  <span class="face f-right"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg></span>
+                  <span class="face f-left"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg></span>
+                  <span class="face f-top"></span>
+                  <span class="face f-bottom"></span>
+                </span>
+              </span>
+              <span class="cube-floor"></span>
+            </span>
+            <h1>What should we build?</h1>
+            <p>A new project from scratch, or a change to one you already have. It makes its own folders and works anywhere on this computer.</p>
           </div>
         </div>
 
         <div class="dock">
           <form class="composer" id="codeComposer">
-            <textarea id="codeInput" rows="1" placeholder="Describe a change, a bug, or a feature" autocomplete="off" spellcheck="false"></textarea>
+            <div class="code-refs" id="codeRefs" hidden></div>
+            <textarea id="codeInput" rows="1" placeholder="Build, fix or explain anything" autocomplete="off" spellcheck="false"></textarea>
             <div class="controls">
               <div class="left">
-                <button type="button" class="folder-btn" id="codeFolderBtn" title="Choose the project folder">
+                <button type="button" class="round attach-btn" id="codeAttachBtn" title="Reference files or a folder" aria-label="Reference files or a folder" aria-haspopup="menu">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.2-8.2a3.3 3.3 0 0 1 4.7 4.7l-8.2 8.2a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5"/></svg>
+                </button>
+                <div class="attach-menu" id="codeAttachMenu" role="menu" hidden>
+                  <button type="button" data-pick="files" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h7l4 4v13h-11Z"/><path d="M13.5 3.5v4h4"/></svg>Files…</button>
+                  <button type="button" data-pick="folder" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>A folder…</button>
+                  <small>Or drag them straight onto the chat, from Explorer or the editor.</small>
+                </div>
+                <button type="button" class="folder-btn" id="codeFolderBtn" title="Where it starts. It can still build anywhere you ask — click to change.">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>
-                  <span id="codeCwd">Choose folder</span>
+                  <span id="codeCwd">Operator Projects</span>
                 </button>
               </div>
 
@@ -270,37 +316,118 @@
             </div>
           </form>
         </div>
+
+        <!-- only on an empty chat: somewhere to start -->
+        <div class="code-starters" id="codeStarters">
+          <div class="starter-grid">
+            <button class="starter" type="button" data-prompt="Make a Tetris game I can play in the browser. One HTML file, with a score, levels and a next-piece preview.">
+              <span class="starter-ic" style="--c:#b98cf0"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="11" rx="4"/><path d="M8 11v3M6.5 12.5h3"/><circle cx="15.5" cy="11.5" r=".8"/><circle cx="17.5" cy="13.5" r=".8"/></svg></span>
+              <span class="starter-text"><b>Build a game</b><small>Tetris in the browser, in one file</small></span>
+            </button>
+            <button class="starter" type="button" data-prompt="Build a landing page for a local bakery: a hero with a photo placeholder, the menu with prices, opening hours and a map link. Make it look good on a phone.">
+              <span class="starter-ic" style="--c:#4ba3e8"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18M7 13h6M7 16h4"/></svg></span>
+              <span class="starter-text"><b>Make a website</b><small>A landing page for a local business</small></span>
+            </button>
+            <button class="starter" type="button" data-prompt="Write a PowerShell script that renames every photo in a folder I choose to the date it was taken, like 2026-09-24_1432.jpg, and tell me how to run it.">
+              <span class="starter-ic" style="--c:#5fd38d"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="m7 9.5 3 2.5-3 2.5M12.5 15h4"/></svg></span>
+              <span class="starter-text"><b>Automate a chore</b><small>A script that renames photos by date</small></span>
+            </button>
+            <button class="starter" type="button" data-pick-folder="Explain how this project works: what it does, how it is laid out, and where I should start reading.">
+              <span class="starter-ic" style="--c:#e5a13a"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11v2.5M12 16h.01"/></svg></span>
+              <span class="starter-text"><b>Explain a project</b><small>Pick a folder and ask how it works</small></span>
+            </button>
+          </div>
+          <div class="starter-recent" id="codeRecent" hidden>
+            <span class="starter-label">Pick up where you left off</span>
+            <div class="starter-projects" id="codeRecentList"></div>
+          </div>
+        </div>
+
+        <div class="code-drop" id="codeDrop" hidden>
+          <div>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10.5v5M9.5 13l2.5 2.5 2.5-2.5"/></svg>
+            Drop to reference in this chat
+            <small>Folders and files. It can read and edit them.</small>
+          </div>
+        </div>
       </section>
+
+      <!-- the editor: its own file tree, tabs and code view (editor.js) -->
+      <div class="ed-resize" id="edResize" hidden title="Drag to resize"></div>
+      <aside class="ed" id="editor" hidden aria-label="Editor"></aside>
+    </div>
+
+    <!-- the start screen: what you see when the app opens. Make an agent, or
+         find one you already have. Esc drops you into a chat with the main one. -->
+    <div class="launch" id="launch" hidden>
+      <!-- the moving background: colour drifting under a field of motes, a glow
+           that trails the pointer, and grain so the gradients never band -->
+      <div class="launch-bg" id="launchBg" aria-hidden="true">
+        <i class="launch-blob b1"></i><i class="launch-blob b2"></i><i class="launch-blob b3"></i>
+        <span class="launch-motes" id="launchMotes"></span>
+      </div>
+      <i class="launch-spot" id="launchSpot" aria-hidden="true"></i>
+      <i class="launch-grain" aria-hidden="true"></i>
+      <div class="launch-inner">
+        <span class="launch-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="13" rx="3"/><path d="M9.5 20.5h5"/><circle cx="14.2" cy="11.4" r="1.5"/></svg>
+        </span>
+        <h1>Welcome to Operator</h1>
+        <p>Make a new agent, or pick up one you already have.</p>
+
+        <button class="launch-new" id="launchNew" type="button">
+          <span class="launch-new-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
+          <span class="launch-new-text"><b id="launchNewLabel">Create a new agent</b><small>Give it a name, a job and a face</small></span>
+          <kbd>Ctrl N</kbd>
+        </button>
+
+        <label class="launch-find">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+          <input id="launchSearch" type="search" placeholder="Search your agents" spellcheck="false" autocomplete="off" aria-label="Search your agents" aria-controls="launchList" />
+          <span class="launch-count" id="launchCount"></span>
+        </label>
+
+        <div class="launch-list" id="launchList" role="listbox" aria-label="Your agents"></div>
+
+        <button class="launch-skip" id="launchSkip" type="button">Skip — just start a chat <kbd>Esc</kbd></button>
+      </div>
     </div>
 
 
     <!-- hands-free: the voice that runs the app, not the computer. Floats above
          everything and is dragged by its bar, so it can sit wherever suits. -->
-    <div class="vox" id="vox" hidden>
+    <div class="vox" id="vox" data-state="starting" hidden>
+      <!-- The whole top row is the handle. The orb swells with your voice, so it
+           doubles as the level meter; the exact meter lives in the drawer. -->
       <div class="vox-bar" id="voxBar">
-        <span class="vox-dot" id="voxDot"></span>
-        <span class="vox-state" id="voxState">Starting</span>
-        <span class="vox-grip" aria-hidden="true"></span>
-        <button class="vox-x" id="voxTest" type="button" title="Say a test line, so you know the voice is reaching your speakers" aria-label="Test the voice">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4Z"/><path d="M16 9.2a4 4 0 0 1 0 5.6"/><path d="M18.6 6.6a7.6 7.6 0 0 1 0 10.8"/></svg>
+        <span class="vox-orb" aria-hidden="true"><i></i><span class="vox-dot" id="voxDot"></span></span>
+        <span class="vox-status">
+          <span class="vox-state" id="voxState">Starting</span>
+          <span class="vox-hint" id="voxHint">Say something — the ring should move.</span>
+        </span>
+        <button class="vox-x" id="voxGear" type="button" title="Microphone and speaker" aria-label="Microphone and speaker" aria-expanded="false" aria-controls="voxSetup">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
         </button>
-        <button class="vox-x" id="voxStop" type="button" aria-label="Stop listening">
+        <button class="vox-x close" id="voxStop" type="button" title="Stop listening" aria-label="Stop listening">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
         </button>
       </div>
 
-      <div class="vox-body">
-        <div class="vox-in">
-          <select id="voxDevice" aria-label="Microphone"></select>
-          <div class="vox-meter" id="voxMeter" title="How loud the microphone is hearing you">
-            <i id="voxFill"></i>
-            <b id="voxMark" title="Anything above this line counts as speech"></b>
-          </div>
-          <p class="vox-hint" id="voxHint">Say something — the bar should move.</p>
-        </div>
+      <div class="vox-log" id="voxLog" aria-live="polite"></div>
 
-        <div class="vox-log" id="voxLog"></div>
-        <p class="vox-foot" id="voxVoice"></p>
+      <div class="vox-setup" id="voxSetup" hidden>
+        <select id="voxDevice" aria-label="Microphone"></select>
+        <div class="vox-meter" id="voxMeter" title="How loud the microphone is hearing you">
+          <i id="voxFill"></i>
+          <b id="voxMark" title="Anything past this line counts as speech"></b>
+        </div>
+        <div class="vox-setup-row">
+          <button class="vox-test" id="voxTest" type="button" title="Say a test line, so you know the voice is reaching your speakers">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4Z"/><path d="M16 9.2a4 4 0 0 1 0 5.6"/></svg>
+            Test speaker
+          </button>
+          <span class="vox-foot" id="voxVoice"></span>
+        </div>
       </div>
     </div>
 
@@ -726,12 +853,20 @@
                 <button class="swatch" data-value="amber" type="button" title="Amber"><span class="swatch-dot" style="--a:#f0a12e"></span><span>Amber</span></button>
               </div>
 
-              <div class="set-label">Neon</div>
-              <p class="set-hint">The coloured line around the task box and the one that runs around a button when you hover it.</p>
+              <div class="set-label">Edge light</div>
+              <p class="set-hint">The light that travels around the task box, and around a button when you hover it.</p>
               <div class="seg" id="apGlow">
                 <button class="seg-btn" data-value="full" type="button">Full</button>
                 <button class="seg-btn" data-value="subtle" type="button">Subtle</button>
                 <button class="seg-btn" data-value="off" type="button">Off</button>
+              </div>
+              <div class="swatches edge-swatches" id="apEdge">
+                <button class="swatch" data-value="accent" type="button" title="The accent colour above">
+                  <span class="edge-chip" style="--e:var(--accent)"></span><span>Accent</span>
+                </button>
+                <button class="swatch" data-value="silver" type="button" title="Silver — the movement without the colour">
+                  <span class="edge-chip" style="--e:#d4d8de"></span><span>Silver</span>
+                </button>
               </div>
 
               <div class="set-label">Motion</div>
@@ -807,6 +942,8 @@
 
     <script src="avatar.js"></script>
     <script src="vox.js"></script>
+    <script src="editor.js"></script>
+    <script src="markdown.js"></script>
     <script src="mic.js"></script>
     <script src="renderer.js"></script>
   </body>

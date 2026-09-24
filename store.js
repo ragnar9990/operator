@@ -134,7 +134,7 @@ function listConnectors() {
 
 // `verify` is on by default: an agent that reports work it did not do is worse
 // than a slow one, and the check costs about a cent. See verify.js.
-const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', motion: 'on', verify: true };
+const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', edge: 'accent', motion: 'on', verify: true };
 
 function getPrefs() {
   return { ...PREF_DEFAULTS, ...(settings.prefs || {}) };
@@ -162,7 +162,9 @@ function removeConnector(id) {
 
 /* ── code chats (the coding side's history, ChatGPT-style) ────────── */
 
-const codeCard = (c) => ({ id: c.id, title: c.title, cwd: c.cwd, cwdName: c.cwdName, model: c.model, botId: c.botId || null, updatedAt: c.updatedAt });
+// `turns` is only a count here: the sidebar needs to know a chat is empty
+// (and hide it), not what was said.
+const codeCard = (c) => ({ id: c.id, title: c.title, cwd: c.cwd, cwdName: c.cwdName, project: c.project || null, model: c.model, botId: c.botId || null, turns: (c.turns || []).length, updatedAt: c.updatedAt });
 
 function listCodeChats() {
   return (settings.codeChats || []).slice().sort((a, b) => b.updatedAt - a.updatedAt).map(codeCard);
@@ -188,6 +190,8 @@ function saveCodeChat(cid, patch = {}) {
   if ('cwd' in patch) { c.cwd = patch.cwd; c.cwdName = patch.cwdName || null; }
   if ('model' in patch) c.model = patch.model;
   if ('botId' in patch) c.botId = patch.botId || null;
+  // The folder a build actually landed in, which the editor opens on.
+  if ('project' in patch) c.project = patch.project || null;
   if ('sessionId' in patch) c.sessionId = patch.sessionId;
   if (Array.isArray(patch.turns)) c.turns = patch.turns;
   c.updatedAt = Date.now();

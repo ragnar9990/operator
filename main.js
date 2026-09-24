@@ -20,6 +20,7 @@ const phone = require('./phone');
 const email = require('./email');
 const code = require('./code');
 const googleOAuth = require('./google-oauth');
+const files = require('./files');
 
 let win = null;
 let running = null; // { abortController }
@@ -61,6 +62,12 @@ function createWindow() {
   win.on('maximize', sendWindowState);
   win.on('unmaximize', sendWindowState);
   win.webContents.on('did-finish-load', sendWindowState);
+
+  // A file dropped anywhere the page did not catch it would otherwise replace
+  // the whole app with that file. This is a single page; it never navigates.
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win.webContents.getURL()) e.preventDefault();
+  });
 
   // A thrown error in the renderer is otherwise invisible unless devtools are
   // open, which they never are on someone else's machine. Warnings and errors
@@ -672,7 +679,7 @@ ipcMain.handle('code:pickFolder', async (_e, id) => {
   if (res.canceled || !res.filePaths.length) return { ok: false };
   const cwd = res.filePaths[0];
   const name = path.basename(cwd);
-  if (id) store.saveCodeChat(id, { cwd, cwdName: name, title: store.getCodeChat(id).title === 'New chat' ? name : undefined });
+  if (id) store.saveCodeChat(id, { cwd, cwdName: name, project: null, title: store.getCodeChat(id).title === 'New chat' ? name : undefined });
   return { ok: true, cwd, name };
 });
 
@@ -682,13 +689,82 @@ ipcMain.handle('codeChats:setBot', async (_e, id, botId) => store.saveCodeChat(i
 
 // One place that actually runs a coding turn, so both the UI and a bot asking
 // via message_code_chat drive the same machinery and land in the same history.
-async function runCodeTask(chatId, prompt) {
+// A sidebar title from the first message: its first line, without the
+// markdown, and not shouting — a prompt pasted in capitals should not sit in
+// the sidebar in capitals.
+function chatTitle(prompt) {
+  let t = String(prompt || '').split('\n').map((l) => l.trim()).find(Boolean) || 'New chat';
+  t = t.replace(/^[#>*\-+\s]+/, '').replace(/[*_`~]/g, '').replace(/\s+/g, ' ').trim();
+  const letters = t.replace(/[^A-Za-z]/g, '');
+  if (letters.length > 6 && letters === letters.toUpperCase()) t = t.charAt(0) + t.slice(1).toLowerCase();
+  if (t.length > 60) t = t.slice(0, 57).replace(/\s+\S*$/, '') + '…';
+  return t || 'New chat';
+}
+
+// The usual places, by the names people use for them.
+function codePlaces() {
+  const get = (k) => { try { return app.getPath(k); } catch (_) { return null; } };
+  return {
+    'Home folder': get('home'),
+    Desktop: get('desktop'),
+    Documents: get('documents'),
+    Downloads: get('downloads'),
+    'Projects workspace (the default working folder)': path.join(get('home') || '', 'Operator Projects'),
+  };
+}
+
+// Which folder a turn actually built in, from the files it wrote. A build in
+// the projects workspace lands in its own sub-folder, and that sub-folder is
+// the project; a build somewhere else entirely is wherever its files share.
+function projectFrom(cwd, written) {
+  if (!written.length) return null;
+  const split = (p) => path.resolve(p).split(path.sep);
+  let common = split(path.dirname(written[0]));
+  for (const f of written.slice(1)) {
+    const parts = split(path.dirname(f));
+    let i = 0;
+    while (i < common.length && i < parts.length && common[i].toLowerCase() === parts[i].toLowerCase()) i++;
+    common = common.slice(0, i);
+  }
+  const dir = common.join(path.sep);
+  if (!dir) return null;
+  const rel = path.relative(path.resolve(cwd), dir);
+  if (!rel) return null;                                   // right in the working folder
+  if (!rel.startsWith('..') && !path.isAbsolute(rel)) return path.join(cwd, rel.split(path.sep)[0]);
+  // Outside it: fine, unless "the project" would be the whole desktop or home.
+  const broad = Object.values(codePlaces()).filter(Boolean).map((p) => path.resolve(p).toLowerCase());
+  return broad.includes(path.resolve(dir).toLowerCase()) ? null : dir;
+}
+
+async function runCodeTask(chatId, prompt, refs = []) {
   // Only this chat has to be free. Another chat working away is none of its
   // business.
   if (codeRuns.has(chatId)) return { ok: false, error: 'This chat is already working on something.' };
-  const chat = store.getCodeChat(chatId);
+  let chat = store.getCodeChat(chatId);
   if (!chat) return { ok: false, error: 'No such code chat.' };
-  if (!chat.cwd) return { ok: false, error: 'That code chat has no project folder yet.' };
+  // Nobody has to pick a folder first. A chat without one works in the
+  // projects workspace, the way a fresh Claude Code session works where it is.
+  if (!chat.cwd) {
+    const d = defaultCwd();
+    store.saveCodeChat(chatId, { cwd: d.cwd, cwdName: d.name });
+    chat = store.getCodeChat(chatId);
+  }
+
+  // Whatever was dragged into the message: listed for the model, and opened up
+  // to its file tools. Only things that still exist make it through.
+  refs = (Array.isArray(refs) ? refs : [])
+    .filter((r) => r && typeof r.path === 'string' && fs.existsSync(r.path))
+    .map((r) => ({ path: r.path, dir: Boolean(r.dir), name: path.basename(r.path) }))
+    .slice(0, 20);
+  const reach = [...new Set([
+    app.getPath('home'),
+    ...refs.map((r) => (r.dir ? r.path : path.dirname(r.path))),
+    chat.project,
+  ].filter(Boolean))];
+  const modelPrompt = refs.length
+    ? prompt + '\n\nReferenced (the user dragged these into the message):\n' +
+      refs.map((r) => '- ' + r.path + (r.dir ? ' (folder)' : '')).join('\n')
+    : prompt;
 
   const abortController = new AbortController();
   const run = { abortController };
@@ -698,15 +774,18 @@ async function runCodeTask(chatId, prompt) {
 
   // Record the conversation as it happens so the sidebar history is real.
   const turns = chat.turns || [];
-  turns.push({ k: 'you', text: prompt });
+  turns.push(refs.length ? { k: 'you', text: prompt, refs } : { k: 'you', text: prompt });
+  const written = [];
   let steps = null;
-  const title = chat.title === 'New chat' ? prompt.slice(0, 60) : chat.title;
+  const title = chat.title === 'New chat' ? chatTitle(prompt) : chat.title;
   store.saveCodeChat(chatId, { turns, title });
 
   let reply = '';
   try {
-    await code.runCode(prompt, {
+    await code.runCode(modelPrompt, {
       cwd: chat.cwd,
+      reach,
+      places: codePlaces(),
       model: chat.model || undefined,
       resume: chat.sessionId || undefined,
       bot: chat.botId ? store.getBot(chat.botId) : null,
@@ -721,6 +800,7 @@ async function runCodeTask(chatId, prompt) {
         } else if (evt.type === 'tool') {
           if (!steps) { steps = { k: 'steps', items: [] }; turns.push(steps); }
           steps.items.push({ name: evt.name, input: evt.input });
+          if ((evt.name === 'Write' || evt.name === 'Edit') && evt.input && evt.input.abs) written.push(evt.input.abs);
           // Code mode runs on the SDK's own file tools, so unlike the computer
           // tools there is no wrapper to time or catch them: all we honestly
           // know here is that the step was asked for. `ok: null` says so rather
@@ -748,6 +828,13 @@ async function runCodeTask(chatId, prompt) {
     send('code-event', { type: 'error', text: msg, chatId });
     return { ok: false, error: msg };
   } finally {
+    // The chat follows what it built: the editor opens on that folder, and
+    // the sidebar names it.
+    const project = projectFrom(chat.cwd, written);
+    if (project && project !== chat.project) {
+      store.saveCodeChat(chatId, { project });
+      send('code-event', { type: 'project', path: project, chatId });
+    }
     // However this turn ended, this chat is free again — and only this one.
     // Unless Stop already freed it and a new turn is under way, in which case
     // this run has no business declaring anything.
@@ -759,7 +846,21 @@ async function runCodeTask(chatId, prompt) {
   return { ok: true, reply };
 }
 
-ipcMain.handle('code:run', async (_e, chatId, prompt) => runCodeTask(chatId, prompt));
+ipcMain.handle('code:run', async (_e, chatId, prompt, refs) => runCodeTask(chatId, prompt, refs));
+
+// Point a chat at a folder without a dialog — from the editor's tree, or a
+// folder dropped on the chat.
+ipcMain.handle('code:setFolder', async (_e, id, dir) => {
+  try { if (!fs.statSync(dir).isDirectory()) return { ok: false }; } catch (_) { return { ok: false }; }
+  const c = store.getCodeChat(id);
+  if (!c) return { ok: false };
+  const name = path.basename(dir);
+  store.saveCodeChat(id, { cwd: dir, cwdName: name, project: null, title: c.title === 'New chat' ? name : undefined });
+  return { ok: true, cwd: dir, name };
+});
+
+// The editor panel's view of the disk — see files.js.
+files.register(ipcMain, { getWin: () => win, send });
 
 // Bots name a code chat by title (or id); match loosely so "tetris" finds it.
 function findCodeChat(ref) {

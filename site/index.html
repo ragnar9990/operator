@@ -10,8 +10,9 @@
 <meta property="og:image" content="img/app-run.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400..700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="demo.css" />
 </head>
 <body>
 
@@ -39,9 +40,9 @@
 <!-- ─────────────────────────────── hero ─────────────────────────────── -->
 <section class="hero" id="top">
   <div class="wrap">
-    <p class="kicker">Windows · one payment · runs on the AI plan you already have</p>
+    <p class="kicker"><span>New</span> Windows · one payment · runs on the AI plan you already have</p>
 
-    <h1>An agent that<br />uses your computer</h1>
+    <h1>An agent that<br />uses <span class="hl">your computer</span></h1>
 
     <p class="lead">
       Give it a job in plain English and it opens your apps, clicks, types, reads
@@ -51,17 +52,21 @@
 
     <div class="cta-row">
       <a class="btn btn-lg" href="#price">Buy Operator — $129</a>
-      <a class="btn btn-ghost btn-lg" href="#work">See it work</a>
+      <a class="btn btn-ghost btn-lg" href="#try">Try the demo</a>
     </div>
 
     <p class="under">One payment. Not a subscription. 14-day refund.</p>
   </div>
 
-  <div class="wrap wrap-wide">
-    <figure class="shot shot-hero">
-      <img src="img/app-main.png" width="1440" height="900" fetchpriority="high"
-           alt="Operator's main window: a task box reading “Give Operator a task”, with suggested jobs beneath it." />
-    </figure>
+  <div class="wrap wrap-wide stage" id="try">
+    <div class="stage-note">
+      <span class="stage-pulse" aria-hidden="true"></span>
+      <p><b>Try it.</b> This is the app, rebuilt for the page — pick a job, press the mic, open Settings. It runs in your browser and touches nothing on your computer.</p>
+    </div>
+    <div class="demo" id="demo" role="region" aria-label="Interactive demo of Operator">
+      <!-- shown only if the demo script cannot run -->
+      <img src="img/app-main.png" width="1440" height="900" alt="Operator's main window: a task box reading “Give Operator a task”, with suggested jobs beneath it." style="width:100%;height:100%;object-fit:cover" />
+    </div>
   </div>
 </section>
 
@@ -274,5 +279,6 @@
 </footer>
 
 <script src="main.js"></script>
+<script src="demo.js"></script>
 </body>
 </html>
