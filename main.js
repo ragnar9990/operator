@@ -117,6 +117,7 @@ function createWindow() {
 app.whenReady().then(() => {
   store.init(app.getPath('userData'));
   audit.init(app.getPath('userData'));
+  checkEmailSoon();
 
   // The NVIDIA NIM key, if there is one, and the live list of what that key
   // can reach. Both are cheap and neither blocks the window. A key saved before
@@ -472,7 +473,12 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   // Google (OAuth) account we refresh the access token on demand, since a task
   // can outlast the token's hour, and pass the fresh one into email.js.
   const emailConnected = store.getConnector('email');
-  const emailApi = emailConnected && emailConnected.connected ? {
+  // An expired sign-in is not handed over: the agent would be told it can read
+  // codes and then fail at every one.
+  const emailApi = emailConnected && emailConnected.connected && !emailConnected.expired ? {
+    // Which inbox this is, so the agent signs up with it — codes sent to any
+    // other address are ones it can never fetch.
+    address: emailConnected.email || null,
     list: async (o) => email.list({ cfg: await freshEmailCfg(), ...o }),
     read: async (o) => email.read({ cfg: await freshEmailCfg(), ...o }),
     send: async (o) => email.send({ cfg: await freshEmailCfg(), ...o }),
@@ -1037,11 +1043,32 @@ async function freshEmailCfg() {
   if (!cfg || cfg.auth !== 'oauth') return cfg;
   if (cfg.accessToken && Date.now() < (cfg.expiry || 0) - 60000) return cfg;
   const creds = store.getGoogle();
-  const t = await googleOAuth.refresh({
-    clientId: creds.clientId, clientSecret: creds.clientSecret, refreshToken: cfg.refreshToken,
-  });
-  store.setConnector('email', { ...cfg, accessToken: t.accessToken, expiry: t.expiry });
+  let t;
+  try {
+    t = await googleOAuth.refresh({
+      clientId: creds.clientId, clientSecret: creds.clientSecret, refreshToken: cfg.refreshToken,
+    });
+  } catch (err) {
+    // Google ends the sign-in — after 7 days while the Google Cloud app is in
+    // "Testing", or when it is revoked. Say so where the user will look, not
+    // just "connected" over a mailbox nobody can open.
+    if ((err && err.code === 'invalid_grant') || /expired|revoked|invalid_grant/i.test(String(err && err.message))) {
+      store.markConnector('email', { expired: true });
+      throw new Error('The Gmail sign-in has expired, so Operator cannot read that inbox. Sign in again in Settings → Connectors (an app password there never expires).');
+    }
+    throw err;
+  }
+  store.setConnector('email', { ...cfg, accessToken: t.accessToken, expiry: t.expiry, expired: false });
   return store.getConnector('email');
+}
+
+// Find out now, not in the middle of a task, whether the email sign-in still
+// works — so Settings says "expired" instead of "connected".
+function checkEmailSoon() {
+  setTimeout(() => {
+    const cfg = store.getConnector('email');
+    if (cfg && cfg.connected && cfg.auth === 'oauth') freshEmailCfg().catch(() => {});
+  }, 5000);
 }
 
 ipcMain.handle('connectors:list', async () => store.listConnectors());

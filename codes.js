@@ -70,6 +70,23 @@ function fromPhone(phone, from) {
   };
 }
 
+// The Spam folder, found by the flag the server gives it (\Junk) — its name is
+// "[Gmail]/Spam" in English Gmail and something else in every other language.
+// Remembered per mailbox object, so polling does not ask again every time.
+const junkPaths = new WeakMap();
+async function junkFolder(email) {
+  if (!email || !email.mailboxes) return null;
+  if (junkPaths.has(email)) return junkPaths.get(email);
+  let path = null;
+  try {
+    const boxes = await email.mailboxes({});
+    const hit = (boxes || []).find((b) => /junk/i.test(b.special || '')) || (boxes || []).find((b) => /\b(spam|junk)\b/i.test(b.path || ''));
+    path = hit ? hit.path : null;
+  } catch { /* leave it unknown; the inbox is still searched */ }
+  junkPaths.set(email, path);
+  return path;
+}
+
 // Look through the newest messages for one carrying a code.
 //
 // `email` is the same object agent.js already holds — { list, read } — so this
@@ -94,36 +111,54 @@ async function findCode({ email, phone, within = DEFAULT_WINDOW_MINUTES, from = 
   const cutoff = Date.now() - within * 60 * 1000;
   const wanted = from ? String(from).toLowerCase() : null;
 
-  for (const row of rows || []) {
-    const when = row.date ? Date.parse(row.date) : NaN;
-    if (Number.isFinite(when) && when < cutoff) continue;      // too old to be live
+  // The newest messages in one folder, looking for a live code.
+  async function look(list, mailbox) {
+    for (const row of list || []) {
+      const when = row.date ? Date.parse(row.date) : NaN;
+      if (Number.isFinite(when) && when < cutoff) continue;      // too old to be live
 
-    const sender = `${row.from || ''} ${row.subject || ''}`.toLowerCase();
-    if (wanted && !sender.includes(wanted)) continue;
+      const sender = `${row.from || ''} ${row.subject || ''}`.toLowerCase();
+      if (wanted && !sender.includes(wanted)) continue;
 
-    let full;
+      let full;
+      try {
+        full = await email.read({ uid: row.uid, ...(mailbox ? { mailbox } : {}) });
+      } catch {
+        continue;
+      }
+
+      const haystack = `${full.subject || ''}\n${full.body || ''}`;
+      if (NOT_A_CODE.test(haystack) && !/\bcode\b/i.test(full.subject || '')) continue;
+
+      const code = extract(haystack);
+      if (code) {
+        return {
+          ok: true,
+          code,
+          from: full.from,
+          subject: full.subject,
+          date: full.date,
+          // so the agent can say where it came from before using it
+          age: Number.isFinite(when) ? Math.round((Date.now() - when) / 1000) : null,
+          via: 'email',
+          ...(mailbox ? { folder: 'spam' } : {}),
+        };
+      }
+    }
+    return null;
+  }
+
+  const inInbox = await look(rows, null);
+  if (inInbox) return inInbox;
+
+  // A sign-up code from a service that has never mailed this address before
+  // lands in Spam as often as not, and INBOX never shows it.
+  const junk = await junkFolder(email);
+  if (junk) {
     try {
-      full = await email.read({ uid: row.uid });
-    } catch {
-      continue;
-    }
-
-    const haystack = `${full.subject || ''}\n${full.body || ''}`;
-    if (NOT_A_CODE.test(haystack) && !/\bcode\b/i.test(full.subject || '')) continue;
-
-    const code = extract(haystack);
-    if (code) {
-      return {
-        ok: true,
-        code,
-        from: full.from,
-        subject: full.subject,
-        date: full.date,
-        // so the agent can say where it came from before using it
-        age: Number.isFinite(when) ? Math.round((Date.now() - when) / 1000) : null,
-        via: 'email',
-      };
-    }
+      const inJunk = await look(await email.list({ limit: scan, mailbox: junk, tab: 'all' }), junk);
+      if (inJunk) return inJunk;
+    } catch { /* no spam folder to read — the inbox answer stands */ }
   }
 
   return {

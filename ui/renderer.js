@@ -3571,18 +3571,25 @@ document.addEventListener('keydown', (e) => {
       const list = await window.operator.connectorsList();
       const em = (list || []).find((c) => c.id === 'email');
       const connected = Boolean(em && em.connected);
-      conn.classList.toggle('on', connected);
+      // Still saved, but Google has ended the sign-in: say so, and put the
+      // way back in right there, instead of "connected" over a dead inbox.
+      const expired = Boolean(connected && em.expired);
+      conn.classList.toggle('on', connected && !expired);
+      conn.classList.toggle('expired', expired);
       disconnectBtn.hidden = !connected;
       accountBox.hidden = !connected;
-      signinBox.hidden = connected;
+      signinBox.hidden = connected && !expired;
       // Drives which provider mark the header shows. Unknown providers fall
       // back to the generic envelope rather than guessing at a logo.
       conn.dataset.provider = connected && em.provider ? em.provider.toLowerCase() : '';
       if (connected) {
-        sub.textContent = em.provider ? em.provider : 'Connected';
+        sub.textContent = expired ? 'Sign-in expired — sign in again' : em.provider ? em.provider : 'Connected';
         acctEmail.textContent = em.email || '';
         acctAvatar.textContent = (em.email || '@').trim().charAt(0).toUpperCase();
-        acctMeta.textContent = (em.provider || 'Email') + ' · agents can read and send';
+        acctMeta.textContent = expired
+          ? 'Google ended this sign-in, so agents cannot read codes from it. Sign in again below — or use an app password, which never expires.'
+          : (em.provider || 'Email') + ' · agents can read and send';
+        if (expired) reveal(form, altToggle, true);   // the app password: never expires
       } else {
         sub.textContent = 'Not connected';
         // Open the key setup by default when there are no Google keys yet.

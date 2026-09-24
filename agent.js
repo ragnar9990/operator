@@ -888,7 +888,10 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         const res = seconds > 0
           ? await codes.waitForCode({ email: c.email, phone, from, within, timeout: seconds, abortController: c.abortController })
           : await codes.findCode({ email: c.email, phone, from, within });
-        if (!res.ok) return { content: [{ type: 'text', text: res.error }] };
+        if (!res.ok) {
+          const only = c.email && c.email.address ? ` Operator can only read ${c.email.address} — a code sent anywhere else has to come from the user (wait_for_user).` : '';
+          return { content: [{ type: 'text', text: res.error + only }] };
+        }
         // The sender is reported so the agent can check the code came from the
         // service it is actually signing in to, rather than typing whatever
         // number turned up.
@@ -962,7 +965,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
 
 You only have browser tools${hasEmail ? ' and get_verification_code' : ''}. Do only your task, and quickly: every browser action already returns the page as text, so do not screenshot or re-read after acting. Fill a whole form with one browser_fill_form. Use browser_select for every dropdown.
 
-When you reach something that is the user's to do — a verification code you cannot fetch, a CAPTCHA or "are you human" check, choosing a password (unless your task gives you one to use), a phone or identity check, accepting terms, paying — call wait_for_user with exactly what they need to do, and carry on with your task when it returns. Do NOT stop, and do NOT end your task, at one of these steps: waiting is the whole point. Publishing or posting anything publicly also waits for them.${hasEmail ? '\nIf the site emails a code, call get_verification_code first, with "from" set to this site so you never pick up a code meant for another helper — only hand it to the user if nothing arrives.' : ''}
+When you reach something that is the user's to do — a verification code you cannot fetch, a CAPTCHA or "are you human" check, choosing a password (unless your task gives you one to use), a phone or identity check, accepting terms, paying — call wait_for_user with exactly what they need to do, and carry on with your task when it returns. Do NOT stop, and do NOT end your task, at one of these steps: waiting is the whole point. Publishing or posting anything publicly also waits for them.${hasEmail ? `\nThe inbox you can read is ${(email && email.address) || 'the connected one'}: if a form needs an email address and your task did not give one, use it. When the site emails a code, call get_verification_code yourself, with "from" set to this site so you never pick up a code meant for another helper, type it in and carry on — only hand it to the user if nothing arrives or it went to an address you cannot read.` : ''}
 
 Finish with a short report. Its first word is DONE if your task is complete, or NEEDS YOU if something is still left for the user (only when wait_for_user timed out or they skipped it). Then one or two lines: what you did, and exactly what is left for them on which site.`;
 
@@ -1192,6 +1195,18 @@ ${notes}`;
     systemPrompt += `
 
 When you learn something durable about this user or how they want work done — a preference, a name, a path, a rule, a correction — call remember to keep it. Do not use it for one-off details from the task at hand.`;
+  }
+
+  // The inbox it can read codes from, by name — so it signs up with this
+  // address, not one it cannot see into. (A real run signed up with a second
+  // Gmail and then had no way to read a single code.)
+  if (hasEmail && email && email.address) {
+    systemPrompt += `
+
+THE INBOX YOU CAN READ: ${email.address}
+- get_verification_code and the email tools read this inbox and no other. A code sent to any other address is one you can never fetch.
+- So when a sign-up or sign-in asks for an email address and the user has not named one, use ${email.address}. When the site sends a code, call get_verification_code with "from" set to that site, type the code in yourself and carry on — do not ask the user for it.
+- If the user named a different address, use theirs, and when its code comes hand it to them with wait_for_user, since you cannot read it.`;
   }
 
   // Always-on skills: reusable instructions the user switched on for this bot.
@@ -1495,6 +1510,8 @@ function sessionKey(o) {
     // Effort and thinking are fixed when a session starts, so changing them on
     // the dial has to start a new one.
     o.tuning || {},
+    // So is the inbox it is told it can read.
+    (o.email && o.email.address) || null,
   ]);
 }
 

@@ -122,8 +122,18 @@ function listConnectors() {
   const c = settings.connectors || {};
   return Object.keys(c).map((k) => {
     const v = c[k] || {};
-    return { id: k, connected: Boolean(v.connected), email: v.email || null, provider: v.provider || null };
+    return { id: k, connected: Boolean(v.connected), expired: Boolean(v.expired), email: v.email || null, provider: v.provider || null };
   });
+}
+
+// Note something about a connector without reconnecting it — that its Google
+// sign-in has expired, say — keeping everything else as it was.
+function markConnector(id, patch) {
+  const c = (settings.connectors || {})[id];
+  if (!c) return null;
+  Object.assign(c, patch || {});
+  flushSettings();
+  return c;
 }
 
 // The full config, password included — for the backend only, never sent to the UI.
@@ -775,7 +785,7 @@ module.exports = {
   listChats, getChat, createChat, saveChat, removeChat,
   sessionOf, setSession, forgetSession,
   getPrefs, setPrefs, getModelOptions, setModelOptions,
-  listConnectors, getConnector, setConnector, removeConnector, getGoogle, setGoogle,
+  listConnectors, getConnector, setConnector, markConnector, removeConnector, getGoogle, setGoogle,
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,
 };

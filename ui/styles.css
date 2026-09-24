@@ -3388,3 +3388,8 @@ body.your-turn {
 :root[data-motion="off"] .hv-wait i { opacity: 1; }
 .handover-answer { margin: -4px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .handover-answer b { color: var(--ink); font-weight: 550; }
+
+/* An email account still saved, but its sign-in ended — amber, like any other
+   "this needs you". */
+.connector.expired .conn-sub { color: #f0a12e; font-weight: 500; }
+.connector.expired .acct-meta { color: #f0a12e; }

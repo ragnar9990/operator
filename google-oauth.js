@@ -144,7 +144,11 @@ async function refresh({ clientId, clientSecret, refreshToken }) {
     body,
   });
   const tok = await r.json();
-  if (!r.ok) throw new Error(tok.error_description || tok.error || 'token refresh failed');
+  if (!r.ok) {
+    const err = new Error(tok.error_description || tok.error || 'token refresh failed');
+    err.code = tok.error;   // "invalid_grant": the sign-in has ended, whatever the wording
+    throw err;
+  }
   return { accessToken: tok.access_token, expiry: Date.now() + (Number(tok.expires_in) || 3600) * 1000 };
 }
 
