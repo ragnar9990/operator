@@ -3110,3 +3110,62 @@ body.working .composer::before { filter: blur(11px); }
 @media (prefers-reduced-motion: reduce) {
   #sheet.grow *, #sheet.grow *::after { animation: none !important; }
 }
+
+/* ── undo, after a delete ─────────────────────────────────────────────
+   A small note at the bottom, over everything but the full-screen view. The
+   line along its foot runs down for as long as Undo is on offer. */
+
+.undo {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 8px 8px 8px 14px;
+  overflow: hidden;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  color: var(--ink-2);
+  font-size: 13px;
+  translate: -50% 0;
+  animation: undo-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.undo[hidden] { display: none; }
+:root[data-theme="light"] .undo { box-shadow: 0 14px 40px rgba(20, 20, 30, 0.14); }
+@keyframes undo-in { from { opacity: 0; transform: translateY(10px); } }
+
+.undo > svg { flex: none; width: 15px; height: 15px; color: var(--ink-4); }
+.undo-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.undo-btn {
+  flex: none;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.undo-btn:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+
+.undo-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  transform-origin: left;
+}
+.undo.run .undo-bar { animation: undo-count 7s linear both; }   /* UNDO_MS in renderer.js */
+@keyframes undo-count { to { transform: scaleX(0); } }
+
+:root[data-motion="off"] .undo { animation: none; }
+@media (prefers-reduced-motion: reduce) { .undo { animation: none; } }

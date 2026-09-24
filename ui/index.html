@@ -940,6 +940,14 @@
       </div>
     </div>
 
+    <!-- a delete, offered back for a few seconds -->
+    <div class="undo" id="undo" role="status" aria-live="polite" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V5.5h5V7M6.5 7l.8 12h9.4l.8-12"/></svg>
+      <span class="undo-text" id="undoText"></span>
+      <button class="undo-btn" id="undoBtn" type="button">Undo</button>
+      <i class="undo-bar" aria-hidden="true"></i>
+    </div>
+
     <script src="avatar.js"></script>
     <script src="vox.js"></script>
     <script src="editor.js"></script>

@@ -419,7 +419,8 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       text: 'Claude Code process exited with code 1. stderr: Invalid API key · Please run /login' }),
 
     listBots: async () => BOTS.map(card),
-    getBot: async (id) => find(id) || null,
+    // A copy, the way IPC hands one over — undo depends on it being one.
+    getBot: async (id) => { const b = find(id); return b ? JSON.parse(JSON.stringify(b)) : null; },
     createBot: async (spec) => { const b = blank((spec && spec.name) || 'New bot', spec && spec.title); BOTS.unshift(b); sync(); return card(b); },
     updateBot: async (id, patch) => {
       const b = find(id); if (!b) return null;
@@ -487,6 +488,12 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       sync(); return b.chats[0];
     },
     deleteBot: async (id) => { BOTS = BOTS.filter((b) => b.id !== id); if (!BOTS.length) BOTS = [blank('Operator', 'Runs this computer')]; sync(); return { ok: true }; },
+    restoreBot: async (snap, index) => {
+      const live = find(snap.id);
+      if (live) { const have = new Set(live.chats.map((c) => c.id)); snap.chats.forEach((c, i) => { if (!have.has(c.id)) live.chats.splice(i, 0, c); }); }
+      else BOTS.splice(Math.max(0, Math.min(index || 0, BOTS.length)), 0, JSON.parse(JSON.stringify(snap)));
+      sync(); return card(find(snap.id));
+    },
     rememberNote: async (id, text) => { const b = find(id); if (!b) return null; const n = { id: uid('m'), text, at: Date.now() }; b.memory.unshift(n); sync(); return n; },
     forgetNote: async (id, noteId) => { const b = find(id); if (b) b.memory = b.memory.filter((m) => m.id !== noteId); sync(); return { ok: true }; },
 

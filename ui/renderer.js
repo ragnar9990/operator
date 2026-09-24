@@ -825,13 +825,68 @@ async function adopt(botId, chatId) {
   loadBots();
 }
 
+/* ── undo, for deletes ───────────────────────────────────────────────
+ * A delete happens at once — close the app a second later and it stays gone —
+ * but for a few seconds a note at the bottom offers it back. The agent is
+ * copied just before it goes, and Undo puts that copy back where it was.
+ */
+
+const undoEl = document.getElementById('undo');
+const UNDO_MS = 7000;
+let undoing = null;   // { restore, timer }
+
+function offerUndo(text, restore) {
+  if (undoing) clearTimeout(undoing.timer);
+  document.getElementById('undoText').textContent = text;
+  undoEl.hidden = false;
+  // Restart the countdown bar, which a second delete in a row would not do.
+  undoEl.classList.remove('run');
+  void undoEl.offsetWidth;
+  undoEl.classList.add('run');
+  undoing = { restore, timer: setTimeout(() => { undoEl.hidden = true; undoing = null; }, UNDO_MS) };
+}
+
+document.getElementById('undoBtn').addEventListener('click', async () => {
+  if (!undoing) return;
+  const { restore, timer } = undoing;
+  clearTimeout(timer);
+  undoing = null;
+  undoEl.hidden = true;
+  await restore();
+});
+
+// The agent as it stands, and where it sits in the list, taken before a delete.
+async function snapshot(botId) {
+  const full = await window.operator.getBot(botId);
+  return full ? { full, index: bots.findIndex((b) => b.id === botId) } : null;
+}
+
+// Puts it back. If it was the conversation on screen, it comes back on screen —
+// unless something is running, since opening a conversation stops a task.
+async function putBack(snap, threadId) {
+  const back = await window.operator.restoreBot(snap.full, snap.index);
+  if (!back) return;
+  if (threadId !== undefined && !busy && !launchOpen()) {
+    await openAgent(back.id, threadId || (back.threads[0] && back.threads[0].id) || null);
+    return;
+  }
+  await loadBots(bot && bot.id);
+  await paintRail();
+  if (launchOpen()) paintLaunch(true);
+}
+
 // Deleting a row deletes the conversation it stands for. For an ordinary agent
 // that is the agent itself; for a routine's run sitting under a pinned agent it
 // is only that thread, because the agent it belongs to is one you chose to keep.
 async function removeRow(r) {
   const mine = isOpen(r);
+  const snap = await snapshot(r.bot.id);
   if (r.bot.pinned && r.thread) await window.operator.deleteChat(r.bot.id, r.thread.id);
   else await window.operator.deleteBot(r.bot.id);
+  if (snap) {
+    offerUndo(r.bot.pinned && r.thread ? 'Deleted a conversation from ' + r.bot.name : 'Deleted ' + r.bot.name,
+      () => putBack(snap, mine ? (r.thread && r.thread.id) || null : undefined));
+  }
 
   if (!mine) {
     await loadBots(bot && bot.id);
@@ -1289,6 +1344,9 @@ document.getElementById('routForm').addEventListener('submit', async (e) => {
 
 document.getElementById('deleteBot').addEventListener('click', async () => {
   if (!bot) return;
+  const snap = await snapshot(bot.id);
+  // From the start screen's Create, it was never on screen to go back to.
+  const shown = launchOpen() ? undefined : (chat && chat.id) || null;
   await window.operator.deleteBot(bot.id);
   closeSheet(true);
   chat = null;
@@ -1296,6 +1354,7 @@ document.getElementById('deleteBot').addEventListener('click', async () => {
   bot = null;
   await loadBots();
   await paintRail();
+  if (snap) offerUndo('Deleted ' + snap.full.name, () => putBack(snap, shown));
 });
 
 // A routine that fired while you were elsewhere changes the roster under you.

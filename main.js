@@ -989,6 +989,7 @@ ipcMain.handle('workspaces:delete', async (_e, id) => store.deleteWorkspace(id))
 ipcMain.handle('workspaces:file', async (_e, botId, wsId) => store.setAgentWorkspace(botId, wsId));
 ipcMain.handle('bots:update', async (_e, id, patch) => store.updateBot(id, patch || {}));
 ipcMain.handle('bots:delete', async (_e, id) => { store.deleteBot(id); return { ok: true }; });
+ipcMain.handle('bots:restore', async (_e, snap, index) => store.restoreBot(snap, index));
 ipcMain.handle('bots:forget', async (_e, id, noteId) => { store.forget(id, noteId); return { ok: true }; });
 ipcMain.handle('bots:remember', async (_e, id, text) => store.remember(id, text));
 

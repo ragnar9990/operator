@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('operator', {
   fileAgent: (botId, wsId) => ipcRenderer.invoke('workspaces:file', botId, wsId),
   updateBot: (id, patch) => ipcRenderer.invoke('bots:update', id, patch),
   deleteBot: (id) => ipcRenderer.invoke('bots:delete', id),
+  restoreBot: (snap, index) => ipcRenderer.invoke('bots:restore', snap, index),
   forgetNote: (id, noteId) => ipcRenderer.invoke('bots:forget', id, noteId),
   rememberNote: (id, text) => ipcRenderer.invoke('bots:remember', id, text),
 

@@ -479,6 +479,26 @@ function deleteBot(botId) {
   flush();
 }
 
+// Undo, for the few seconds after a delete: `snap` is the bot as getBot gave
+// it just before. A bot deleteBot took goes back where it was; for one that is
+// still here, only the threads removeChat took come back — anything that has
+// changed on it since is kept.
+function restoreBot(snap, index) {
+  if (!snap || !snap.id || !Array.isArray(snap.chats)) return null;
+  const live = find(snap.id);
+  if (live) {
+    const have = new Set(live.chats.map((c) => c.id));
+    snap.chats.forEach((c, i) => { if (!have.has(c.id)) live.chats.splice(Math.min(i, live.chats.length), 0, c); });
+  } else {
+    if (bots.length >= MAX_BOTS) return null;
+    // Filed in a workspace that has gone since: back into the main list.
+    if (snap.workspaceId && !(settings.workspaces || []).some((w) => w.id === snap.workspaceId)) snap.workspaceId = null;
+    bots.splice(Number.isInteger(index) ? Math.max(0, Math.min(index, bots.length)) : 0, 0, snap);
+  }
+  flush();
+  return card(find(snap.id));
+}
+
 /* ── what a bot remembers ────────────────────────────────────────── */
 
 // Memory belongs to the bot, not the account: a bot that books travel and a bot
@@ -720,7 +740,7 @@ function forgetSession(botId, chatId) {
 
 module.exports = {
   init, faceFor,
-  listBots, getBot, createBot, updateBot, deleteBot,
+  listBots, getBot, createBot, updateBot, deleteBot, restoreBot,
   createAgent, threadOf,
   listWorkspaces, createWorkspace, updateWorkspace, deleteWorkspace, setAgentWorkspace,
   remember, forget,
