@@ -21,7 +21,10 @@ function setFrameListener(cb) {
 // same browser a person here would use, so prefer it and keep Chromium only as
 // a fallback for machines that do not have Chrome installed.
 const LAUNCH = {
-  headless: false, // a real, visible window — this is its computer
+  // A real, visible window — this is its computer. Automated tests set
+  // OPERATOR_BROWSER_HEADLESS=1 so a test run never pops a window up in front
+  // of whoever is using the machine.
+  headless: process.env.OPERATOR_BROWSER_HEADLESS === '1',
   viewport: VIEWPORT,
   deviceScaleFactor: 1, // keep screenshot pixels == click coordinates
   // Drop the flag that makes Chrome announce it is being driven by a test tool.
@@ -30,14 +33,36 @@ const LAUNCH = {
     '--disable-blink-features=AutomationControlled',
     '--no-first-run',
     '--no-default-browser-check',
+    // Helpers work in background tabs at the same time. Chrome normally slows a
+    // tab you are not looking at to a crawl — timers, rendering — which would
+    // make every helper but one wait on the others.
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
   ],
 };
 
+// Helpers (run_helpers in agent.js) each work in a tab of their own — a lane —
+// so several can fill in forms at once without touching the main agent's page.
+// A lane follows its own pop-ups ("Sign in with Google" and the like).
+const lanes = new Set();
+let laneOpening = 0;
+const laneOf = (p) => [...lanes].find((l) => l.pages.has(p)) || null;
+
 let usingChrome = null; // null until the first launch tells us
+
+// One launch at a time, and everyone who asks while it is happening gets that
+// same launch. Helpers start together, and two launches on one profile fight
+// over its lock: the loser fell back to Playwright's own Chromium and failed.
+let launching = null;
 
 async function ensureBrowser(userDataDir) {
   if (page && !page.isClosed()) return page;
+  if (!launching) launching = launch(userDataDir).finally(() => { launching = null; });
+  return launching;
+}
 
+async function launch(userDataDir) {
   try {
     context = await chromium.launchPersistentContext(userDataDir, { ...LAUNCH, channel: 'chrome' });
     usingChrome = true;
@@ -55,21 +80,60 @@ async function ensureBrowser(userDataDir) {
   page = context.pages()[0] || (await context.newPage());
   await page.setViewportSize(VIEWPORT);
 
-  // Follow the active tab if the site opens a new one.
-  context.on('page', (p) => {
+  // Follow the active tab if the site opens a new one — unless it is a helper's
+  // tab, or a pop-up from one, which that helper follows instead.
+  const adopt = (p) => {
     page = p;
     p.setViewportSize(VIEWPORT).catch(() => {});
+  };
+  context.on('page', (p) => {
+    if (laneOpening > 0) return;           // openLane is setting this one up
+    if (!lanes.size) { adopt(p); return; } // no helpers: exactly as it always was
+    p.opener().then((from) => { if (!(from && laneOf(from))) adopt(p); }, () => adopt(p));
   });
 
   return page;
 }
 
-// Take a viewport screenshot and push it to the live view.
-async function snap() {
-  if (!page || page.isClosed()) return null;
-  const buf = await page.screenshot({ type: 'png' });
+// A new tab for a helper. The helper works on `lane.page`, which moves to any
+// pop-up the page opens and back when that pop-up closes.
+async function openLane(userDataDir) {
+  await ensureBrowser(userDataDir);
+  laneOpening++;
+  try {
+    const lane = { page: null, pages: new Set() };
+    const follow = (p) => {
+      lane.pages.add(p);
+      lane.page = p;
+      p.setViewportSize(VIEWPORT).catch(() => {});
+      p.on('popup', follow);
+      p.on('close', () => {
+        if (lane.page !== p) return;
+        const open = [...lane.pages].filter((x) => !x.isClosed());
+        if (open.length) lane.page = open[open.length - 1];
+      });
+    };
+    follow(await context.newPage());
+    lanes.add(lane);
+    return lane;
+  } finally {
+    laneOpening--;
+  }
+}
+
+// The helper is finished. Its tab stays open — it is usually left on the step
+// that is the user's to do — and simply stops being a lane.
+function closeLane(lane) {
+  lanes.delete(lane);
+}
+
+// Take a viewport screenshot and push it to the live view. A helper's tab is
+// passed with no live-view callback: it has its own thumbnail, not this pane.
+async function snap(p = page, frame = onFrame) {
+  if (!p || p.isClosed()) return null;
+  const buf = await p.screenshot({ type: 'png' });
   const b64 = buf.toString('base64');
-  if (onFrame) onFrame(b64, page.url());
+  if (frame) frame(b64, p.url());
   return b64;
 }
 
@@ -79,11 +143,11 @@ async function snap() {
 // with analytics or a live feed burned the full timeout, so we settle for the
 // DOM being ready and a short beat for paint. Pages that are still moving get
 // caught by the agent taking another look.
-async function settle(ms = 100) {
+async function settle(ms = 100, p = page) {
   try {
-    await page.waitForLoadState('domcontentloaded', { timeout: 800 });
+    await p.waitForLoadState('domcontentloaded', { timeout: 800 });
   } catch (_) {}
-  await page.waitForTimeout(ms);
+  await p.waitForTimeout(ms);
 }
 
 // Pick a value from a dropdown.
@@ -103,8 +167,8 @@ async function settle(ms = 100) {
 //   already visible.
 //
 // Returns { ok, how, value } so the caller can report which path worked.
-async function pickOption(field, option) {
-  if (!page) throw new Error('no page');
+async function pickOption(field, option, pg = page) {
+  if (!pg) throw new Error('no page');
   const want = String(option);
   // No regex escaping here on purpose: quotes and backslashes are simply
   // removed, which is safe inside an attribute selector and impossible to get
@@ -117,13 +181,13 @@ async function pickOption(field, option) {
   // guess for an unlabelled control, and only worth making when there is one
   // select on the page — otherwise it matches some unrelated dropdown and
   // reports, with total confidence, that the wrong element lacks the option.
-  const onlyOneSelect = await page.locator('select').count() === 1;
+  const onlyOneSelect = await pg.locator('select').count() === 1;
   const selects = [
-    { loc: page.locator(`select[aria-label*="${quoted}" i]`), named: true },
-    { loc: page.locator(`select[name*="${quoted}" i]`), named: true },
-    { loc: page.locator(`select[id*="${quoted}" i]`), named: true },
-    { loc: page.getByLabel(field, { exact: false }), named: true },
-    ...(onlyOneSelect ? [{ loc: page.locator('select'), named: false }] : []),
+    { loc: pg.locator(`select[aria-label*="${quoted}" i]`), named: true },
+    { loc: pg.locator(`select[name*="${quoted}" i]`), named: true },
+    { loc: pg.locator(`select[id*="${quoted}" i]`), named: true },
+    { loc: pg.getByLabel(field, { exact: false }), named: true },
+    ...(onlyOneSelect ? [{ loc: pg.locator('select'), named: false }] : []),
   ];
 
   for (const { loc, named } of selects) {
@@ -166,10 +230,10 @@ async function pickOption(field, option) {
   }
 
   // ── a custom dropdown ────────────────────────────────────────────
-  const opener = page.getByLabel(field, { exact: false })
-    .or(page.getByRole('combobox', { name: field }))
-    .or(page.getByRole('button', { name: field }))
-    .or(page.getByText(field, { exact: false }))
+  const opener = pg.getByLabel(field, { exact: false })
+    .or(pg.getByRole('combobox', { name: field }))
+    .or(pg.getByRole('button', { name: field }))
+    .or(pg.getByText(field, { exact: false }))
     .first();
 
   try {
@@ -177,12 +241,12 @@ async function pickOption(field, option) {
   } catch {
     return { ok: false, error: `could not find a dropdown called "${field}"` };
   }
-  await page.waitForTimeout(220);
+  await pg.waitForTimeout(220);
 
   const candidates = [
-    page.getByRole('option', { name: want, exact: false }),
-    page.locator('[role="option"]').filter({ hasText: want }),
-    page.locator('li, [role="menuitem"]').filter({ hasText: want }),
+    pg.getByRole('option', { name: want, exact: false }),
+    pg.locator('[role="option"]').filter({ hasText: want }),
+    pg.locator('li, [role="menuitem"]').filter({ hasText: want }),
   ];
 
   for (const loc of candidates) {
@@ -202,9 +266,9 @@ async function pickOption(field, option) {
   // pressing Enter blind would report success for a value that does not exist,
   // which is worse than failing: the agent moves on believing it is set.
   try {
-    await page.keyboard.type(want.slice(0, 12), { delay: 40 });
-    await page.waitForTimeout(250);
-    const filtered = page.getByRole('option', { name: want, exact: false }).first();
+    await pg.keyboard.type(want.slice(0, 12), { delay: 40 });
+    await pg.waitForTimeout(250);
+    const filtered = pg.getByRole('option', { name: want, exact: false }).first();
     if (await filtered.count()) {
       await filtered.scrollIntoViewIfNeeded({ timeout: 1500 });
       await filtered.click({ timeout: 2000 });
@@ -229,53 +293,53 @@ async function pickOption(field, option) {
 //          'appears'  — some text shows up (a success message)
 //          'url'      — the address changes (a redirect after signing in)
 //          'change'   — anything on the page changes at all
-async function waitForChange({ until = 'change', text = '', seconds = 120 } = {}) {
-  if (!page) throw new Error('no page');
+async function waitForChange({ until = 'change', text = '', seconds = 120 } = {}, pg = page) {
+  if (!pg) throw new Error('no page');
   const limit = Math.max(3, Math.min(Number(seconds) || 120, 300));
   const deadline = Date.now() + limit * 1000;
   const startedAt = Date.now();
 
-  const startUrl = page.url();
+  const startUrl = pg.url();
   const snapshot = async () => {
-    try { return (await page.innerText('body')).replace(/\s+/g, ' ').slice(0, 4000); }
+    try { return (await pg.innerText('body')).replace(/\s+/g, ' ').slice(0, 4000); }
     catch { return ''; }
   };
   const startText = until === 'change' ? await snapshot() : '';
 
   const visible = async (t) => {
-    try { return await page.getByText(t, { exact: false }).first().isVisible({ timeout: 800 }); }
+    try { return await pg.getByText(t, { exact: false }).first().isVisible({ timeout: 800 }); }
     catch { return false; }
   };
 
   // If we are waiting for something to go and it was never there, the step has
   // already happened — say so rather than sitting for two minutes.
   if (until === 'gone' && text && !(await visible(text))) {
-    return { ok: true, why: `"${text}" is not on the page`, waited: 0, url: page.url() };
+    return { ok: true, why: `"${text}" is not on the page`, waited: 0, url: pg.url() };
   }
 
   while (Date.now() < deadline) {
-    await page.waitForTimeout(700);
+    await pg.waitForTimeout(700);
     const waited = Math.round((Date.now() - startedAt) / 1000);
 
     try {
-      if (until === 'url' && page.url() !== startUrl) {
-        return { ok: true, why: `the page moved to ${page.url()}`, waited, url: page.url() };
+      if (until === 'url' && pg.url() !== startUrl) {
+        return { ok: true, why: `the page moved to ${pg.url()}`, waited, url: pg.url() };
       }
       if (until === 'gone' && text && !(await visible(text))) {
-        return { ok: true, why: `"${text}" is gone`, waited, url: page.url() };
+        return { ok: true, why: `"${text}" is gone`, waited, url: pg.url() };
       }
       if (until === 'appears' && text && (await visible(text))) {
-        return { ok: true, why: `"${text}" appeared`, waited, url: page.url() };
+        return { ok: true, why: `"${text}" appeared`, waited, url: pg.url() };
       }
       if (until === 'change') {
-        if (page.url() !== startUrl) {
-          return { ok: true, why: `the page moved to ${page.url()}`, waited, url: page.url() };
+        if (pg.url() !== startUrl) {
+          return { ok: true, why: `the page moved to ${pg.url()}`, waited, url: pg.url() };
         }
         const now = await snapshot();
         // A little noise on a page is normal — a clock, a counter. Only a real
         // difference in what is written counts as the step being finished.
         if (now && startText && now.slice(0, 600) !== startText.slice(0, 600)) {
-          return { ok: true, why: 'the page changed', waited, url: page.url() };
+          return { ok: true, why: 'the page changed', waited, url: pg.url() };
         }
       }
     } catch { /* mid-navigation; look again next pass */ }
@@ -284,7 +348,7 @@ async function waitForChange({ until = 'change', text = '', seconds = 120 } = {}
   return {
     ok: false,
     waited: limit,
-    url: page.url(),
+    url: pg.url(),
     error: `Waited ${limit}s and the page did not ${until === 'gone' ? `lose "${text}"` : until === 'appears' ? `show "${text}"` : 'change'}.`,
   };
 }
@@ -301,6 +365,13 @@ function getPage() {
   return page;
 }
 
+// Every open tab — the main one and any a helper worked in — for the check at
+// the end of a run, which would otherwise see only the main agent's tab.
+function openTabs() {
+  if (!context) return [];
+  try { return context.pages().filter((p) => !p.isClosed()); } catch { return []; }
+}
+
 const isRealChrome = () => usingChrome;
 
 module.exports = {
@@ -308,6 +379,9 @@ module.exports = {
   isRealChrome,
   ensureBrowser,
   getPage,
+  openTabs,
+  openLane,
+  closeLane,
   snap,
   settle,
   pickOption,

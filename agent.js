@@ -97,6 +97,7 @@ LEAVE THEIR WINDOWS AS YOU FOUND THEM:
    - WHEN A STEP IS NOT YOURS TO DO — the user has to scan a QR, tap an approval, type a code on their phone, or an upload or payment is still going — do NOT end your turn to tell them. Say in one line what they need to do, then call browser_wait_for and continue the moment the page moves on. Ending the turn means they have to come back and start you again, by which time the page has usually timed out.
    - DROPDOWNS: always browser_select. Never click a dropdown open and try to find the option by eye — a real <select> draws its list outside the page, so it is not in the screenshot and cannot be clicked or scrolled at coordinates. That is why long lists like a year of birth get stuck.
    - Chain: navigate, then fill_form with submit — a whole "go to the site and fill it in" is often just two calls.
+   - SEVERAL SEPARATE WEB JOBS AT ONCE: when a request splits into jobs on different sites that do not depend on each other — an account on each of four sites, the same lookup in several shops — call run_helpers ONCE with one task per site (up to 4). They run at the same time, each in its own tab, which is several times faster than doing them one after another. Each helper sees ONLY its task, so write it complete: the site, every detail it needs (names, bio, email address), and what to leave for the user. When they report back, tell the user in a few lines what each did and exactly what is waiting for them, and in which tab.
 
 2. Anything else on the computer — desktop apps, Explorer, settings, games, installers, local files, or a browser the user already has open — use the screen_* tools. This is a real mouse and keyboard on a real desktop.
 
@@ -267,6 +268,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'use_own_screen': return 'give your screen back';
       case 'maximize_window': return `put "${a.title}" back to full size`;
       case 'screen_read': return `read ${a.title || 'the window in front'} as text`;
+      case 'browser_navigate': return `open ${a.url}`;
       case 'browser_click_text': return `click "${a.text}" in the browser`;
       case 'browser_click_xy': return `click (${a.x}, ${a.y}) in the browser`;
       case 'browser_type_into': return `type "${String(a.text || '').slice(0, 50)}" into "${a.target}"`;
@@ -279,24 +281,27 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'email_send': return `email ${a.to} — "${a.subject}"`;
       case 'remember': return `remember "${String(a.note || '').slice(0, 60)}"`;
       case 'message_bot': return `ask ${a.bot}: "${String(a.message || '').slice(0, 60)}"`;
+      case 'run_helpers': return `hand ${(a.tasks || []).length} jobs to helpers at once: ${(a.tasks || []).map((x) => x.name).join(', ')}`;
       default: return name;
     }
   }
 
   // Every tool is registered through this wrapper, so a tool added later is
-  // guarded by default instead of relying on someone remembering.
-  let planNo = 0;
-  const tool = (name, description, schema, handler) =>
+  // guarded by default instead of relying on someone remembering. It takes the
+  // context it reports to: the session's own, or a helper's (run_helpers), so
+  // a helper's steps are rehearsed, timed and audited exactly the same way.
+  const toolFor = (c) => (name, description, schema, handler) =>
     sdkTool(name, description, schema, async (...call) => {
       const args = call[0] || {};
       const writes = WRITES.has(name) && !(name === 'run_command' && readOnlyCommand(args.command));
       const text = describeStep(name, args);
 
-      if (ctx.dryRun && writes) {
-        ctx.onEvent({ type: 'plan_step', n: ++planNo, name, input: args, text, risk: riskOf(name, args) });
-        ctx.onEvent({ type: 'tool_done', name, input: args, text, ok: true, ms: 0, dryRun: true });
+      if (c.dryRun && writes) {
+        c.planNo = (c.planNo || 0) + 1;
+        c.onEvent({ type: 'plan_step', n: c.planNo, name, input: args, text, risk: riskOf(name, args) });
+        c.onEvent({ type: 'tool_done', name, input: args, text, ok: true, ms: 0, dryRun: true });
         return { content: [{ type: 'text', text:
-          `DRY RUN — this did NOT happen. Recorded as step ${planNo} of the plan: ${text}. ` +
+          `DRY RUN — this did NOT happen. Recorded as step ${c.planNo} of the plan: ${text}. ` +
           `Assume it worked and carry on planning the rest of the task.` }] };
       }
 
@@ -307,14 +312,15 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       try {
         const out = await handler(...call);
         const failed = Boolean(out && out.isError);
-        ctx.onEvent({ type: 'tool_done', name, input: args, text, ok: !failed, ms: Date.now() - started });
+        c.onEvent({ type: 'tool_done', name, input: args, text, ok: !failed, ms: Date.now() - started });
         return out;
       } catch (err) {
-        ctx.onEvent({ type: 'tool_done', name, input: args, text, ok: false, ms: Date.now() - started,
+        c.onEvent({ type: 'tool_done', name, input: args, text, ok: false, ms: Date.now() - started,
                   error: String((err && err.message) || err) });
         throw err;
       }
     });
+  const tool = toolFor(ctx);
 
   // Chromium starts on first use, not on every task — asking Operator to open
   // Notepad should not pop a browser window.
@@ -629,30 +635,31 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
 
   /* ── the browser ─────────────────────────────────────────────── */
 
-  const browserTools = [
-    tool('browser_navigate', 'Open a URL in the agent browser.', { url: z.string() }, async ({ url }) => {
-      const p = await page();
+  function buildBrowserTools(t, web) {
+    return [
+    t('browser_navigate', 'Open a URL in the agent browser.', { url: z.string() }, async ({ url }) => {
+      const p = await web.page();
       await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-      return afterWeb(`Navigated to ${url}`);
+      return web.afterWeb(`Navigated to ${url}`);
     }),
 
-    tool('browser_screenshot', 'Screenshot the agent browser viewport (1280x800).', {}, async () => {
-      await page();
-      const b64 = await browser.snap();
+    t('browser_screenshot', 'Screenshot the agent browser viewport (1280x800).', {}, async () => {
+      await web.page();
+      const b64 = await web.snap();
       return { content: [img(b64)] };
     }),
 
-    tool('browser_click_text', 'Click the first visible element in the page containing this text.',
+    t('browser_click_text', 'Click the first visible element in the page containing this text.',
       { text: z.string() }, async ({ text }) => {
-        const p = await page();
+        const p = await web.page();
         await p.getByText(text, { exact: false }).first().click({ timeout: 8000 });
-        return afterWeb(`Clicked element with text "${text}"`);
+        return web.afterWeb(`Clicked element with text "${text}"`);
       }),
 
-    tool('browser_type_into', 'Click a field described by its placeholder/label/nearby text, then type.',
+    t('browser_type_into', 'Click a field described by its placeholder/label/nearby text, then type.',
       { target: z.string(), text: z.string(), enter: z.boolean().optional() },
       async ({ target, text, enter }) => {
-        const p = await page();
+        const p = await web.page();
         const field = p.getByPlaceholder(target, { exact: false })
           .or(p.getByLabel(target, { exact: false }))
           .or(p.getByRole('textbox', { name: target }))
@@ -660,10 +667,10 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         await field.click({ timeout: 8000 });
         await field.fill(text);
         if (enter) await p.keyboard.press('Enter');
-        return afterWeb(`Typed into "${target}"${enter ? ' and pressed Enter' : ''}`);
+        return web.afterWeb(`Typed into "${target}"${enter ? ' and pressed Enter' : ''}`);
       }),
 
-    tool('browser_fill_form',
+    t('browser_fill_form',
       'Fill a whole form in ONE call — much faster than one field at a time. Give each field by its placeholder/label/nearby text and the value. Set submit to press Enter at the end. Use this whenever you have two or more fields to fill.',
       {
         fields: z.array(z.object({
@@ -673,7 +680,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         submit: z.boolean().optional().describe('press Enter after the last field'),
       },
       async ({ fields, submit }) => {
-        const p = await page();
+        const p = await web.page();
         const filled = [];
         for (const f of fields) {
           const field = p.getByPlaceholder(f.target, { exact: false })
@@ -685,10 +692,10 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
           filled.push(f.target);
         }
         if (submit) await p.keyboard.press('Enter');
-        return afterWeb(`Filled ${filled.length} field(s): ${filled.join(', ')}${submit ? ' and submitted' : ''}`);
+        return web.afterWeb(`Filled ${filled.length} field(s): ${filled.join(', ')}${submit ? ' and submitted' : ''}`);
       }),
 
-    tool('browser_wait_for',
+    t('browser_wait_for',
       'Wait for the page to move on, then carry on. Use this whenever a step is not yours to do — a code the user types on their phone, a QR they scan, an approval they tap, a slow upload or payment. ' +
       'Say in one line what you are waiting for, call this, and continue when it returns. Do NOT end your turn to report that something needs doing; wait for it.',
       {
@@ -697,12 +704,12 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         seconds: z.number().int().min(3).max(300).optional().describe('how long to wait; 120 by default'),
       },
       async ({ until, text, seconds }) => {
-        const res = await browser.waitForChange({ until, text, seconds });
+        const res = await web.waitForChange({ until, text, seconds });
         if (!res.ok) return { content: [{ type: 'text', text: `${res.error} Look at the page and decide what to do.` }] };
-        return afterWeb(`Waited ${res.waited}s — ${res.why}`);
+        return web.afterWeb(`Waited ${res.waited}s — ${res.why}`);
       }),
 
-    tool('browser_select',
+    t('browser_select',
       'Choose a value from a dropdown — USE THIS FOR EVERY DROPDOWN, never click one open and hunt for the option. ' +
       'A real <select> is drawn by the browser outside the page, so its open list cannot be seen in a screenshot or clicked at coordinates; ' +
       'this sets the value directly instead. For a custom dropdown it opens the list, scrolls the option into view and clicks it. ' +
@@ -712,40 +719,50 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         option: z.string().describe('the value you want, as shown — e.g. "1994", "Australia"'),
       },
       async ({ field, option }) => {
-        const res = await browser.pickOption(field, option);
+        const res = await web.pickOption(field, option);
         if (!res.ok) return { content: [{ type: 'text', text: `${res.error}. Read the page to see what the choices actually are.` }] };
-        return afterWeb(`Set "${field}" to "${res.value}"`);
+        return web.afterWeb(`Set "${field}" to "${res.value}"`);
       }),
 
-    tool('browser_click_xy', 'Click pixel coordinates in the browser viewport (0-1280, 0-800). Only for canvas or visual targets the text tools cannot reach.',
+    t('browser_click_xy', 'Click pixel coordinates in the browser viewport (0-1280, 0-800). Only for canvas or visual targets the text tools cannot reach.',
       { x: z.number(), y: z.number() }, async ({ x, y }) => {
-        const p = await page();
+        const p = await web.page();
         await p.mouse.click(x, y);
-        return afterWeb(`Clicked (${x}, ${y}) in the browser`);
+        return web.afterWeb(`Clicked (${x}, ${y}) in the browser`);
       }),
 
-    tool('browser_read_text', 'Get the visible text of the current page — for reading results, comments, articles.',
+    t('browser_read_text', 'Get the visible text of the current page — for reading results, comments, articles.',
       {}, async () => {
-        const p = await page();
+        const p = await web.page();
         const text = (await p.innerText('body')).slice(0, 6000);
         return { content: [{ type: 'text', text: `URL: ${p.url()}\n\n${text}` }] };
       }),
 
-    tool('browser_press_key', 'Press a key in the browser (Enter, Escape, ArrowDown, PageDown…).',
+    t('browser_press_key', 'Press a key in the browser (Enter, Escape, ArrowDown, PageDown…).',
       { key: z.string() }, async ({ key }) => {
-        const p = await page();
+        const p = await web.page();
         await p.keyboard.press(key);
-        return afterWeb(`Pressed ${key} in the browser`);
+        return web.afterWeb(`Pressed ${key} in the browser`);
       }),
 
-    tool('browser_scroll', 'Scroll the browser page up or down.',
+    t('browser_scroll', 'Scroll the browser page up or down.',
       { direction: z.enum(['up', 'down']), amount: z.number().optional() },
       async ({ direction, amount }) => {
-        const p = await page();
+        const p = await web.page();
         await p.mouse.wheel(0, (direction === 'down' ? 1 : -1) * (amount || 600));
-        return afterWeb(`Scrolled ${direction} in the browser`);
+        return web.afterWeb(`Scrolled ${direction} in the browser`);
       }),
-  ];
+    ];
+  }
+
+  // The main agent's: the shared tab, with the live view beside the chat.
+  const browserTools = buildBrowserTools(tool, {
+    page,
+    afterWeb,
+    snap: () => browser.snap(),
+    pickOption: (field, option) => browser.pickOption(field, option),
+    waitForChange: (o) => browser.waitForChange(o),
+  });
 
   /* ── what it keeps ───────────────────────────────────────────── */
 
@@ -806,8 +823,9 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
   // Email connector: real inbox access when the user has connected an account.
   // Reading is free; sending waits for the user to confirm, since a sent mail
   // can't be recalled.
-  const emailTools = hasEmail ? [
-    tool('get_verification_code',
+  // Shared with helpers (run_helpers), which need codes for sign-ups too.
+  const codeToolFor = (t, c) =>
+    t('get_verification_code',
       'Get the one-time code a service just sent, when signing the user in to an account they already have. ' +
       'Reads a text pushed from their paired phone, or the connected mailbox (see PHONE.md). ' +
       'It WAITS for the code to arrive rather than reporting there is not one yet, so call it straight after the step that triggers the code and carry on when it returns. ' +
@@ -820,8 +838,8 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       async ({ from, within, wait }) => {
         const seconds = wait === undefined ? 120 : wait;
         const res = seconds > 0
-          ? await codes.waitForCode({ email: ctx.email, phone, from, within, timeout: seconds, abortController: ctx.abortController })
-          : await codes.findCode({ email: ctx.email, phone, from, within });
+          ? await codes.waitForCode({ email: c.email, phone, from, within, timeout: seconds, abortController: c.abortController })
+          : await codes.findCode({ email: c.email, phone, from, within });
         if (!res.ok) return { content: [{ type: 'text', text: res.error }] };
         // The sender is reported so the agent can check the code came from the
         // service it is actually signing in to, rather than typing whatever
@@ -831,7 +849,10 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
           (res.via === 'email' ? `, "${res.subject}"` : '') +
           (res.age !== null ? `, ${res.age}s ago.` : '.') +
           ' Check that sender is the service you are signing in to before using it.' }] };
-      }),
+      });
+
+  const emailTools = hasEmail ? [
+    codeToolFor(tool, ctx),
 
     tool('email_list',
       "List the user's emails, NEWEST FIRST by the date shown — item 1 IS the most recent, so for 'my latest email' read that one.\n" +
@@ -879,6 +900,150 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       }),
   ] : [];
 
+  /* ── helpers: several web jobs at the same time ─────────────────────
+   * One mouse means one agent on the desktop, but the browser tools never touch
+   * the mouse — they name elements on a page. So separate web jobs (a sign-up
+   * on each of four sites, say) can run side by side: each helper gets a tab of
+   * its own (browser.openLane), these same browser tools bound to that tab, and
+   * this session's model and settings. The main agent hands them out with
+   * run_helpers and gets back one short report each. Steps are rehearsed,
+   * timed and audited like its own; Stop stops them all.
+   */
+  const MAX_HELPERS = 4;
+  const HELPER_PROMPT = `You are a helper agent doing ONE part of a bigger job, in a browser tab of your own. Other helpers are doing the other parts at the same time; ignore them.
+
+You only have browser tools${hasEmail ? ' and get_verification_code' : ''}. Do only your task, and quickly: every browser action already returns the page as text, so do not screenshot or re-read after acting. Fill a whole form with one browser_fill_form. Use browser_select for every dropdown.
+
+STOP and hand back — leave the tab exactly where it is — when you reach anything that is the user's to do: choosing or typing a password, a phone number or a code sent to a phone, a CAPTCHA or "are you human" check, accepting terms, paying, or publishing anything. Do not try to get past these; they are not yours.${hasEmail ? '\nIf the site emails a code, call get_verification_code with "from" set to this site, so you never pick up a code meant for another helper.' : ''}
+
+Finish with a short report. Its first word is DONE if your task is complete, or NEEDS YOU if the user has to finish something. Then one or two lines: what you did, and exactly what is left for them on which site.`;
+
+  // A helper's hands: its own tab, and a small picture of it for its lane in
+  // the chat instead of the live view (which stays the main agent's).
+  const laneWeb = (lane, frame) => ({
+    page: async () => lane.page,
+    snap: () => browser.snap(lane.page, null),
+    pickOption: (field, option) => browser.pickOption(field, option, lane.page),
+    waitForChange: (o) => browser.waitForChange(o, lane.page),
+    afterWeb: async (text) => {
+      const p = lane.page;
+      await browser.settle(100, p);
+      p.screenshot({ type: 'jpeg', quality: 40 }).then((b) => frame(b.toString('base64'))).catch(() => {});
+      let seen = '';
+      try { seen = (await p.innerText('body')).slice(0, 2500); } catch (_) {}
+      return { content: [{ type: 'text', text: seen ? `${text}\nURL: ${p.url()}\n\n${seen}` : text }] };
+    },
+  });
+
+  async function runHelper({ name, task }, i) {
+    const id = `h${Date.now().toString(36)}${i}`;
+    const say = (e) => ctx.onEvent({ ...e, helper: id, helperName: name });
+    say({ type: 'helper_start', task });
+
+    // Its own stop, pulled when the whole run is stopped.
+    const stop = new AbortController();
+    const parent = ctx.abortController;
+    const onParentStop = () => stop.abort();
+    if (parent) {
+      if (parent.signal.aborted) stop.abort();
+      else parent.signal.addEventListener('abort', onParentStop, { once: true });
+    }
+
+    // Its steps reach the audit log and the final check through the session,
+    // labelled; everything else about it goes to its lane in the chat.
+    const hctx = {
+      dryRun: ctx.dryRun,
+      email: ctx.email,
+      abortController: stop,
+      onEvent: (e) => {
+        if (e.type === 'tool_done' || e.type === 'plan_step') ctx.onEvent({ ...e, text: `[${name}] ${e.text}`, helper: id });
+      },
+    };
+    const t = toolFor(hctx);
+
+    let lane = null;
+    let report = '';
+    let last = '';
+    try {
+      lane = await browser.openLane(userDataDir);
+      const tools = [
+        ...buildBrowserTools(t, laneWeb(lane, (b64) => say({ type: 'helper_frame', b64 }))),
+        ...(hasEmail ? [codeToolFor(t, hctx)] : []),
+      ];
+      const step = (toolName, input) => say({ type: 'helper_step', name: toolName, text: describeStep(toolName, input || {}) });
+
+      if (nim.isNimModel(chosen)) {
+        await nim.runTask({
+          prompt: task, model: chosen, systemPrompt: HELPER_PROMPT, tools,
+          abortController: stop, params: tuning, maxTurns: 60,
+          onEvent: (e) => {
+            if (e.type === 'tool') step(e.name, e.input);
+            else if ((e.type === 'assistant' || e.type === 'say_end') && e.text) last = e.text;
+            else if (e.type === 'done' && e.text) report = e.text;
+          },
+        });
+      } else {
+        const server = createSdkMcpServer({ name: 'computer', version: '2.0.0', tools });
+        const stream = query({
+          prompt: task,
+          options: {
+            model: chosen,
+            systemPrompt: HELPER_PROMPT,
+            mcpServers: { computer: server },
+            tools: [],
+            allowedTools: tools.map((x) => `mcp__computer__${x.name}`),
+            settingSources: [],
+            skills: [],
+            ...tuning,
+            permissionMode: 'bypassPermissions',
+            maxTurns: 60,
+            abortController: stop,
+          },
+        });
+        for await (const m of stream) {
+          if (m.type === 'assistant') {
+            for (const b of m.message.content) {
+              if (b.type === 'tool_use') step(b.name.replace('mcp__computer__', ''), b.input);
+              else if (b.type === 'text' && b.text.trim()) last = b.text;
+            }
+          } else if (m.type === 'result') {
+            report = m.subtype === 'success' ? (m.result || last) : `Stopped early (${m.subtype}). ${last}`;
+            break;
+          }
+        }
+      }
+      report = String(report || last || 'Finished without a report.').trim();
+      const state = stop.signal.aborted ? 'stopped' : /^\s*NEEDS YOU/i.test(report) ? 'needs' : /^\s*DONE/i.test(report) ? 'done' : 'done';
+      say({ type: 'helper_done', state, report });
+      return { name, state, report };
+    } catch (err) {
+      const why = stop.signal.aborted ? 'Stopped.' : String((err && err.message) || err).split('\n')[0].slice(0, 300);
+      say({ type: 'helper_done', state: stop.signal.aborted ? 'stopped' : 'failed', report: why });
+      return { name, state: 'failed', report: why };
+    } finally {
+      if (lane) browser.closeLane(lane);
+      if (parent) parent.signal.removeEventListener('abort', onParentStop);
+    }
+  }
+
+  const helperTools = [
+    tool('run_helpers',
+      `Hand 2 to ${MAX_HELPERS} SEPARATE web jobs to helper agents that do them AT THE SAME TIME, each in its own browser tab — for example one account sign-up per site, or the same lookup on several shops. ` +
+      'Much faster than doing them one after another. Each helper only has the browser, sees nothing but its task, and stops at anything that is the user\'s to do (passwords, phone codes, CAPTCHAs, terms, payments). ' +
+      'Returns one short report per helper. Do not use it for desktop work, or for jobs that depend on each other\'s results.',
+      {
+        tasks: z.array(z.object({
+          name: z.string().describe('a short label for the helper, e.g. "TikTok"'),
+          task: z.string().describe('COMPLETE instructions: the site, every detail it needs (names, bio, email address), and what to leave for the user. The helper sees nothing else.'),
+        })).min(2).max(MAX_HELPERS),
+      },
+      async ({ tasks }) => {
+        const results = await Promise.all(tasks.slice(0, MAX_HELPERS).map((job, i) => runHelper(job, i)));
+        const text = results.map((r) => `${r.name} — ${r.state === 'needs' ? 'NEEDS THE USER' : r.state.toUpperCase()}: ${r.report}`).join('\n\n');
+        return { content: [{ type: 'text', text: `All ${results.length} helpers have finished. Their tabs are left open where they stopped.\n\n${text}` }] };
+      }),
+  ];
+
   // The local Chromium (browser_* tools) runs on THIS machine. When Operator is
   // driving another computer, that is exactly the wrong place — "open Google"
   // should open on the remote machine. So drop the browser tools entirely in
@@ -887,7 +1052,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
   const remote = where.kind === 'remote';
   let tools = remote
     ? [...desktopTools, ...memoryTools, ...teamTools, ...codeTools, ...emailTools]
-    : [...desktopTools, ...browserTools, ...memoryTools, ...teamTools, ...codeTools, ...emailTools];
+    : [...desktopTools, ...browserTools, ...helperTools, ...memoryTools, ...teamTools, ...codeTools, ...emailTools];
 
   // A bot is the shared instructions plus who it is and what it has learned.
   let systemPrompt = SYSTEM_PROMPT;

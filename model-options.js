@@ -143,7 +143,9 @@ function sdkOptions(mode, id, saved) {
   const out = {};
   if (claude.efforts && v.effort && v.effort !== 'auto') out.effort = v.effort;
   if (claude.thinking === 'toggle' && v.thinking === false) out.thinking = { type: 'disabled' };
-  if (claude.thinking === 'budget' && v.thinking === true) out.thinking = { type: 'enabled', budgetTokens: HAIKU_BUDGET };
+  // Said both ways on Haiku: left unset, Claude Code turns its thinking ON, so
+  // "off" has to be asked for or the switch would not do what it says.
+  if (claude.thinking === 'budget') out.thinking = v.thinking ? { type: 'enabled', budgetTokens: HAIKU_BUDGET } : { type: 'disabled' };
   return out;
 }
 

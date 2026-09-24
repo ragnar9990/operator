@@ -204,9 +204,12 @@ async function openSession(app) {
       includePartialMessages: true,
       settingSources: [],
       skills: [],
-      // Minimal thinking. This is "which agent, which tool, what do I say" —
+      // No thinking. This is "which agent, which tool, what do I say" —
       // deliberation here is pure latency, and latency is the whole game.
+      // Effort alone did not do it: Haiku ignores effort, and Claude Code
+      // switches Haiku's thinking on unless it is told not to.
       effort: 'low',
+      thinking: { type: 'disabled' },
       permissionMode: 'bypassPermissions',
       maxTurns: 24,
     },

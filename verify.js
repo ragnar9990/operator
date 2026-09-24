@@ -73,13 +73,20 @@ async function evidence({ usedScreen, usedBrowser, canSee }) {
   let image = null;
 
   if (usedBrowser) {
-    try {
-      const p = browser.getPage();
-      if (p && !p.isClosed()) {
-        const text = (await p.innerText('body')).slice(0, 1800);
-        parts.push(`THE BROWSER PAGE NOW:\n${p.url()}\n${text}`);
-      }
-    } catch { /* the page moved on or closed — say nothing rather than guess */ }
+    // Every tab with something in it, not just the main agent's: helpers work
+    // in tabs of their own, and a blank main tab read as "nothing happened".
+    // The newest five: helpers leave their tabs open, so older runs' pile up.
+    const tabs = browser.openTabs().filter((p) => p.url() && p.url() !== 'about:blank').slice(-5);
+    const each = tabs.length > 1 ? 600 : 1800;
+    const seen = [];
+    for (const p of tabs) {
+      try {
+        const text = (await p.innerText('body')).slice(0, each);
+        seen.push(`${p.url()}\n${text}`);
+      } catch { /* the page moved on or closed — say nothing rather than guess */ }
+    }
+    if (seen.length === 1) parts.push(`THE BROWSER PAGE NOW:\n${seen[0]}`);
+    else if (seen.length) parts.push(`THE BROWSER TABS NOW:\n\n${seen.map((s, i) => `Tab ${i + 1}: ${s}`).join('\n\n')}`);
   }
 
   if (usedScreen && canSee) {
@@ -140,7 +147,14 @@ async function askClaude({ system, body, image, abortController }) {
 
   const stream = query({
     prompt: once(),
-    options: { model: CHECKER, systemPrompt: system, tools: [], allowedTools: [], settingSources: [], maxTurns: 1 },
+    options: {
+      model: CHECKER, systemPrompt: system, tools: [], allowedTools: [], settingSources: [], maxTurns: 1,
+      // Claude Code switches Haiku's thinking on unless told otherwise, and on a
+      // check with thin evidence it would deliberate for 40s+. Off entirely it
+      // is fast but wrong — it failed work that was done. A small budget kept
+      // every verdict right and every check at 3–5s.
+      thinking: { type: 'enabled', budgetTokens: 1024 },
+    },
   });
 
   let text = '';

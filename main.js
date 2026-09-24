@@ -321,7 +321,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     // user cut the run short is the one you would most want to find.
     // Bookkeeping only — the transcript drew this step when it was asked for.
     if (evt.type === 'tool_done') {
-      acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
+      // Handing out helpers is listed where it STARTED (the `tool` event
+      // below): it only finishes after every helper has, and listed there it
+      // read to the check as "did the work, then handed it out".
+      if (evt.name !== 'run_helpers') acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
       if (/^(screen_|launch_app|focus_window|list_windows)/.test(evt.name)) usedScreen = true;
       if (evt.name.startsWith('browser_')) usedBrowser = true;
       audit.write({
@@ -363,6 +366,15 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       if (evt.mine) tookTheScreen = true;
       send('agent-event', { ...evt, botId, chatId });
       return;
+    }
+    if (evt.type === 'tool' && evt.name === 'run_helpers') {
+      const names = ((evt.input && evt.input.tasks) || []).map((t) => t.name);
+      acts.push({ text: `handed ${names.length} jobs to helpers working at the same time, each in its own browser tab: ${names.join(', ')} — their steps follow, marked with their names`, ok: true });
+    }
+    // What each helper said it did, for the check at the end — the steps alone
+    // do not say whether a helper got to the end of its job.
+    if (evt.type === 'helper_done') {
+      acts.push({ text: `[${evt.helperName}] ${evt.state === 'needs' ? 'stopped for the user' : evt.state}: ${String(evt.report || '').slice(0, 300)}`, ok: evt.state !== 'failed' });
     }
     if (evt.type === 'tool' || evt.type === 'say_start' || evt.type === 'assistant') progressed = true;
     // The claim the check is testing. `done` repeats the closing line as null

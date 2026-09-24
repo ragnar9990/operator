@@ -3216,3 +3216,69 @@ body.working .composer::before { filter: blur(11px); }
 .tuner-foot { margin: 6px 0 0; padding-top: 9px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-4); }
 
 :root[data-motion="off"] .tuner-pop { animation: none; }
+
+/* ── helpers: several web jobs at once ────────────────────────────────
+   One card per batch, a lane per helper: a small live picture of its tab,
+   its name and state, what it is doing, and how it ended. Same surface as
+   the check card; amber only for "needs you", the one thing to act on. */
+
+.helpers {
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raise);
+  font-size: 13px;
+  letter-spacing: -0.2px;
+}
+.helpers-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.helpers-head svg { width: 15px; height: 15px; color: var(--ink-4); }
+.helpers.is-working .helpers-head svg { color: var(--accent); }
+.helpers-head b { color: var(--ink-2); font-weight: 500; }
+.helpers-sum { color: var(--ink-4); font-size: 12px; }
+
+.helpers-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 720px) { .helpers-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.helper {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.helper-shot {
+  position: relative;
+  aspect-ratio: 16 / 7;      /* the top of the page, where the form usually starts */
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+.helper-shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.helper-initial { font-size: 22px; font-weight: 550; color: var(--ink-4); }
+
+.helper-body { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px 9px; min-width: 0; }
+.helper-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.helper-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 550; }
+.helper-state { margin-left: auto; flex: none; font-size: 11.5px; color: var(--ink-4); }
+.helper-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); }
+.helper-step {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; color: var(--ink-3);
+}
+.helper-report { font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+
+.helper.is-working .helper-dot { background: var(--accent); animation: breathe 1.4s ease-in-out infinite; }
+.helper.is-working .helper-state { color: var(--accent); }
+.helper.is-done .helper-dot { background: var(--accent); }
+.helper.is-needs { border-color: rgba(240, 161, 46, 0.45); }
+.helper.is-needs .helper-dot { background: #f0a12e; }
+.helper.is-needs .helper-state { color: #f0a12e; font-weight: 500; }
+.helper.is-failed { border-color: rgba(244, 104, 95, 0.4); }
+.helper.is-failed .helper-dot { background: var(--fail); }
+.helper.is-failed .helper-state { color: var(--fail); }
+
+:root[data-motion="off"] .helper-dot { animation: none !important; }

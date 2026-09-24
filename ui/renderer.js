@@ -122,6 +122,23 @@ function endRun() {
   setLive(hasFrame ? 'Paused' : 'Idle', false);
   closeGroup();
   paintFaces();
+  settleHelpers();
+}
+
+// The run is over, so no helper of it is still working. After Stop their own
+// last words are dropped on purpose (main.js), so the card is told here.
+function settleHelpers() {
+  if (!helpers) return;
+  let changed = false;
+  for (const lane of helpers.lanes.values()) {
+    if (lane.data.state !== 'working') continue;
+    lane.data.state = 'stopped';
+    paintLane(lane.el, lane.data);
+    changed = true;
+  }
+  if (!changed) return;
+  paintHelpersHead(helpers.card, helpers.record.lanes);
+  save();
 }
 
 /* ── the step list ───────────────────────────────────────────────── */
@@ -799,6 +816,7 @@ function replay(turns) {
     else if (t.k === 'check') turn('', checkCard(t));
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'screen') turn('', screenCard(t));
+    else if (t.k === 'helpers') turn('', '').appendChild(helpersCard(t));
     else if (t.k === 'steps') {
       const g = openGroup();
       for (const it of t.items) addStepRow(g, it.name, it.input || {}, it.at || '', false);
@@ -821,6 +839,7 @@ function errorCard(title, fix, detail) {
 
 function clearThread() {
   thread.querySelectorAll('.turn').forEach((el) => el.remove());
+  helpers = null;
   group = null;
   stepsRec = null;
   live = null;
@@ -1394,6 +1413,127 @@ function hideDots() {
   if (dots.isConnected) dots.remove();
 }
 
+/* ── helpers: several web jobs at once ─────────────────────────────
+ * run_helpers hands separate web jobs to helper agents that work at the same
+ * time, each in its own browser tab. They get one card: a lane each, with a
+ * small live picture of its tab, what it is doing and how it ended. The card
+ * is saved with the chat (without the pictures) and replayed like the rest.
+ */
+
+const HELPER_STATE = { working: 'Working', done: 'Done', needs: 'Needs you', failed: 'Failed', stopped: 'Stopped' };
+let helpers = null;   // the card being filled right now: { el, record, lanes: Map }
+
+function helperLane(data) {
+  const el = document.createElement('div');
+  el.className = 'helper is-' + data.state;
+  el.innerHTML =
+    '<div class="helper-shot"><img alt="" hidden><span class="helper-initial"></span></div>' +
+    '<div class="helper-body">' +
+      '<div class="helper-top"><i class="helper-dot"></i><b class="helper-name"></b><span class="helper-state"></span></div>' +
+      '<div class="helper-step"></div>' +
+      '<div class="helper-report" hidden></div>' +
+    '</div>';
+  el.querySelector('.helper-initial').textContent = (data.name || '?').trim().charAt(0).toUpperCase();
+  el.querySelector('.helper-name').textContent = data.name;
+  el.title = data.task || '';
+  paintLane(el, data);
+  return el;
+}
+
+function paintLane(el, data) {
+  el.className = 'helper is-' + data.state;
+  el.querySelector('.helper-state').textContent = HELPER_STATE[data.state] || data.state;
+  el.querySelector('.helper-step').textContent = data.state === 'working'
+    ? (data.step || 'Opening its tab…')
+    : data.steps + (data.steps === 1 ? ' step' : ' steps');
+  const report = el.querySelector('.helper-report');
+  // The report opens with DONE / NEEDS YOU, which the badge already says.
+  const text = String(data.report || '').replace(/^\s*(DONE|NEEDS YOU)\s*[:—–-]?\s*/i, '');
+  report.textContent = text;
+  report.hidden = !text;
+}
+
+function paintHelpersHead(card, lanes) {
+  const all = [...lanes];
+  const working = all.filter((l) => l.state === 'working').length;
+  const needs = all.filter((l) => l.state === 'needs').length;
+  const sum = card.querySelector('.helpers-sum');
+  if (working === all.length) sum.textContent = all.length + ' working at once';
+  else if (working) sum.textContent = (all.length - working) + ' of ' + all.length + ' finished';
+  else sum.textContent = 'All ' + all.length + ' finished' + (needs ? ' — ' + needs + ' need' + (needs === 1 ? 's' : '') + ' you' : '');
+  card.classList.toggle('is-working', working > 0);
+}
+
+// The card, from a saved record or a new one.
+function helpersCard(record) {
+  const card = document.createElement('div');
+  card.className = 'helpers';
+  card.innerHTML =
+    '<div class="helpers-head">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/></svg>' +
+      '<b>Helpers</b><span class="helpers-sum"></span>' +
+    '</div>' +
+    '<div class="helpers-grid"></div>';
+  const grid = card.querySelector('.helpers-grid');
+  for (const l of record.lanes) {
+    // A card replayed from history cannot still be working: whatever did not
+    // report back was cut off when the run ended.
+    if (!helpers || helpers.record !== record) { if (l.state === 'working') l.state = 'stopped'; }
+    const el = helperLane(l);
+    el.dataset.id = l.id;
+    grid.appendChild(el);
+  }
+  paintHelpersHead(card, record.lanes);
+  return card;
+}
+
+function onHelperEvent(evt) {
+  if (evt.type === 'helper_start') {
+    // A new batch starts a new card; lanes of the same batch join it.
+    if (!helpers || ![...helpers.lanes.values()].some((l) => l.data.state === 'working')) {
+      closeGroup();
+      hideDots();
+      const record = { k: 'helpers', lanes: [] };
+      helpers = { record, lanes: new Map(), card: null };
+      helpers.card = helpersCard(record);
+      turn('', '').appendChild(helpers.card);
+      rec(record);
+      showDots();
+    }
+    const data = { id: evt.helper, name: evt.helperName, task: evt.task, state: 'working', step: '', steps: 0, report: '' };
+    helpers.record.lanes.push(data);
+    const el = helperLane(data);
+    el.dataset.id = data.id;
+    helpers.card.querySelector('.helpers-grid').appendChild(el);
+    helpers.lanes.set(data.id, { data, el });
+    paintHelpersHead(helpers.card, helpers.record.lanes);
+    save();
+    return;
+  }
+
+  const lane = helpers && helpers.lanes.get(evt.helper);
+  if (!lane) return;
+
+  if (evt.type === 'helper_frame') {
+    const img = lane.el.querySelector('.helper-shot img');
+    img.src = 'data:image/jpeg;base64,' + evt.b64;
+    img.hidden = false;
+    return;
+  }
+  if (evt.type === 'helper_step') {
+    lane.data.step = evt.text || evt.name;
+    lane.data.steps += 1;
+    actionCount += 1;
+    actionsEl.textContent = actionCount + (actionCount === 1 ? ' action' : ' actions');
+  } else if (evt.type === 'helper_done') {
+    lane.data.state = evt.state;
+    lane.data.report = evt.report || '';
+    save();
+  }
+  paintLane(lane.el, lane.data);
+  paintHelpersHead(helpers.card, helpers.record.lanes);
+}
+
 /* ── events ──────────────────────────────────────────────────────── */
 
 // The reply being typed right now, if any.
@@ -1467,6 +1607,11 @@ window.operator.onEvent((evt) => {
   }
 
   if (!mine) return;
+
+  if (evt.type === 'helper_start' || evt.type === 'helper_step' || evt.type === 'helper_frame' || evt.type === 'helper_done') {
+    onHelperEvent(evt);
+    return;
+  }
 
   switch (evt.type) {
     case 'remember':
