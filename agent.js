@@ -130,6 +130,7 @@ SIGNING IN:
 
 GENERAL:
 - Keep going until the goal is met, then stop and give a one-line summary. Don't hand work back to the user that you could do yourself.
+- If you truly cannot go further without the user — something only they can do, or something only they can tell you (a phone number, a choice, a code) — do not simply stop. End your message with a line that starts NEEDS YOU: and says exactly what they must do or give you to keep going. Operator shows them that, waits, and hands you their answer so you carry on in this same conversation. (Mid-task, prefer wait_for_user.)
 - If you hit a captcha or an "I'm not a robot" checkbox, click it like a person would and carry on. If it is still there after that, or it is a puzzle or picture challenge, call wait_for_user for the user to do it — never end the task at one.
 - One exception to just doing it: if a step is destructive and hard to undo — permanently deleting files, spending money, sending a message or posting something publicly, changing security settings — say what you are about to do and wait for the user to confirm. Everything else, just do it.`;
 
@@ -738,52 +739,20 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       async ({ what, until_gone, minutes }) => {
         const first = await web.page();
         const h = handover.open(first);
-        const startUrl = first.url();
-        const visible = async (p, text) => {
-          try { return await p.getByText(text, { exact: false }).first().isVisible({ timeout: 500 }); }
-          catch { return false; }
-        };
-        // "Gone" only counts if it was there to begin with — a guessed text
-        // that never appeared must not end the wait at once.
-        let sawText = until_gone ? await visible(first, until_gone) : false;
-
-        web.say({ type: 'handover', id: h.id, what, url: startUrl });
+        web.say({ type: 'handover', id: h.id, what, url: first.url() });
         first.bringToFront().catch(() => {});
 
-        const limit = Date.now() + (minutes || 10) * 60 * 1000;
-        const signal = web.signal();
-        let outcome = null;
-        h.done.then((o) => { if (!outcome) outcome = o; });
+        const r = await handover.watch({ h, getPage: web.page, untilGone: until_gone, minutes: minutes || 10, signal: web.signal() });
+        web.say({ type: 'handover_end', id: h.id, outcome: r.outcome, what, answer: r.text });
 
-        while (!outcome) {
-          if (signal && signal.aborted) { outcome = 'stopped'; break; }
-          if (Date.now() > limit) { outcome = 'timeout'; break; }
-          await new Promise((r) => setTimeout(r, 1000));
-          if (outcome) break;
-          try {
-            const p = await web.page();       // a helper's tab may have moved to a pop-up
-            if (!p || p.isClosed()) continue;
-            if (p.url() !== startUrl) { outcome = 'moved'; break; }
-            if (until_gone) {
-              const there = await visible(p, until_gone);
-              if (there) sawText = true;
-              else if (sawText) { outcome = 'gone'; break; }
-            }
-          } catch { /* mid-navigation; look again next second */ }
-        }
-
-        handover.finish(h.id, outcome);          // tidy up if it ended on the watcher's side
-        web.say({ type: 'handover_end', id: h.id, outcome });
-
-        if (outcome === 'skipped') {
+        if (r.outcome === 'skipped') {
           return { content: [{ type: 'text', text: 'The user chose to skip this step. Do not try it again; carry on with anything else, then report what is left here.' }] };
         }
-        if (outcome === 'timeout') {
+        if (r.outcome === 'timeout') {
           return { content: [{ type: 'text', text: `Waited ${minutes || 10} minutes and it was not done. Stop this part here and report exactly what is left for the user.` }] };
         }
-        if (outcome === 'stopped') return { content: [{ type: 'text', text: 'Stopped.' }] };
-        const why = outcome === 'user' ? 'the user says they have done it' : outcome === 'moved' ? 'the page moved on' : `"${until_gone}" is gone`;
-        return web.afterWeb(`Your turn is over — ${why}. Look at the page and carry on with the task.`);
+        if (r.outcome === 'stopped') return { content: [{ type: 'text', text: 'Stopped.' }] };
+        return web.afterWeb(`${handover.answerFor(r)}. Look at the page and carry on with the task — use what they told you if it is needed on the page.`);
       }),
 
     t('browser_select',
@@ -1043,8 +1012,6 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
     const t = toolFor(hctx);
 
     let lane = null;
-    let report = '';
-    let last = '';
     try {
       lane = await browser.openLane(userDataDir);
       const tools = [
@@ -1053,50 +1020,81 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
       ];
       const step = (toolName, input) => say({ type: 'helper_step', name: toolName, text: describeStep(toolName, input || {}) });
 
-      if (nim.isNimModel(chosen)) {
-        await nim.runTask({
-          prompt: task, model: chosen, systemPrompt: HELPER_PROMPT, tools,
-          abortController: stop, params: tuning, maxTurns: 60,
-          onEvent: (e) => {
-            if (e.type === 'tool') step(e.name, e.input);
-            else if ((e.type === 'assistant' || e.type === 'say_end') && e.text) last = e.text;
-            else if (e.type === 'done' && e.text) report = e.text;
-          },
-        });
-      } else {
-        const server = createSdkMcpServer({ name: 'computer', version: '2.0.0', tools });
-        const stream = query({
-          prompt: task,
-          options: {
-            model: chosen,
-            systemPrompt: HELPER_PROMPT,
-            mcpServers: { computer: server },
-            tools: [],
-            allowedTools: tools.map((x) => `mcp__computer__${x.name}`),
-            settingSources: [],
-            skills: [],
-            ...tuning,
-            permissionMode: 'bypassPermissions',
-            maxTurns: 60,
-            abortController: stop,
-          },
-        });
-        for await (const m of stream) {
-          if (m.type === 'assistant') {
-            for (const b of m.message.content) {
-              if (b.type === 'tool_use') step(b.name.replace('mcp__computer__', ''), b.input);
-              else if (b.type === 'text' && b.text.trim()) last = b.text;
+      // One turn of the helper's own conversation — the first with its task,
+      // later ones carrying on from where it stopped, with the user's answer.
+      async function ask(prompt, resume) {
+        let report = '';
+        let last = '';
+        let session = resume || null;
+        if (nim.isNimModel(chosen)) {
+          await nim.runTask({
+            prompt, model: chosen, systemPrompt: HELPER_PROMPT, tools,
+            abortController: stop, params: tuning, maxTurns: 60, resume,
+            onEvent: (e) => {
+              if (e.type === 'session') session = e.id;
+              else if (e.type === 'tool') step(e.name, e.input);
+              else if ((e.type === 'assistant' || e.type === 'say_end') && e.text) last = e.text;
+              else if (e.type === 'done' && e.text) report = e.text;
+            },
+          });
+        } else {
+          const stream = query({
+            prompt,
+            options: {
+              model: chosen,
+              systemPrompt: HELPER_PROMPT,
+              mcpServers: { computer: createSdkMcpServer({ name: 'computer', version: '2.0.0', tools }) },
+              tools: [],
+              allowedTools: tools.map((x) => `mcp__computer__${x.name}`),
+              settingSources: [],
+              skills: [],
+              ...tuning,
+              ...(resume ? { resume } : {}),
+              permissionMode: 'bypassPermissions',
+              maxTurns: 60,
+              abortController: stop,
+            },
+          });
+          for await (const m of stream) {
+            if (m.session_id) session = m.session_id;
+            if (m.type === 'assistant') {
+              for (const b of m.message.content) {
+                if (b.type === 'tool_use') step(b.name.replace('mcp__computer__', ''), b.input);
+                else if (b.type === 'text' && b.text.trim()) last = b.text;
+              }
+            } else if (m.type === 'result') {
+              report = m.subtype === 'success' ? (m.result || last) : `Stopped early (${m.subtype}). ${last}`;
+              break;
             }
-          } else if (m.type === 'result') {
-            report = m.subtype === 'success' ? (m.result || last) : `Stopped early (${m.subtype}). ${last}`;
-            break;
           }
         }
+        return { report: String(report || last || 'Finished without a report.').trim(), session };
       }
-      report = String(report || last || 'Finished without a report.').trim();
+
       // Anywhere in it: the YouTube helper wrote two sentences before "NEEDS
       // YOU" and was shown as Done.
-      const state = stop.signal.aborted ? 'stopped' : /\bNEEDS YOU\b/i.test(report) ? 'needs' : 'done';
+      const needsYou = (r) => /\bNEEDS YOU\b/i.test(r);
+      let { report, session } = await ask(task, null);
+
+      // A helper does not get to end on "needs you". Whatever it was left
+      // waiting on becomes the user's turn — in its lane, on its tab — and when
+      // they have done it (or typed what it asked for) the helper picks its own
+      // conversation back up. Models do not reliably call wait_for_user by
+      // themselves; this does not depend on them doing so.
+      for (let round = 0; round < 8 && needsYou(report) && !stop.signal.aborted; round++) {
+        const what = report.replace(/^[\s\S]*?\bNEEDS YOU\b[\s:—–-]*/i, '').trim() || report;
+        const h = handover.open(lane.page);
+        say({ type: 'handover', id: h.id, what: what.slice(0, 600), url: lane.page.url() });
+        lane.page.bringToFront().catch(() => {});
+        const r = await handover.watch({ h, getPage: async () => lane.page, minutes: 30, signal: stop.signal });
+        say({ type: 'handover_end', id: h.id, outcome: r.outcome, what: what.slice(0, 300), answer: r.text });
+        if (!handover.carriedOn(r.outcome)) break;
+        ({ report, session } = await ask(
+          `${handover.answerFor(r)}. Look at your tab and carry on with your task from where you stopped. ` +
+          'If there is something else only the user can do, call wait_for_user for it rather than stopping.', session));
+      }
+
+      const state = stop.signal.aborted ? 'stopped' : needsYou(report) ? 'needs' : 'done';
       say({ type: 'helper_done', state, report });
       return { name, state, report };
     } catch (err) {

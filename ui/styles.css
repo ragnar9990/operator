@@ -3325,3 +3325,66 @@ body.working .composer::before { filter: blur(11px); }
 .helper.is-waiting .helper-step { white-space: normal; color: var(--ink-2); }
 .helper-actions { margin-top: 6px; gap: 6px; }
 .helper-actions[hidden] { display: none; }
+
+/* ── waiting for you ──────────────────────────────────────────────────
+   It is not stuck, it is waiting: bouncing dots beside "Waiting for you", a
+   ring pulsing out of the icon, and the task box's light turning amber while
+   it is the user's turn anywhere in the run. */
+
+.hv-wait { display: inline-flex; align-items: flex-end; gap: 3px; margin-right: 7px; height: 10px; vertical-align: -1px; }
+.hv-wait i { width: 4px; height: 4px; border-radius: 50%; background: #f0a12e; animation: hv-bounce 1.2s ease-in-out infinite; }
+.hv-wait i:nth-child(2) { animation-delay: 0.15s; }
+.hv-wait i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes hv-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30%           { transform: translateY(-5px); opacity: 1; }
+}
+
+.hv-icon { position: relative; display: grid; place-items: center; flex: none; width: 15px; height: 15px; }
+.hv-icon svg { width: 15px; height: 15px; color: #f0a12e; }
+.handover:not(.is-over) .hv-icon::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1.5px solid #f0a12e;
+  border-radius: 50%;
+  opacity: 0;
+  animation: hv-ring 2s ease-out infinite;
+}
+@keyframes hv-ring {
+  0%   { opacity: 0.6; transform: scale(0.6); }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+.handover.is-over .hv-icon svg { color: var(--ink-4); }
+
+.hv-reply { display: flex; gap: 8px; margin: 0 0 9px; }
+.hv-reply input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line-hi);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.hv-reply input:focus { border-color: #f0a12e; }
+.hv-reply input::placeholder { color: var(--ink-4); }
+.helper .hv-reply { margin: 6px 0 6px; }
+.helper .hv-reply input { height: 30px; font-size: 12px; }
+
+/* The task box, while it is the user's turn: the same travelling light, amber. */
+body.your-turn {
+  --edge: #f0a12e;
+  --edge-head: color-mix(in srgb, #f0a12e 40%, #fff);
+  --edge-rest: color-mix(in srgb, #f0a12e 18%, var(--line-hi));
+}
+
+:root[data-motion="off"] .hv-wait i,
+:root[data-motion="off"] .hv-icon::after { animation: none !important; }
+:root[data-motion="off"] .hv-wait i { opacity: 1; }
+.handover-answer { margin: -4px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.handover-answer b { color: var(--ink); font-weight: 550; }

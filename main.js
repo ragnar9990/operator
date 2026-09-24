@@ -201,7 +201,7 @@ const modelOptionsState = (mode, id) => {
 ipcMain.handle('model-options:get', async (_e, mode, id) => modelOptionsState(mode, id));
 
 // The user's turn (handover.js): their answers from the card in the chat.
-ipcMain.handle('handover:done', async (_e, id) => handover.finish(id, 'user'));
+ipcMain.handle('handover:done', async (_e, id, text) => handover.finish(id, 'user', text));
 ipcMain.handle('handover:skip', async (_e, id) => handover.finish(id, 'skipped'));
 ipcMain.handle('handover:show', async (_e, id) => handover.show(id));
 
@@ -394,6 +394,18 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     // The user's turn: make sure they notice, and remember a step they did not
     // finish — sending the agent back to redo the work cannot fix that one.
     if (evt.type === 'handover') tellUserItIsTheirTurn(evt);
+    // What was asked of the user and what they answered, for the check at the
+    // end: it sees only this list, and without it an answer the user gave
+    // looked like a step the agent had skipped — and the user was asked again.
+    if (evt.type === 'handover_end' && evt.what) {
+      const who = evt.helperName ? `[${evt.helperName}] ` : '';
+      const did = evt.answer ? `the user answered "${String(evt.answer).slice(0, 200)}"`
+        : evt.outcome === 'skipped' ? 'the user skipped it'
+        : evt.outcome === 'timeout' ? 'the user did not do it in time'
+        : evt.outcome === 'stopped' ? 'stopped'
+        : 'the user did it';
+      acts.push({ text: `${who}asked the user: ${String(evt.what).slice(0, 200)} — ${did}`, ok: handover.carriedOn(evt.outcome) });
+    }
     if (evt.type === 'handover_end' && (evt.outcome === 'timeout' || evt.outcome === 'skipped')) leftForUser = true;
     if (evt.type === 'helper_done' && evt.state === 'needs') leftForUser = true;
     if (evt.type === 'tool' && evt.name === 'run_helpers') {
@@ -526,11 +538,12 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   // follow-up turn — bounded, so a stubborn task cannot loop the machine.
   const VERIFY_RETRIES = 1;
 
+  // Returns the last verdict, or null when nothing was checked.
   async function checkTheWork() {
     // A run that did nothing has nothing to check — which is also how ordinary
     // conversation avoids paying for this at all.
-    if (store.getPrefs().verify === false) return;
-    if (!acts.length || abortController.signal.aborted) return;
+    if (store.getPrefs().verify === false) return null;
+    if (!acts.length || abortController.signal.aborted) return null;
 
     for (let tries = 0; ; tries++) {
       onEvent({ type: 'verify_start' });
@@ -538,7 +551,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
         goal: prompt, actions: acts, reply: lastReply, model,
         dryRun, usedScreen, usedBrowser, abortController,
       });
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted) return null;
 
       audit.write({
         botId: botId || null,
@@ -562,19 +575,41 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
 
       // Met, or no honest verdict either way — either way, stop here. An
       // "unsure" must never send the agent back to redo work that was fine.
-      if (v.ok !== false) return;
-      if (tries >= VERIFY_RETRIES) return;      // out of retries; the verdict stands
-      // Part of it was the user's and was not done (skipped, or the wait ran
-      // out). Redoing the agent's part cannot finish theirs, so the verdict
-      // stands and the run ends where it is.
-      if (leftForUser) return;
+      if (v.ok !== false) return v;
+      if (tries >= VERIFY_RETRIES) return v;    // out of retries; the verdict stands
+      // What is missing is the user's part (a step they skipped or did not
+      // finish, or the agent saying it needs them). Redoing the agent's part
+      // cannot finish theirs — the run waits for them instead (below).
+      if (leftForUser || needsYou(lastReply)) return v;
 
       // Same conversation, not a new one: the agent has to see its own work to
       // fix it. Read the session back rather than reusing the one this task
       // started with — the run may have been handed a fresh one along the way.
       await go(botId && chatId ? store.sessionOf(botId, chatId) : null, verify.critique(v.why));
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted) return null;
     }
+  }
+
+  // The run does not end with the goal unmet. Whatever is left — the agent's
+  // "NEEDS YOU:", or else what the check says is missing — is put to the user
+  // as their turn, and their answer goes back into this same conversation.
+  // Round after round until the goal is met, they skip, stop, or 30 minutes
+  // pass with no answer. Not for rehearsals, and not for routines running with
+  // nobody there.
+  const USER_ROUNDS = 8;
+  const needsYou = (s) => /\bNEEDS YOU\b/i.test(String(s || ''));
+  function needsOf(reply, verdict) {
+    const m = String(reply || '').match(/\bNEEDS YOU\b[\s:—–-]*([\s\S]+)$/i);
+    if (m && m[1].trim()) return m[1].trim().slice(0, 700);
+    if (verdict && verdict.why) return `It is not finished yet: ${verdict.why} Tell it what to do next, or do that step yourself and press "I've done it".`;
+    return 'Tell Operator how to carry on.';
+  }
+  async function waitForTheUser(what) {
+    const h = handover.open(null);
+    onEvent({ type: 'handover', id: h.id, what, reply: true });
+    const r = await handover.watch({ h, minutes: 30, signal: abortController.signal });
+    onEvent({ type: 'handover_end', id: h.id, outcome: r.outcome, what, answer: r.text });
+    return r;
   }
 
   try {
@@ -589,7 +624,25 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       store.forgetSession(botId, chatId);
       await go(null);
     }
-    await checkTheWork();
+    let verdict = await checkTheWork();
+
+    for (let round = 0; round < USER_ROUNDS && !silent && !dryRun; round++) {
+      if (abortController.signal.aborted) break;
+      // They skipped a step, or let one time out: that means move on, so it
+      // is not put straight back to them.
+      if (leftForUser) break;
+      // The agent saying it needs them always waits — it asked for something,
+      // whatever the check thinks. Otherwise, a check that says it is not met.
+      const unmet = needsYou(lastReply) || Boolean(verdict && verdict.ok === false);
+      if (!unmet) break;
+      const r = await waitForTheUser(needsOf(lastReply, verdict));
+      if (!handover.carriedOn(r.outcome)) break;
+      leftForUser = false;
+      await go(botId && chatId ? store.sessionOf(botId, chatId) : null,
+        `${handover.answerFor(r)}. Carry on towards the goal from where you stopped, until it is met. ` +
+        'If you need something else only they can do or tell you, call wait_for_user, or end with NEEDS YOU: and what you need.');
+      verdict = await checkTheWork();
+    }
   } catch (err) {
     // Raw SDK and Node failures mean nothing to someone who has just installed
     // this. errors.js turns the common ones into a sentence plus the fix, and

@@ -130,6 +130,7 @@ function endRun() {
 function settleHelpers() {
   // The main agent's turn cards too: their own ending is dropped after Stop.
   for (const [id, h] of handovers) { handovers.delete(id); endHandoverCard(h, 'stopped'); }
+  if (openTurns.length) { openTurns.length = 0; paintTurns(); }
   if (!helpers) return;
   let changed = false;
   for (const lane of helpers.lanes.values()) {
@@ -384,8 +385,11 @@ function paintFaces() {
     whoName.textContent = bot.name;
     whoTitle.textContent = bot.title || '';
 
-    // you are talking to a particular bot, so say its name
-    input.placeholder = 'Give ' + bot.name + ' a task';
+    // you are talking to a particular bot, so say its name — unless it is
+    // waiting on you, when the box is for your answer (paintTurns)
+    input.placeholder = openTurns.length
+      ? 'Operator is waiting for you — type what it asked for and press Enter'
+      : 'Give ' + bot.name + ' a task';
     const h1 = document.querySelector('#intro h1');
     if (h1) h1.textContent = 'What should ' + bot.name + ' do?';
     // The start screen shows who you are about to talk to.
@@ -819,7 +823,7 @@ function replay(turns) {
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'screen') turn('', screenCard(t));
     else if (t.k === 'helpers') turn('', '').appendChild(helpersCard(t));
-    else if (t.k === 'handover') turn('', handoverCard(t.what, t.outcome || 'stopped'));
+    else if (t.k === 'handover') turn('', handoverCard(t.what, t.outcome || 'stopped', true, t.answer));
     else if (t.k === 'steps') {
       const g = openGroup();
       for (const it of t.items) addStepRow(g, it.name, it.input || {}, it.at || '', false);
@@ -844,6 +848,7 @@ function clearThread() {
   thread.querySelectorAll('.turn').forEach((el) => el.remove());
   helpers = null;
   handovers.clear();
+  if (openTurns.length) { openTurns.length = 0; document.body.classList.remove('your-turn'); }
   group = null;
   stepsRec = null;
   live = null;
@@ -1435,53 +1440,105 @@ const HELPER_STATE = { working: 'Working', waiting: 'Your turn', done: 'Done', n
  */
 
 const HANDOVER_END = { user: 'Done — carrying on', moved: 'Done — carrying on', gone: 'Done — carrying on', skipped: 'Skipped', timeout: 'Timed out — nothing more was done', stopped: 'Stopped' };
-const handovers = new Map();   // id → { el, record }
+const handovers = new Map();   // the main agent's open turns: id → { el, record }
+const openTurns = [];          // every open turn, oldest first — the task box answers the newest
 
-function handoverCard(what, outcome) {
+// Three bouncing dots: it is waiting, not stuck.
+const WAIT_DOTS = '<span class="hv-wait" aria-hidden="true"><i></i><i></i><i></i></span>';
+
+// `page`: whether there is a tab to show. A run waiting on an answer has none.
+// `answer`: what the user typed, shown once it is over.
+function handoverCard(what, outcome, page, answer) {
   const over = outcome !== null && outcome !== undefined;
   return '<div class="handover' + (over ? ' is-over' : '') + '">' +
-    '<div class="handover-top"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>' +
-      '<b>Your turn</b><span class="handover-state">' + (over ? esc(HANDOVER_END[outcome] || outcome) : 'Waiting for you') + '</span></div>' +
+    '<div class="handover-top"><span class="hv-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span>' +
+      '<b>' + (over ? 'Your turn' : 'Operator needs you to keep going') + '</b>' +
+      '<span class="handover-state">' + (over ? esc(HANDOVER_END[outcome] || outcome) : WAIT_DOTS + 'Waiting for you') + '</span></div>' +
     '<p class="handover-what">' + esc(what) + '</p>' +
+    (over && answer ? '<p class="handover-answer">You answered: <b>' + esc(answer) + '</b></p>' : '') +
     (over ? '' :
+      '<form class="hv-reply">' +
+        '<input type="text" placeholder="Type what it asked for — a code, a number, an answer — or just do it on the page" autocomplete="off" spellcheck="false" />' +
+        '<button type="submit" class="pill solid sm">Send</button>' +
+      '</form>' +
       '<div class="handover-actions">' +
-        '<button type="button" class="pill ghost sm hv-show">Show me</button>' +
-        '<button type="button" class="pill solid sm hv-done">I\'ve done it</button>' +
+        (page === false ? '' : '<button type="button" class="pill ghost sm hv-show">Show me</button>') +
+        '<button type="button" class="pill ghost sm hv-done">I\'ve done it</button>' +
         '<button type="button" class="hv-skip">Skip this step</button>' +
       '</div>') +
   '</div>';
 }
 
-// The three buttons, for a card or a helper's lane. `id` is read when clicked:
-// a lane is handed a new one for each turn.
+// The controls, for a card or a helper's lane. `id` is read when clicked: a
+// lane is handed a new one for each turn.
 function bindHandover(root, getId) {
-  const act = (fn) => () => { const id = getId(); if (id) fn(id); };
-  root.querySelector('.hv-show').addEventListener('click', act((id) => window.operator.handoverShow(id)));
-  root.querySelector('.hv-done').addEventListener('click', act((id) => window.operator.handoverDone(id)));
+  const act = (fn) => (e) => { if (e) e.preventDefault(); const id = getId(); if (id) fn(id); };
+  const show = root.querySelector('.hv-show');
+  if (show) show.addEventListener('click', act((id) => window.operator.handoverShow(id)));
+  root.querySelector('.hv-done').addEventListener('click', act((id) => window.operator.handoverDone(id, '')));
   root.querySelector('.hv-skip').addEventListener('click', act((id) => window.operator.handoverSkip(id)));
+  const form = root.querySelector('.hv-reply');
+  if (form) {
+    form.addEventListener('submit', act((id) => {
+      const box = form.querySelector('input');
+      window.operator.handoverDone(id, box.value);
+      box.value = '';
+    }));
+  }
+}
+
+// While anything is waiting on the user: the task box glows amber and its
+// placeholder says so, and pressing Enter in it answers the newest turn.
+function paintTurns() {
+  const waiting = openTurns.length > 0;
+  document.body.classList.toggle('your-turn', waiting);
+  if (waiting) input.placeholder = 'Operator is waiting for you — type what it asked for and press Enter';
+  else paintFaces();
+}
+function turnOpened(id) {
+  openTurns.push(id);
+  if (!busy) resumeRun();     // the reply that said "needs you" had ended it visually
+  hideDots();
+  paintTurns();
+}
+function turnClosed(id) {
+  const i = openTurns.indexOf(id);
+  if (i >= 0) openTurns.splice(i, 1);
+  paintTurns();
+}
+// The task box, while it is the user's turn: an answer, not a new task.
+function answerTurn(text) {
+  const id = openTurns[openTurns.length - 1];
+  if (!id) return false;
+  window.operator.handoverDone(id, text);
+  return true;
 }
 
 function onHandover(evt) {
   if (evt.type === 'handover') {
     closeGroup();
-    hideDots();
     const record = { k: 'handover', what: evt.what, outcome: null };
-    const el = turn('', handoverCard(evt.what, null));
+    const el = turn('', handoverCard(evt.what, null, !evt.reply));
     bindHandover(el, () => (handovers.has(evt.id) ? evt.id : null));
     handovers.set(evt.id, { el, record });
     rec(record);
+    turnOpened(evt.id);
+    const box = el.querySelector('.hv-reply input');
+    if (box) box.focus();
     return;
   }
   const h = handovers.get(evt.id);
+  turnClosed(evt.id);
   if (!h) return;
   handovers.delete(evt.id);
-  endHandoverCard(h, evt.outcome);
+  endHandoverCard(h, evt.outcome, evt.answer);
   if (evt.outcome !== 'stopped') showDots();
 }
 
-function endHandoverCard(h, outcome) {
+function endHandoverCard(h, outcome, answer) {
   h.record.outcome = outcome;
-  h.el.innerHTML = handoverCard(h.record.what, outcome);
+  if (answer) h.record.answer = answer;
+  h.el.innerHTML = handoverCard(h.record.what, outcome, true, h.record.answer);
   save();
 }
 let helpers = null;   // the card being filled right now: { el, record, lanes: Map }
@@ -1494,10 +1551,16 @@ function helperLane(data) {
     '<div class="helper-body">' +
       '<div class="helper-top"><i class="helper-dot"></i><b class="helper-name"></b><span class="helper-state"></span></div>' +
       '<div class="helper-step"></div>' +
-      '<div class="helper-actions handover-actions" hidden>' +
-        '<button type="button" class="pill ghost sm hv-show">Show me</button>' +
-        '<button type="button" class="pill solid sm hv-done">I\'ve done it</button>' +
-        '<button type="button" class="hv-skip">Skip</button>' +
+      '<div class="helper-actions" hidden>' +
+        '<form class="hv-reply">' +
+          '<input type="text" placeholder="Type what it asked for…" autocomplete="off" spellcheck="false" />' +
+          '<button type="submit" class="pill solid sm">Send</button>' +
+        '</form>' +
+        '<div class="handover-actions">' +
+          '<button type="button" class="pill ghost sm hv-show">Show me</button>' +
+          '<button type="button" class="pill ghost sm hv-done">I\'ve done it</button>' +
+          '<button type="button" class="hv-skip">Skip</button>' +
+        '</div>' +
       '</div>' +
       '<div class="helper-report" hidden></div>' +
     '</div>';
@@ -1511,7 +1574,7 @@ function helperLane(data) {
 
 function paintLane(el, data) {
   el.className = 'helper is-' + data.state;
-  el.querySelector('.helper-state').textContent = HELPER_STATE[data.state] || data.state;
+  el.querySelector('.helper-state').innerHTML = (data.state === 'waiting' ? WAIT_DOTS : '') + esc(HELPER_STATE[data.state] || data.state);
   el.querySelector('.helper-step').textContent = data.state === 'working'
     ? (data.step || 'Opening its tab…')
     : data.state === 'waiting' ? data.what
@@ -1597,7 +1660,9 @@ function onHelperEvent(evt) {
     lane.data.state = 'waiting';
     lane.data.what = evt.what;
     lane.data.hv = evt.id;
+    turnOpened(evt.id);
   } else if (evt.type === 'handover_end') {
+    turnClosed(evt.id);
     if (lane.data.state === 'waiting') lane.data.state = 'working';
     lane.data.hv = null;
     lane.data.step = evt.outcome === 'skipped' ? 'Skipped that step' : evt.outcome === 'timeout' ? 'Stopped waiting' : 'Carrying on';
@@ -1828,6 +1893,13 @@ if (dryBtn) {
 
 async function run(override) {
   const task = (override !== undefined ? override : input.value).trim();
+  // It is waiting on the user: what they type is the answer it asked for, and
+  // the same task carries on with it — not a new task.
+  if (task && override === undefined && answerTurn(task)) {
+    input.value = '';
+    resize();
+    return;
+  }
   if (!task || busy) return;
 
   await ensureChat();

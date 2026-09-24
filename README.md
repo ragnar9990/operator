@@ -204,13 +204,20 @@ what it is doing, and its report. Stop stops them all. Desktop work stays one
 agent at a time — there is one mouse.
 
 **Your turn — it waits instead of giving up.** A verification code it cannot
-fetch, a robot check, a password, a phone or identity check: when the agent (or
-a helper) reaches a step like that, it does not end the task. A "Your turn"
-card says exactly what to do, with **Show me** (brings that tab up), **I've
-done it** and **Skip**; if Operator is in the background you get a Windows
-notification. It carries on by itself the moment the page moves on, or when
-you press "I've done it" — up to ten minutes by default. Connect an email
-account in Settings → Connectors and it fetches emailed codes itself.
+fetch, a robot check, a password, a phone number only you can give: when the
+agent (or a helper) reaches a step like that, the task does not end. A card
+says exactly what it needs to keep going, with bouncing "waiting for you" dots,
+a box to type the answer into, **Show me** (brings that tab up), **I've done
+it** and **Skip**; the task box glows amber, and typing in it answers too. If
+Operator is in the background you get a Windows notification. It carries on in
+the same conversation the moment the page moves on or you answer.
+
+This is built into the app rather than left to the model: a helper that ends
+with "NEEDS YOU" gets its lane turned into your turn and picks its own
+conversation back up after; a run whose goal is not met yet asks you what it
+needs instead of finishing, and carries on with your answer until it is — or
+until you Skip or Stop. Connect an email account in Settings → Connectors and
+it fetches emailed codes itself.
 
 Both monitors are supported. Screenshots come back per display, scaled to 1280
 wide, and click coordinates use that same space — so what it sees is what it hits.
