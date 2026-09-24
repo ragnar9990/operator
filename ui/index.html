@@ -2,6 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- Scripts only from this folder: text an agent or a web page puts on screen
+         can never run as code here, where the preload can drive the machine.
+         Styles may be inline (the UI sets them on elements); fonts come from Google. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Operator</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -13,20 +17,7 @@
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="editor.css" />
     <link rel="stylesheet" href="code.css" />
-    <script>
-      // Runs before anything paints. The real preferences live in the profile,
-      // but reading those is async — long enough for the default theme to flash
-      // up first. The renderer mirrors them here, so this reads the mirror.
-      try {
-        var p = JSON.parse(localStorage.getItem('prefs') || '{}');
-        var d = document.documentElement.dataset;
-        d.theme = p.theme || 'warm';
-        d.accent = p.accent || 'blue';
-        d.glow = p.glow || 'full';
-        d.edge = p.edge || 'accent';
-        d.motion = p.motion || 'on';
-      } catch (e) { /* first run, or storage blocked */ }
-    </script>
+    <script src="boot.js"></script>
   </head>
   <body>
     <div class="modebar">
