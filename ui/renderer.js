@@ -1075,6 +1075,7 @@ const ACCESSORIES = ['none', 'antenna', 'visor', 'bolt', 'sprout', 'halo', 'ears
 const HUES = [199, 262, 152, 24, 341, 44, 288, 174];
 
 const EVERY = {
+  once: 'Once',
   min5: 'Every 5 minutes', min15: 'Every 15 minutes', min30: 'Every 30 minutes',
   hour: 'Every hour', day: 'Every day', weekday: 'Weekdays', week: 'Mondays',
 };
@@ -1247,7 +1248,9 @@ async function paintSheet() {
     body.textContent = r.name;
     const stamp = document.createElement('span');
     stamp.className = 'when';
-    stamp.textContent = (EVERY[r.every] || r.every) + (SPACED.has(r.every) ? '' : ' at ' + r.at) +
+    stamp.textContent = (r.kind === 'remind' ? 'Reminder · ' : '') + (EVERY[r.every] || r.every) +
+      (r.every === 'once' ? ', ' + new Date(r.when).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+        : SPACED.has(r.every) ? '' : ' at ' + r.at) +
       (r.paused ? ' · paused' : r.lastRun ? ' · last ran ' + when(r.lastRun) : ' · not yet run');
     body.appendChild(stamp);
 
@@ -1792,6 +1795,9 @@ window.operator.onEvent((evt) => {
     }
     return;
   }
+
+  // A reminder is the Windows notification main shows; nothing to draw here.
+  if (evt.type === 'reminder') return;
 
   if (!mine) return;
 

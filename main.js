@@ -349,7 +349,13 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       // Handing out helpers is listed where it STARTED (the `tool` event
       // below): it only finishes after every helper has, and listed there it
       // read to the check as "did the work, then handed it out".
-      if (evt.name !== 'run_helpers') acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
+      // A shell command goes in whole, with what it printed: its first line
+      // alone read to the check as "made folders, moved nothing".
+      if (evt.name === 'run_command') {
+        acts.push({ text: `run: ${String((evt.input || {}).command || '').slice(0, 800)}${evt.output ? `\n   it printed: ${evt.output}` : ''}`, long: true, ok: evt.ok !== false, error: evt.error || null });
+      } else if (evt.output) {
+        acts.push({ text: `${evt.text || evt.name} → ${evt.output}`, long: true, ok: evt.ok !== false, error: evt.error || null });
+      } else if (evt.name !== 'run_helpers') acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
       if (/^(screen_|launch_app|focus_window|list_windows)/.test(evt.name)) usedScreen = true;
       if (evt.name.startsWith('browser_')) usedBrowser = true;
       audit.write({
@@ -530,6 +536,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       messageBot,
       codeChats,
       email: emailApi,
+      schedule: botId ? scheduleFor(botId) : null,
       alwaysSkills,
       activeSkill: again ? null : activeSkill,
       skillIndex,
@@ -555,7 +562,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       onEvent({ type: 'verify_start' });
       const v = await verify.check({
         goal: prompt, actions: acts, reply: lastReply, model,
-        dryRun, usedScreen, usedBrowser, abortController,
+        dryRun, usedScreen, usedBrowser, onTheirScreen: tookTheScreen, abortController,
       });
       if (abortController.signal.aborted) return null;
 
@@ -1228,6 +1235,7 @@ const SPAN = { min5: 5, min15: 15, min30: 30, hour: 60 };
 
 function dueNow(r, now) {
   if (r.paused) return false;
+  if (r.every === 'once') return !r.lastRun && now >= (r.when || 0);
   // Never run yet: count from when it was made (see store.addRoutine).
   const last = Math.max(r.lastRun || 0, r.createdAt || 0);
 
@@ -1247,7 +1255,44 @@ function dueNow(r, now) {
   return true;
 }
 
+// A reminder is only words at a time: a notification and no agent run, so it
+// never waits for the desk to be free or spends a model turn on one line.
+function remindNow(botId, routine) {
+  if (routine.every === 'once') store.removeRoutine(botId, routine.id);
+  else store.updateRoutine(botId, routine.id, { lastRun: Date.now() });
+  send('agent-event', { type: 'reminder', text: routine.prompt, botId });
+  send('bots-changed', { botId });
+  if (process.env.OPERATOR_NO_NOTIFY === '1') return;   // automated tests
+  try { if (win && !win.isDestroyed()) win.flashFrame(true); } catch (_) {}
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: 'Reminder', body: String(routine.prompt).slice(0, 200) });
+    n.on('click', () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } });
+    n.show();
+  } catch (_) { /* nothing else to do with a reminder that cannot show */ }
+}
+
+// The agent's hands on the scheduler: the reminders and routines of the bot it
+// is running as, the same list that bot's panel shows.
+function scheduleFor(botId) {
+  return {
+    add: (spec) => {
+      const r = store.addRoutine(botId, spec);
+      if (r) { send('bots-changed', { botId }); tick().catch(() => {}); }
+      return r;
+    },
+    list: () => ((store.getBot(botId) || {}).routines || []),
+    remove: (routineId) => {
+      const had = ((store.getBot(botId) || {}).routines || []).some((r) => r.id === routineId);
+      store.removeRoutine(botId, routineId);
+      if (had) send('bots-changed', { botId });
+      return had;
+    },
+  };
+}
+
 async function fireRoutine(botId, routine) {
+  if (routine.kind === 'remind') { remindNow(botId, routine); return; }
   store.updateRoutine(botId, routine.id, { lastRun: Date.now() });
   const chat = store.createChat(botId);
   store.saveChat(botId, chat.id, { title: routine.name });
@@ -1260,17 +1305,22 @@ async function fireRoutine(botId, routine) {
     silent: true,
     record: makeRecorder(botId, chat.id, routine.prompt),
   });
+  if (routine.every === 'once') store.removeRoutine(botId, routine.id);
   send('bots-changed', { botId });
 }
 
 // One physical desktop, one mouse: routines queue behind whatever is running
-// rather than fighting it for the screen.
+// rather than fighting it for the screen. Reminders touch neither, so they
+// go off on time whatever is running.
 async function tick() {
-  if (running) return;
   const now = Date.now();
+  for (const { botId, routine } of store.allRoutines()) {
+    if (routine.kind === 'remind' && dueNow(routine, now)) remindNow(botId, routine);
+  }
+  if (running) return;
 
   for (const { botId, routine } of store.allRoutines()) {
-    if (!dueNow(routine, now)) continue;
+    if (routine.kind === 'remind' || !dueNow(routine, now)) continue;
     await fireRoutine(botId, routine);
     return; // one per tick; the next is picked up 30s later
   }

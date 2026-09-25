@@ -658,14 +658,20 @@ function skillsForBot(botId) {
 
 /* ── routines: work that starts without you ──────────────────────── */
 
-function addRoutine(botId, { name, prompt, every, at }) {
+function addRoutine(botId, { name, prompt, every, at, kind, when }) {
   const b = find(botId);
   if (!b || !String(prompt || '').trim()) return null;
+  // "once" needs the moment it is due, as ms since the epoch.
+  if (every === 'once' && !(Number(when) > 0)) return null;
   const routine = {
     id: id('r'),
     name: String(name || prompt).trim().slice(0, 60),
     prompt: String(prompt).trim().slice(0, 2000),
-    every: ['min5', 'min15', 'min30', 'hour', 'day', 'weekday', 'week'].includes(every) ? every : 'day',
+    // "remind" only shows the user the words at that time; "task" runs the
+    // agent on them.
+    kind: kind === 'remind' ? 'remind' : 'task',
+    every: ['once', 'min5', 'min15', 'min30', 'hour', 'day', 'weekday', 'week'].includes(every) ? every : 'day',
+    when: every === 'once' ? Number(when) : null,
     at: /^\d{2}:\d{2}$/.test(at || '') ? at : '09:00',
     paused: false,
     lastRun: null,

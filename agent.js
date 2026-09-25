@@ -69,6 +69,7 @@ const SYSTEM_PROMPT = `You are Operator. You run on the user's own Windows PC an
 
 FIRST, decide what kind of message this is:
 - If the user is just talking — a greeting, small talk, a thank-you, or a question you can answer from your own knowledge — reply in plain text. Do NOT take a screenshot or call any tools.
+- But anything that changes — today's opening hours, prices, exchange rates, weather, news, times, what is on or in stock — look up now in the browser rather than answering from memory, and say where the answer came from.
 - Only start acting when they ask you to DO something. If you are unsure what they want, ask one short clarifying question first.
 
 WHEN YOU ACT, pick the right set of hands:
@@ -98,6 +99,8 @@ LEAVE THEIR WINDOWS AS YOU FOUND THEM:
    - WHEN A STEP IS THE USER'S TO DO — a code you cannot fetch, a CAPTCHA, a password, a phone or identity check, a QR to scan, an approval to tap — do NOT end your turn to tell them. Call wait_for_user with exactly what they need to do: it shows them the tab and waits, and you carry on the moment it returns. Ending the turn means they have to come back and start you again, by which time the page has usually timed out. For something that finishes by itself — an upload, a payment going through — browser_wait_for is enough.
    - DROPDOWNS: always browser_select. Never click a dropdown open and try to find the option by eye — a real <select> draws its list outside the page, so it is not in the screenshot and cannot be clicked or scrolled at coordinates. That is why long lists like a year of birth get stuck.
    - Chain: navigate, then fill_form with submit — a whole "go to the site and fill it in" is often just two calls.
+   - SEARCHING: if Google answers with an "unusual traffic" or "not a robot" page, do not fight it — search on https://duckduckgo.com/?q=... or https://www.bing.com/search?q=... instead, or go straight to the site that has the answer.
+   - A shop or site that blocks you ("Access Denied", "you have been blocked") is not the end of the job: try another source for the same thing (another shop, a price-comparison site, the brand's own site), and say which ones blocked you.
    - SEVERAL SEPARATE WEB JOBS AT ONCE: when a request splits into jobs on different sites that do not depend on each other — an account on each of four sites, the same lookup in several shops — call run_helpers ONCE with one task per site (up to 4). They run at the same time, each in its own tab, which is several times faster than doing them one after another. Each helper sees ONLY its task, so write it complete: the site, every detail it needs (names, bio, email address), and what to leave for the user. When they report back, tell the user in a few lines what each did and exactly what is waiting for them, and in which tab.
 
 2. Anything else on the computer — desktop apps, Explorer, settings, games, installers, local files, or a browser the user already has open — use the screen_* tools. This is a real mouse and keyboard on a real desktop.
@@ -130,9 +133,18 @@ SIGNING IN:
 
 GENERAL:
 - Keep going until the goal is met, then stop and give a one-line summary. Don't hand work back to the user that you could do yourself.
+- REMINDERS AND REPEATING JOBS — "remind me…", "every morning…", "at 5pm, do…", "in 20 minutes…" — use schedule. You can set these; never tell the user you cannot. Use schedule ONLY — never Windows Task Scheduler, schtasks or a script: Operator cannot list or cancel those, so "stop reminding me" would silently fail.
 - If you truly cannot go further without the user — something only they can do, or something only they can tell you (a phone number, a choice, a code) — do not simply stop. End your message with a line that starts NEEDS YOU: and says exactly what they must do or give you to keep going. Operator shows them that, waits, and hands you their answer so you carry on in this same conversation. (Mid-task, prefer wait_for_user.)
 - If you hit a captcha or an "I'm not a robot" checkbox, click it like a person would and carry on. If it is still there after that, or it is a puzzle or picture challenge, call wait_for_user for the user to do it — never end the task at one.
 - One exception to just doing it: if a step is destructive and hard to undo — permanently deleting files, spending money, sending a message or posting something publicly, changing security settings — say what you are about to do and wait for the user to confirm. Everything else, just do it.`;
+
+// Tools whose result is the proof of what they did — a command's output, what
+// was scheduled or cancelled — so the check at the end is shown it.
+const SHOW_RESULT = new Set(['run_command', 'schedule', 'list_schedule', 'cancel_schedule']);
+
+// Microsoft Store apps, by the names and links people launch them with. They
+// cannot open on the agent's hidden desktop (see launch_app).
+const STORE_APP = /^(calc|calc\.exe|calculator|settings|ms-settings:.*|photos|ms-photos:.*|camera|microsoft\.windows\.camera:.*|clock|alarms|alarms & clock|ms-clock:.*|microsoft store|store|ms-windows-store:.*|mail|calendar|maps|bingmaps:.*|xbox|media player|mswindowsmusic:.*|sticky notes|weather|msnweather:.*|snipping tool|ms-screenclip:.*|sound recorder|voice recorder|microsoft to ?do|ms-todo:.*|phone link)$/i;
 
 // A teammate answering a message. It replies from its own persona and memory —
 // a single reasoning turn, no computer tools, because two agents driving the
@@ -207,11 +219,11 @@ function makeCtx({ onEvent, abortController, dryRun }) {
 // turns and 12-40% longer every time, because a screenshot plus one batched
 // screen_do does the same job in one round trip. The tools are still here and
 // still correct; pass textPath:true to use them.
-async function createSession({ userDataDir, model, resume, bot, teammates, messageBot, codeChats, email, alwaysSkills, skillIndex, dryRun, textPath = false,
+async function createSession({ userDataDir, model, resume, bot, teammates, messageBot, codeChats, email, schedule, alwaysSkills, skillIndex, dryRun, textPath = false,
                                tuning = {},
                                hasMessageBot = Boolean(messageBot), hasCodeChats = Boolean(codeChats), hasEmail = Boolean(email) }) {
   const ctx = makeCtx({ dryRun });
-  ctx.messageBot = messageBot; ctx.codeChats = codeChats; ctx.email = email;
+  ctx.messageBot = messageBot; ctx.codeChats = codeChats; ctx.email = email; ctx.schedule = schedule;
   const { query, tool: sdkTool, createSdkMcpServer } = await import('@anthropic-ai/claude-agent-sdk');
 
   /* ── dry run ──────────────────────────────────────────────────────────
@@ -232,6 +244,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
     'browser_click_text', 'browser_type_into', 'browser_fill_form', 'browser_select',
     'browser_click_xy', 'browser_press_key', 'browser_scroll',
     'email_send', 'remember', 'message_bot', 'screen_click_text',
+    'schedule', 'cancel_schedule',
     // A rehearsal describes a hand-over instead of stopping to wait for one.
     'wait_for_user',
     // Stepping onto the user's screen moves their real mouse, so a rehearsal
@@ -285,6 +298,8 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'get_verification_code': return `wait for the code${a.from ? ` from ${a.from}` : ''}`;
       case 'email_send': return `email ${a.to} — "${a.subject}"`;
       case 'remember': return `remember "${String(a.note || '').slice(0, 60)}"`;
+      case 'schedule': return `${a.kind === 'remind' ? 'remind you' : 'run'} "${String(a.text || '').slice(0, 60)}" ${a.every === 'once' ? 'once' : a.every}${a.at ? ' at ' + a.at : ''}`;
+      case 'cancel_schedule': return `cancel ${a.id}`;
       case 'message_bot': return `ask ${a.bot}: "${String(a.message || '').slice(0, 60)}"`;
       case 'run_helpers': return `hand ${(a.tasks || []).length} jobs to helpers at once: ${(a.tasks || []).map((x) => x.name).join(', ')}`;
       default: return name;
@@ -317,7 +332,11 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       try {
         const out = await handler(...call);
         const failed = Boolean(out && out.isError);
-        c.onEvent({ type: 'tool_done', name, input: args, text, ok: !failed, ms: Date.now() - started });
+        // What a shell command printed is the only proof of what it did, so the
+        // check at the end (main.js → verify.js) gets to see it.
+        const output = SHOW_RESULT.has(name) && out && Array.isArray(out.content)
+          ? out.content.map((x) => x.text || '').join('\n').slice(0, 1500) : undefined;
+        c.onEvent({ type: 'tool_done', name, input: args, text, ok: !failed, ms: Date.now() - started, output });
         return out;
       } catch (err) {
         c.onEvent({ type: 'tool_done', name, input: args, text, ok: false, ms: Date.now() - started,
@@ -616,9 +635,15 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         return afterScreen(`Maximised "${res.title}"`);
       }),
 
-    tool('launch_app', 'Start a program by name ("notepad", "calc", "explorer"), open a file path, or open a URL.',
+    tool('launch_app', 'Start a program by name ("notepad", "calc", "explorer"), open a file path, or open a URL. Microsoft Store apps (Calculator, Settings, Photos, Clock, Camera, Media Player…) only open on the user\'s own screen.',
       { target: z.string(), args: z.string().optional() },
       async ({ target, args }) => {
+        // Store apps are drawn by a host that only lives on the user's own
+        // desktop: on the hidden one they start and never show a window, and
+        // the agent waited for Calculator for three minutes.
+        if (desktop.isPrivate() && STORE_APP.test(String(target).trim())) {
+          return { content: [{ type: 'text', text: `${target} is a Microsoft Store app, and those never show a window on your hidden desktop. Call use_my_screen, launch it again there, do the job, then call use_own_screen.` }] };
+        }
         await desktop.launch(target, args);
         return afterScreen(`Launched ${target}`);
       }),
@@ -824,6 +849,60 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         ctx.onEvent({ type: 'remember', text: note });
         return { content: [{ type: 'text', text: `Noted, and you will have it next time: "${note}"` }] };
       }),
+  ] : [];
+
+  /* ── reminders and routines ──────────────────────────────────── */
+
+  // The bot's own schedule, the list its panel shows. Without these the only
+  // honest answer to "remind me at 8" was "I can't".
+  const say = (text) => ({ content: [{ type: 'text', text }] });
+  const EVERY_WORDS = { once: 'once', min5: 'every 5 minutes', min15: 'every 15 minutes', min30: 'every 30 minutes', hour: 'every hour', day: 'every day', weekday: 'every weekday', week: 'every Monday' };
+  const describe = (r) => `${r.id}: ${r.kind === 'remind' ? 'reminder' : 'task'} "${r.name}" — ` +
+    (r.every === 'once' ? 'once, ' + new Date(r.when).toLocaleString() : EVERY_WORDS[r.every] + (['day', 'weekday', 'week'].includes(r.every) ? ' at ' + r.at : '')) +
+    (r.paused ? ' (paused)' : '');
+  // "once": minutes from now, a time today (tomorrow if it has passed), or a
+  // local date and time.
+  const onceAt = (at, inMinutes) => {
+    if (Number(inMinutes) > 0) return Date.now() + Number(inMinutes) * 60000;
+    const s = String(at || '').trim();
+    const hm = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (hm) {
+      const d = new Date();
+      d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
+      if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+      return d.getTime();
+    }
+    const t = Date.parse(s.replace(' ', 'T'));
+    return Number.isFinite(t) ? t : null;
+  };
+  const scheduleTools = bot ? [
+    tool('schedule',
+      'Set a reminder or a repeating job for the user — "remind me at 8", "every morning, check…", "in 20 minutes tell me…". ' +
+      'kind "remind" pops up a Windows notification with the text at that time and does nothing else. kind "task" runs you on the text at that time, in a new conversation (e.g. "check the weather and tell me if I need an umbrella"). ' +
+      'It goes off while Operator is open.',
+      {
+        kind: z.enum(['remind', 'task']),
+        text: z.string().describe('For a reminder, the words to show. For a task, the full instruction to carry out then.'),
+        every: z.enum(['once', 'min5', 'min15', 'min30', 'hour', 'day', 'weekday', 'week']).describe('"week" is Mondays.'),
+        at: z.string().optional().describe('"HH:MM", 24-hour local time, for day/weekday/week. For once: "HH:MM" (the next time it comes round) or a local date and time like "2026-09-26 17:30".'),
+        in_minutes: z.number().optional().describe('For once: minutes from now, instead of at.'),
+      },
+      async ({ kind, text, every, at, in_minutes }) => {
+        if (!ctx.schedule) return say('Scheduling is not available in this run.');
+        const when = every === 'once' ? onceAt(at, in_minutes) : null;
+        if (every === 'once' && !when) return say('For "once", give in_minutes or at ("HH:MM" or "YYYY-MM-DD HH:MM").');
+        if (['day', 'weekday', 'week'].includes(every) && !/^\d{2}:\d{2}$/.test(at || '')) return say(`For "${every}", give at as "HH:MM" in 24-hour time, e.g. "08:00".`);
+        const r = ctx.schedule.add({ name: text.slice(0, 50), prompt: text, kind, every, at, when });
+        if (!r) return say('Could not set that up.');
+        return say(`Set — ${describe(r)}. It goes off while Operator is open, and shows in this agent's panel under Routines. Tell the user in one line what you set and when.`);
+      }),
+    tool('list_schedule', "The reminders and repeating jobs set up on this agent, with their ids.", {},
+      async () => {
+        const all = ctx.schedule ? ctx.schedule.list() : [];
+        return say(all.length ? all.map(describe).join('\n') : 'Nothing is scheduled.');
+      }),
+    tool('cancel_schedule', 'Stop a reminder or repeating job, by the id list_schedule gives.', { id: z.string() },
+      async ({ id }) => say(ctx.schedule && ctx.schedule.remove(id) ? `Cancelled ${id}.` : `There is nothing scheduled with the id ${id}.`)),
   ] : [];
 
   // Talk to another of the user's bots. The active bot names a teammate and a
@@ -1135,8 +1214,8 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
   const where = desktop.target();
   const remote = where.kind === 'remote';
   let tools = remote
-    ? [...desktopTools, ...memoryTools, ...teamTools, ...codeTools, ...emailTools]
-    : [...desktopTools, ...browserTools, ...helperTools, ...memoryTools, ...teamTools, ...codeTools, ...emailTools];
+    ? [...desktopTools, ...memoryTools, ...scheduleTools, ...teamTools, ...codeTools, ...emailTools]
+    : [...desktopTools, ...browserTools, ...helperTools, ...memoryTools, ...scheduleTools, ...teamTools, ...codeTools, ...emailTools];
 
   // A bot is the shared instructions plus who it is and what it has learned.
   let systemPrompt = SYSTEM_PROMPT;
@@ -1344,6 +1423,7 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
     if (task.messageBot) ctx.messageBot = task.messageBot;
     if (task.codeChats) ctx.codeChats = task.codeChats;
     if (task.email) ctx.email = task.email;
+    if (task.schedule) ctx.schedule = task.schedule;
     const onEvent = ctx.onEvent;
     const abortController = ctx.abortController;
 
@@ -1556,6 +1636,7 @@ async function runTask(prompt, opts) {
       messageBot: opts.messageBot,
       codeChats: opts.codeChats,
       email: opts.email,
+      schedule: opts.schedule,
     });
   } catch (err) {
     // A broken session must not be handed to the next task.

@@ -37,6 +37,7 @@ How to judge:
 - An action list full of errors that still ends in the right place is a PASS — how it got there is not your problem.
 - If the request was vague or conversational and what happened is a fair reading of it, that is a PASS. Do not invent requirements the user never asked for.
 - If the evidence genuinely does not show you either way, say UNSURE rather than guessing. UNSURE is not a polite FAIL.
+- A reminder or repeating job set with the schedule tool is done the moment it is set: it cannot have gone off yet. That it goes off while Operator is open is how Operator works, not something missing. A "task" job is carried out at that time by this same agent with all its tools, so judge only that it is set for the right time and that its instruction asks for the right thing.
 
 Reply with ONE line, in exactly this shape, and nothing else — no preamble, no markdown:
 PASS — <one sentence>
@@ -54,7 +55,7 @@ This was a REHEARSAL. Nothing in the list below actually happened — it is the 
 // after, the closing says where it left the machine — and drop the middle.
 function actionList(actions) {
   const line = (a, i) => {
-    const what = String(a.text || a.name || 'something').slice(0, 160);
+    const what = String(a.text || a.name || 'something').slice(0, a.long ? 2500 : 160);
     const how = a.ok === false ? ` — FAILED${a.error ? ': ' + String(a.error).slice(0, 120) : ''}` : '';
     return `${i + 1}. ${what}${how}`;
   };
@@ -68,7 +69,7 @@ function actionList(actions) {
 // already paid for: a task that never touched the desktop must not boot the
 // desktop helper just to be checked, and a task that never opened the browser
 // has no page to read.
-async function evidence({ usedScreen, usedBrowser, canSee }) {
+async function evidence({ usedScreen, usedBrowser, canSee, onTheirScreen }) {
   const parts = [];
   let image = null;
 
@@ -94,6 +95,9 @@ async function evidence({ usedScreen, usedBrowser, canSee }) {
       const shot = await desktop.screenshot(1, SHOT);
       image = { mime: shot.mime || 'image/jpeg', b64: shot.image };
       parts.push(`THE SCREEN NOW: attached, display ${shot.display} of ${shot.displays}. Foreground window: ${shot.foreground || 'unknown'}.`);
+      // It stepped back onto its own hidden desktop when it finished, so the
+      // shot cannot show what it did on theirs (Calculator failed on this).
+      if (onTheirScreen) parts.push('NOTE: part of this was done on the USER\'S OWN screen (use_my_screen), and the agent then stepped back to its own hidden desktop — which is what this screenshot shows. What it did on their screen will not be in it; judge that part on the actions.');
     } catch { /* the helper went with the task; judge on the actions alone */ }
   } else if (usedScreen && !canSee) {
     parts.push('(The screen cannot be shown to you — the model running this check has no vision. Judge on the actions alone, and say UNSURE if that is not enough.)');
@@ -196,13 +200,13 @@ async function askNim({ system, body, image, model, abortController }) {
  * ok === false it was not, and `why` says what is missing
  * ok === null  could not tell — no verdict, and nothing is re-run on it
  */
-async function check({ goal, actions = [], reply, model, dryRun, usedScreen, usedBrowser, abortController }) {
+async function check({ goal, actions = [], reply, model, dryRun, usedScreen, usedBrowser, onTheirScreen, abortController }) {
   const started = Date.now();
   const onNim = nim.isNimModel(model);
   const canSee = onNim ? Boolean(nim.describe(nim.bareId(model)).vision) : true;
 
   try {
-    const ev = await evidence({ usedScreen: usedScreen && !dryRun, usedBrowser: usedBrowser && !dryRun, canSee });
+    const ev = await evidence({ usedScreen: usedScreen && !dryRun, usedBrowser: usedBrowser && !dryRun, canSee, onTheirScreen });
     const body = brief({ goal, actions, reply, dry: dryRun, ev });
     const system = dryRun ? RULES_DRY : RULES;
 
