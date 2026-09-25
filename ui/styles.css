@@ -169,6 +169,22 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .chat-row:hover .chat-del, .chat-del:focus-visible { opacity: 1; }
 .chat-del:hover { color: var(--fail); background: rgba(244, 104, 95, 0.12); }
 
+/* The same bin on a pinned agent and on a start-screen row, laid over the
+   row's right end, in space the row keeps free for it. */
+.bot-item, .launch-item { position: relative; }
+.bot-item .bot-row { padding-right: 36px; }
+.launch-item .launch-row { padding-right: 46px; }
+.bot-item > .chat-del, .launch-item > .chat-del {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  margin: -13px 0 0;
+}
+.launch-item > .chat-del { right: 10px; color: var(--ink-3); }
+.launch-item > .chat-del:hover { color: var(--fail); }
+.bot-item:hover > .chat-del, .launch-item:hover > .chat-del { opacity: 1; }
+
 .chats-empty { padding: 6px 10px; color: var(--ink-4); font-size: 13px; }
 
 /* ── hands-free: the voice that runs the app ───────────────────────── */

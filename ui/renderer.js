@@ -564,7 +564,7 @@ function paintRoster() {
 
     row.appendChild(text);
     row.addEventListener('click', () => openAgent(b.id, r.thread && r.thread.id));
-    rosterEl.appendChild(row);
+    rosterEl.appendChild(withBin(row, 'bot-item', b));
   }
 }
 
@@ -946,6 +946,47 @@ async function removeRow(r) {
   const next = pinnedAgents().map((b) => ({ bot: b, thread: b.threads[0] || null }))[0] || looseRows()[0];
   if (next) await openAgent(next.bot.id, next.thread && next.thread.id);
   else await paintRail();
+}
+
+// A bin for a row that is a button itself, since one button cannot hold
+// another: the two share a wrapper, and the bin sits over the row's right end.
+function withBin(row, cls, b) {
+  const item = document.createElement('div');
+  item.className = cls;
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'chat-del';
+  del.title = 'Delete agent';
+  del.setAttribute('aria-label', 'Delete ' + b.name);
+  del.innerHTML = BIN;
+  del.addEventListener('click', (e) => { e.stopPropagation(); deleteAgent(b); });
+  item.append(row, del);
+  return item;
+}
+
+// The whole agent, from its bin in the pinned list or on the start screen:
+// every conversation with it goes too, and Undo brings it all back.
+async function deleteAgent(b) {
+  const mine = Boolean(bot && bot.id === b.id);
+  if (mine && busy) window.operator.stopTask();
+  // What Undo reopens: the conversation on screen, if this was it.
+  const shown = mine && !launchOpen() ? (chat && chat.id) || null : undefined;
+  const snap = await snapshot(b.id);
+  await window.operator.deleteBot(b.id);
+  if (snap) offerUndo('Deleted ' + b.name, () => putBack(snap, shown));
+
+  if (mine) {
+    // It was the one on screen (or waiting under the start screen), so carry
+    // on with a fresh chat with the main agent instead.
+    const rest = bots.filter((x) => x.id !== b.id);
+    const home = rest.find((x) => x.pinned && x.role === 'main') || rest.find((x) => x.pinned) || rest[0];
+    bot = null;
+    await startFresh(home && home.id);
+  } else {
+    await loadBots(bot && bot.id);
+    await paintRail();
+  }
+  if (launchOpen()) { paintLaunch(true); launchSearch.focus(); }
 }
 
 // New agent: its own persona, its own memory, its own thread. This is the one
@@ -2896,7 +2937,7 @@ function paintLaunch(typed) {
     row.append(text, meta);
     row.addEventListener('click', () => launchInto(b));
     row.addEventListener('mousemove', () => { if (launchPick !== i) { launchPick = i; markPick(); } });
-    launchList.appendChild(row);
+    launchList.appendChild(withBin(row, 'launch-item', b));
   });
 }
 
