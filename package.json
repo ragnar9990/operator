@@ -1,7 +1,7 @@
 {
   "name": "operator",
   "version": "0.3.2",
-  "description": "An AI agent with its own computer. Drives the whole Windows desktop plus a dedicated browser, using your Claude subscription.",
+  "description": "An AI agent with its own computer. Drives the whole Windows desktop plus a dedicated browser, on Claude with your own Anthropic API key or on NVIDIA-hosted models.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

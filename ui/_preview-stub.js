@@ -401,6 +401,8 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     onFsChanged: (cb) => FS_LISTENERS.push(cb),
     pathForFile: (f) => 'C:/demo/dropped/' + f.name,
 
+    anthropicStatus: async () => ({ configured: true, hint: '…demo', devLogin: false, ready: true }),
+    anthropicSetKey: async (key) => ({ ok: true, status: { configured: Boolean(key), hint: key ? '…' + String(key).slice(-4) : '', devLogin: false, ready: Boolean(key) } }),
     nvidiaStatus: async () => NVIDIA,
     // The sweep that finds out which models a key can actually run. Here it
     // just pretends a third of them are not served, after a short delay.

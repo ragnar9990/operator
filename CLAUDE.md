@@ -23,3 +23,6 @@ and its tools. See README.md for the features.
   `main`, unless told otherwise.
 - Make surgical edits: change only the lines that need changing, and never
   rewrite a whole file.
+- The v1 scope is frozen — see V1.md. Fixes and the launch list there are in;
+  a new feature goes on its v1.1 list instead of into the app, unless the owner
+  asks for it by name.

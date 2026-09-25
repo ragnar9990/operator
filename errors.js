@@ -12,17 +12,23 @@
 
 const RULES = [
   {
-    // No usable login. The commonest first-run failure by a distance: the app
-    // is installed, nothing is signed in, and nothing explains that.
-    test: /signed[_ ]?out|not authenticated|unauthorized|\b401\b|invalid[_ ]api[_ ]key|authentication[_ ]error|refresh[_ ]failed|identity[_ ]changed|oauth/i,
-    title: 'Operator has no brain to use yet',
-    fix: 'Sign in to Claude by running "claude login" in a terminal, or add a free NVIDIA key in Settings → Models and pick one of its models.',
+    // An installed copy with no Anthropic key (main.js needClaudeKey). The
+    // commonest first-run failure by a distance: nothing explains it otherwise.
+    test: /no_anthropic_key/,
+    title: 'Operator needs a key to use Claude',
+    fix: 'Paste your Anthropic API key in Settings → Models (get one at console.anthropic.com → API keys). Or add a free NVIDIA key there and pick one of its models.',
   },
   {
-    // Claude Code itself is missing, so the SDK cannot start.
+    // A key or login that was refused.
+    test: /signed[_ ]?out|not authenticated|unauthorized|\b401\b|invalid[_ ]api[_ ]key|authentication[_ ]error|refresh[_ ]failed|identity[_ ]changed|oauth/i,
+    title: 'Claude refused the key',
+    fix: 'Check your Anthropic API key in Settings → Models — copy it again from console.anthropic.com → API keys. Or add a free NVIDIA key there and pick one of its models.',
+  },
+  {
+    // The model runner that ships inside Operator is missing, so it cannot start.
     test: /executable not found|native binary not found|failed to spawn|ENOENT.*claude|spawn_failed/i,
-    title: 'Claude Code is not installed on this machine',
-    fix: 'Install it from claude.com/claude-code, then restart Operator. Or add an NVIDIA key in Settings → Models to run without it.',
+    title: 'Part of Operator is missing',
+    fix: 'Reinstall Operator, then restart it. Or add an NVIDIA key in Settings → Models to run without it.',
   },
   {
     test: /rate[ _-]?limit|\b429\b|usage limit|quota|too many requests/i,
@@ -79,4 +85,14 @@ function explainLine(err) {
   return e.fix ? `${e.title}. ${e.fix}` : (e.detail || e.title);
 }
 
-module.exports = { explain, explainLine };
+// The SDK retries a refused key ten times over about two minutes before it
+// gives up, which looks exactly like a hang. Its retry notice says why, and a
+// 401 does not get better by waiting — so every loop reading the SDK throws
+// this at the first one, and the rule at the top of RULES explains it.
+function keyRefused(m) {
+  return Boolean(m && m.type === 'system' && m.subtype === 'api_retry' &&
+    (m.error_status === 401 || m.error === 'authentication_failed'));
+}
+const KEY_REFUSED = 'invalid_api_key (401): Anthropic refused the key';
+
+module.exports = { explain, explainLine, keyRefused, KEY_REFUSED };

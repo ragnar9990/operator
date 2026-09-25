@@ -10,6 +10,10 @@ if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined) {
   process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
 }
 
+// An ANTHROPIC_API_KEY the user set for themselves, kept so removing the key
+// saved in Settings falls back to it rather than to nothing.
+const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
+
 const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -128,6 +132,7 @@ app.whenReady().then(() => {
   const clean = agent.nim.cleanKey(saved);
   if (clean !== saved) { store.setNvidia(clean); store.setNvidiaUnavailable(unavailable); }
   agent.nim.setKey(clean);
+  applyAnthropicKey();
 
   // What NVIDIA would not serve last time stays out of the picker, and a model
   // that 404s during a task joins it.
@@ -185,6 +190,7 @@ ipcMain.handle('list-models', async () => {
     models: agent.listModels(),
     current: agent.DEFAULT_MODEL,
     nvidia: nvidiaStatus(),
+    anthropic: anthropicStatus(),
   };
 });
 
@@ -225,6 +231,63 @@ function tellUserItIsTheirTurn(evt) {
 ipcMain.handle('model-options:set', async (_e, mode, id, patch) => {
   store.setModelOptions(mode, id, patch);
   return modelOptionsState(mode, id);
+});
+
+/* ── Anthropic API key ───────────────────────────────────────────── */
+
+// Anthropic does not let a product built on the Agent SDK run on a customer's
+// claude.ai login, so an installed copy runs Claude on the customer's own API
+// key or not at all. Run from source (npm start) it is the developer's own
+// machine, where their own login is fine. Every Claude brain here is a
+// subprocess that inherits this environment, so setting it once covers the
+// agent, the check, Code, the voice and the helpers.
+function applyAnthropicKey() {
+  const key = store.getAnthropic() || ENV_ANTHROPIC_KEY;
+  if (key) process.env.ANTHROPIC_API_KEY = key;
+  else delete process.env.ANTHROPIC_API_KEY;
+}
+
+// OPERATOR_AS_INSTALLED=1 makes a run from source behave like an installed
+// copy, so the no-key path can be tested without building an installer.
+const installed = () => app.isPackaged || process.env.OPERATOR_AS_INSTALLED === '1';
+const claudeReady = () => Boolean(process.env.ANTHROPIC_API_KEY) || !installed();
+
+// Thrown before any Claude subprocess starts; errors.js says what to do.
+function needClaudeKey(model) {
+  if (agent.nim.isNimModel(model) || claudeReady()) return;
+  throw new Error('no_anthropic_key');
+}
+
+const anthropicStatus = () => {
+  const saved = store.anthropicStatus();
+  return {
+    configured: saved.configured || Boolean(ENV_ANTHROPIC_KEY),
+    hint: saved.hint || (ENV_ANTHROPIC_KEY ? 'from the environment' : ''),
+    // From source with no key: runs on this PC's own Claude login.
+    devLogin: !installed() && !process.env.ANTHROPIC_API_KEY,
+    ready: claudeReady(),
+  };
+};
+
+ipcMain.handle('anthropic:status', async () => anthropicStatus());
+
+// Whatever was pasted — a bare key, ANTHROPIC_API_KEY=…, quotes — find the key
+// in it, and refuse text that cannot be one rather than overwrite a real key.
+// An empty key clears it.
+ipcMain.handle('anthropic:set', async (_e, raw) => {
+  const text = String(raw || '').trim();
+  if (text) {
+    const key = (text.match(/sk-ant-[A-Za-z0-9_-]{20,}/) || [])[0];
+    if (!key) return { ok: false, error: 'That is not an Anthropic API key — they start with sk-ant-.', status: anthropicStatus() };
+    store.setAnthropic(key);
+  } else {
+    store.setAnthropic('');
+  }
+  applyAnthropicKey();
+  // Warm sessions were started with the old environment.
+  agent.closeSession();
+  voice.close();
+  return { ok: true, status: anthropicStatus() };
 });
 
 /* ── NVIDIA NIM key ──────────────────────────────────────────────── */
@@ -520,8 +583,9 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   // `again` is a follow-up turn on the same session — the check sending the run
   // back to fix something. It is not the user's message, so the /skill that was
   // invoked for this turn does not apply to it.
-  const go = (resume, again) =>
-    agent.runTask(again || prompt, {
+  const go = (resume, again) => {
+    needClaudeKey(model || (bot && bot.model) || agent.DEFAULT_MODEL);
+    return agent.runTask(again || prompt, {
       userDataDir: profileDir(),
       abortController,
       model: model || (bot && bot.model) || undefined,
@@ -543,6 +607,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       dryRun,
       onEvent,
     });
+  };
 
   // The run does not get to mark its own homework. Once it thinks it is
   // finished, a second cheap model (verify.js) looks at the goal, what was
@@ -923,6 +988,7 @@ async function runCodeTask(chatId, prompt, refs = []) {
 
   let reply = '';
   try {
+    needClaudeKey(chat.model || agent.DEFAULT_MODEL);
     await code.runCode(modelPrompt, {
       cwd: chat.cwd,
       reach,
@@ -1665,7 +1731,7 @@ ipcMain.handle('voice:warm', async () => {
     out.ttsError = piper.describeMissing();
   }
   // Opening the SDK session is the slow part — pay it before the first word.
-  voice.warm(voiceApp).catch(() => {});
+  if (claudeReady()) voice.warm(voiceApp).catch(() => {});
   return out;
 });
 
@@ -1724,6 +1790,8 @@ ipcMain.handle('voice:heard', async (_e, said, onScreen) => {
   let spoke = false;
   let acked = false;
   try {
+    // The voice always thinks with Claude.
+    if (!claudeReady()) return { ok: false, error: 'Add your Anthropic API key in Settings → Models to use the voice.' };
     await voice.heard(said, voiceApp, (evt) => {
       if (evt.type === 'say') {
         spoke = true;

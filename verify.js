@@ -13,6 +13,7 @@
 const desktop = require('./desktop');
 const browser = require('./browser');
 const nim = require('./nim');
+const errors = require('./errors');
 
 // Cheap on purpose. This runs at the end of every task that did anything, so it
 // has to cost close to nothing or people turn it off and we are back to taking
@@ -166,6 +167,7 @@ async function askClaude({ system, body, image, abortController }) {
   try {
     for await (const m of stream) {
       if (abortController?.signal.aborted) break;
+      if (errors.keyRefused(m)) throw new Error(errors.KEY_REFUSED);
       if (m.type === 'assistant') {
         for (const b of m.message.content) if (b.type === 'text') text += b.text;
       } else if (m.type === 'result') {

@@ -4,9 +4,14 @@ An AI agent with its own computer. You give it a task in plain English; it uses
 this PC to get it done — opening apps, clicking, typing, reading the screen and
 running shell commands, the same way a person would.
 
-The brain is **your Claude subscription**, used through the Claude Agent SDK — it
-runs off your existing Claude Code login, so there's no separate API key or billing.
-Or it can be **any model on NVIDIA NIM** — see below.
+The brain is **Claude, on your own Anthropic API key** (Settings → Models), used
+through the Claude Agent SDK — you pay Anthropic for what it uses. Or it can be
+**any model on NVIDIA NIM** — see below.
+
+Anthropic does not allow a product built on the Agent SDK to run on customers'
+claude.ai logins, so an installed copy needs a key for Claude. Run from source
+(`npm start`) it is your own development machine, and with no key saved it
+uses this PC's own Claude login.
 
 ## Choosing a brain
 
@@ -239,9 +244,8 @@ Operator like any other app — no terminal, no `npm start`.
 
 Type a task and hit Run, then watch it work in the live view.
 
-You need to be logged into your Claude account (the same login Claude Code uses)
-for the brain to work. On a new PC, install Claude Code and run `claude login`
-once, or add a free NVIDIA key in Settings → Models. The browser it drives is
+For the brain, paste your Anthropic API key (console.anthropic.com → API keys)
+in Settings → Models, or add a free NVIDIA key there. The browser it drives is
 your installed Google Chrome, so that PC needs Chrome too.
 
 ## Rebuild the app (after code changes)

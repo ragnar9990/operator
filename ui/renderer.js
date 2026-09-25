@@ -2143,6 +2143,7 @@ const REMEMBERED = 'operator.model';
 let models = [];
 let chosenModel = null;
 let nvidia = { configured: false };
+let anthropic = { ready: true };
 let filter = '';
 
 // The choice is a per-viewer convenience, so browser storage is the right home
@@ -2154,9 +2155,10 @@ function remember(id) {
   try { localStorage.setItem(REMEMBERED, id); } catch { /* not worth surfacing */ }
 }
 
-// A NIM model with no key saved would fail the moment you ran it, so picking
-// one sends you to Settings instead of pretending.
-const locked = (m) => m.vendor === 'nvidia' && !nvidia.configured;
+// A model with no key saved would fail the moment you ran it, so picking one
+// sends you to Settings instead of pretending. Claude needs one in an installed
+// copy; run from source it can use this PC's own login.
+const locked = (m) => (m.vendor === 'nvidia' && !nvidia.configured) || (m.vendor === 'claude' && !anthropic.ready);
 
 // The agent's own model when one is pinned in its panel — that is what runs,
 // so it is what the picker shows and edits. Pinning used to change nothing:
@@ -2251,6 +2253,15 @@ function buildMenu() {
       group = m.providerName;
       seenOlder = false;
       menuList.appendChild(label(group, m.vendor === 'nvidia' ? 'via-nim' : ''));
+
+      if (m.vendor === 'claude' && !anthropic.ready) {
+        const cta = document.createElement('button');
+        cta.type = 'button';
+        cta.className = 'menu-cta';
+        cta.textContent = 'Add your Anthropic API key to use these →';
+        cta.addEventListener('click', () => { closeMenu(); window.__openSettings && window.__openSettings('models'); });
+        menuList.appendChild(cta);
+      }
 
       // One line, once, explaining where this whole half of the list comes
       // from — and what to do about it if there is no key yet.
@@ -2348,6 +2359,7 @@ async function loadModels() {
   const res = await window.operator.listModels();
   models = res.models || [];
   nvidia = res.nvidia || { configured: false };
+  anthropic = res.anthropic || { ready: true };
   const saved = remembered();
   if (!chosenModel) chosenModel = models.some((m) => m.id === saved) ? saved : res.current;
   if (!menu.hidden) buildMenu();
@@ -3445,8 +3457,63 @@ document.addEventListener('keydown', (e) => {
     tabs.forEach((x) => x.classList.toggle('active', x === t));
     panels.forEach((p) => { p.hidden = p.dataset.panel !== t.dataset.tab; });
     if (t.dataset.tab === 'connectors') refreshConnectors();
-    if (t.dataset.tab === 'models') refreshNvidia();
+    if (t.dataset.tab === 'models') { refreshNvidia(); refreshAnthropic(); }
   }));
+
+  /* ── Claude: the customer's own Anthropic key ─────────────────── */
+
+  const anBox = document.getElementById('claudeProvider');
+  const anSub = document.getElementById('anSub');
+  const anKey = document.getElementById('anKey');
+  const anSave = document.getElementById('anSave');
+  const anStatus = document.getElementById('anStatus');
+  const anRemove = document.getElementById('anDisconnect');
+
+  const anSay = (text, kind) => {
+    anStatus.textContent = text || '';
+    anStatus.className = 'remote-status' + (kind ? ' ' + kind : '');
+  };
+
+  function applyAnthropic(s) {
+    const on = Boolean(s && s.configured);
+    anBox.classList.toggle('on', on || Boolean(s && s.devLogin));
+    anSub.textContent = on ? `Connected · key ${s.hint}`
+      : s && s.devLogin ? "Using this PC's Claude login (running from source)"
+      : 'Not connected — add a key to use Claude';
+    anRemove.hidden = !on || s.hint === 'from the environment';
+    anKey.value = '';
+    anKey.placeholder = on ? 'Saved — paste a new key to replace it' : 'sk-ant-…';
+  }
+
+  async function refreshAnthropic() {
+    try { applyAnthropic(await window.operator.anthropicStatus()); } catch (_) {}
+  }
+
+  anSave.addEventListener('click', async () => {
+    const key = anKey.value.trim();
+    if (!key) { anSay('Paste a key first.', 'bad'); return; }
+    anSave.disabled = true;
+    try {
+      const r = await window.operator.anthropicSetKey(key);
+      if (!r || !r.ok) { anSay((r && r.error) || 'That did not work.', 'bad'); return; }
+      applyAnthropic(r.status);
+      anSay('Saved — run a task to try it.', 'ok');
+      if (window.__reloadModels) window.__reloadModels();
+    } catch (err) {
+      anSay(err.message, 'bad');
+    } finally {
+      anSave.disabled = false;
+    }
+  });
+
+  anKey.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); anSave.click(); } });
+
+  anRemove.addEventListener('click', async () => {
+    const r = await window.operator.anthropicSetKey('');
+    applyAnthropic(r && r.status);
+    anSay('Key removed.');
+    if (window.__reloadModels) window.__reloadModels();
+  });
 
   /* ── NVIDIA NIM: the key, and what it unlocks ─────────────────── */
 

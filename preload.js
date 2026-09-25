@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('operator', {
   handoverShow: (id) => ipcRenderer.invoke('handover:show', id),
   setModelOptions: (mode, id, patch) => ipcRenderer.invoke('model-options:set', mode, id, patch),
 
+  // Claude, on the customer's own Anthropic key
+  anthropicStatus: () => ipcRenderer.invoke('anthropic:status'),
+  anthropicSetKey: (key) => ipcRenderer.invoke('anthropic:set', key),
   // NVIDIA NIM — one key, every vendor's models
   nvidiaStatus: () => ipcRenderer.invoke('nvidia:status'),
   nvidiaSetKey: (key) => ipcRenderer.invoke('nvidia:set', key),

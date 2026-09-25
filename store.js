@@ -287,6 +287,29 @@ function setNvidia(key) {
   return nvidiaStatus();
 }
 
+/* ── Anthropic API key ───────────────────────────────────────────────
+   What an installed copy runs Claude on. Anthropic does not let a product
+   built on the Agent SDK run on someone's Claude subscription login, so the
+   customer brings their own key and pays Anthropic for what they use. Same
+   rules as the NVIDIA key: it stays here, and the UI sees the last four. */
+
+function getAnthropic() {
+  return ((settings.anthropic || {}).key) || '';
+}
+
+function anthropicStatus() {
+  const key = getAnthropic();
+  return { configured: Boolean(key), hint: key ? `…${key.slice(-4)}` : '' };
+}
+
+function setAnthropic(key) {
+  const k = String(key || '').trim();
+  if (k) settings.anthropic = { key: k, at: Date.now() };
+  else delete settings.anthropic;
+  flushSettings();
+  return anthropicStatus();
+}
+
 // Chats written before bots existed become the first bot's chats, so nobody
 // loses a transcript to the upgrade.
 function adopt() {
@@ -793,5 +816,6 @@ module.exports = {
   getPrefs, setPrefs, getModelOptions, setModelOptions,
   listConnectors, getConnector, setConnector, markConnector, removeConnector, getGoogle, setGoogle,
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
+  getAnthropic, setAnthropic, anthropicStatus,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,
 };

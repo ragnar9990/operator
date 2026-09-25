@@ -59,7 +59,7 @@ const msg = document.getElementById('earlyMsg');
 
 document.getElementById('buyBtn').addEventListener('click', () => {
   msg.classList.remove('is-bad');
-  msg.textContent = 'Checkout opens at launch. Leave your email and you get the $79 price.';
+  msg.textContent = 'Checkout opens at launch. Leave your email and you get the $49 launch price.';
   email.focus({ preventScroll: true });
 });
 

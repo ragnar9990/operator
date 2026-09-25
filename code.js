@@ -12,8 +12,9 @@ const path = require('path');
 const nim = require('./nim');
 const modelOptions = require('./model-options');
 const { buildCodeTools } = require('./code-tools');
+const errors = require('./errors');
 
-const CODE_SYSTEM = `You are Operator's coding assistant. You work exactly like Claude Code: you have the user's real files, a shell, and search. Your working folder is where you start, not a fence — you can read, create and edit files anywhere the user points you. Be decisive and finish the task.
+const CODE_SYSTEM = `You are Operator's coding assistant. You have the user's real files, a shell, and search. Your working folder is where you start, not a fence — you can read, create and edit files anywhere the user points you. Be decisive and finish the task.
 
 THE USER NEVER HAS TO SET UP A FOLDER FOR YOU. Never ask them to create one, pick one or open one:
 - If they name a place ("on my desktop", "in C:\\dev", "in my Documents"), go there — create the folders yourself.
@@ -139,6 +140,7 @@ async function runCode(prompt, { cwd, onEvent, abortController, resume, model, b
 
   for await (const message of stream) {
     if (abortController?.signal.aborted) break;
+    if (errors.keyRefused(message)) throw new Error(errors.KEY_REFUSED);
 
     if (message.session_id) onEvent({ type: 'session', id: message.session_id });
 

@@ -630,14 +630,28 @@
             <div class="set-section">
               <div class="set-label">Which brains Operator can use</div>
 
-              <div class="connector on" id="claudeProvider">
+              <div class="connector" id="claudeProvider">
                 <div class="conn-head">
                   <span class="conn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 20 19H4l8-15.5Z"/></svg></span>
                   <span class="conn-text">
                     <span class="conn-name">Claude</span>
-                    <span class="conn-sub">On your Claude subscription — nothing to set up</span>
+                    <span class="conn-sub" id="anSub">Not connected</span>
                   </span>
-                  <span class="acct-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                  <button class="pill ghost" id="anDisconnect" type="button" hidden>Remove key</button>
+                </div>
+
+                <div class="conn-body">
+                  <p class="conn-lead">Anthropic's models — the ones Operator is built around, and the best at driving a computer. You pay Anthropic for what you use, straight from your own account.</p>
+
+                  <label class="field">
+                    <span>API key</span>
+                    <input id="anKey" type="password" spellcheck="false" autocomplete="off" placeholder="sk-ant-…" />
+                  </label>
+                  <div class="remote-actions">
+                    <button class="pill ghost" id="anSave" type="button">Save key</button>
+                    <span class="remote-status" id="anStatus"></span>
+                  </div>
+                  <p class="set-hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a> — sign in, open <b>API keys</b> and click <b>Create key</b>. Add a little credit under <b>Billing</b> first. It is stored only on this computer.</p>
                 </div>
               </div>
 

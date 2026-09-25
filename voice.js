@@ -20,6 +20,7 @@
 //   is blunt about length and the tools return short summaries, not dumps.
 
 const { z } = require('zod');
+const errors = require('./errors');
 
 // Haiku, and not as a compromise. This is routing and short decisions over a
 // list of names — the work a bigger model would do better is not the work being
@@ -250,6 +251,7 @@ ${said}` : said);
       const next = await it.next();
       if (next.done) { dead = true; break; }
       const m = next.value;
+      if (errors.keyRefused(m)) throw new Error(errors.KEY_REFUSED);
 
       if (m.type === 'stream_event') {
         const ev = m.event;

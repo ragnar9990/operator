@@ -22,6 +22,7 @@ const modelOptions = require('./model-options');
 const handover = require('./handover');
 const codes = require('./codes');
 const phone = require('./phone');
+const errors = require('./errors');
 
 // Driving a GUI is mostly perception plus a short decision, repeated — the kind
 // of loop where a faster model is worth more than a deeper one, because every
@@ -174,6 +175,7 @@ async function askBot({ bot, message, model }) {
     options: { model: isClaudeModel(model) ? model : DEFAULT_MODEL, systemPrompt: sys, tools: [], allowedTools: [], settingSources: [], maxTurns: 1 },
   });
   for await (const m of stream) {
+    if (errors.keyRefused(m)) throw new Error(errors.KEY_REFUSED);
     if (m.type === 'assistant') {
       for (const b of m.message.content) if (b.type === 'text') reply += b.text;
     } else if (m.type === 'result' && !reply && m.result) {
@@ -1138,6 +1140,7 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
             },
           });
           for await (const m of stream) {
+            if (errors.keyRefused(m)) throw new Error(errors.KEY_REFUSED);
             if (m.session_id) session = m.session_id;
             if (m.type === 'assistant') {
               for (const b of m.message.content) {
@@ -1240,7 +1243,7 @@ ${roster.map((t) => `- ${t.name}${t.title ? ' — ' + t.title : ''}`).join('\n')
   if (hasCodeChats) {
     systemPrompt += `
 
-THE CODE SIDE — this app also has a coding half (a Claude Code style assistant working in real project folders), and you can reach it:
+THE CODE SIDE — this app also has a coding half (a coding assistant working in real project folders), and you can reach it:
 - list_code_chats to see the coding conversations, read_code_chat to catch up on what one of them built or discussed before you answer about it.
 - message_code_chat to hand it actual coding work: it does the job in that project's folder and its reply comes back to you. Use it rather than trying to write code through the screen.`;
   }
@@ -1445,6 +1448,7 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
       const message = next.value;
 
       if (abortController?.signal.aborted) break;
+      if (errors.keyRefused(message)) throw new Error(errors.KEY_REFUSED);
       if (process.env.OPERATOR_TRACE) {
         const ev = message.type === 'stream_event'
           ? '/' + message.event?.type + (message.event?.content_block ? ':' + message.event.content_block.type : '')
