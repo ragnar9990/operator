@@ -30,6 +30,11 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg>
           Code
         </button>
+        <button class="mode" data-mode="employees" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+          Employees
+          <span class="mode-badge" id="staffBadge" hidden></span>
+        </button>
       </div>
 
       <!-- Our own window buttons. The native ones painted over the lit edge. -->
@@ -367,6 +372,164 @@
       <!-- the editor: its own file tree, tabs and code view (editor.js) -->
       <div class="ed-resize" id="edResize" hidden title="Drag to resize"></div>
       <aside class="ed" id="editor" hidden aria-label="Editor"></aside>
+    </div>
+
+    <!-- EMPLOYEES mode: agents that work on a loop and message you first (employees.js, ui/employees.js) -->
+    <div class="staffview" id="staffView" hidden>
+      <!-- the Agent Verse: the same employees as a 3D office floating in space.
+           Clicking a computer opens that employee's desk below as its screen (agentverse.js) -->
+      <div class="verse" id="verse">
+        <canvas class="verse-canvas" id="verseCanvas"></canvas>
+        <div class="verse-tags" id="verseTags"></div>
+        <header class="verse-hud">
+          <div class="verse-title">
+            <b>Agent Verse</b>
+            <small id="verseStats"></small>
+            <div class="verse-roster" id="verseRoster" hidden></div>
+          </div>
+          <div class="verse-actions">
+            <button class="pill" id="verseMe" type="button">My look</button>
+            <button class="pill" id="verseSections" type="button">Sections</button>
+            <button class="pill" id="verseList" type="button">List view</button>
+            <button class="pill solid" id="verseHire" type="button">Hire</button>
+          </div>
+        </header>
+        <form class="verse-pop" id="versePop" hidden>
+          <div class="verse-pop-head">Sections</div>
+          <div class="verse-pop-list" id="versePopList"></div>
+          <div class="verse-pop-add">
+            <input id="versePopInput" type="text" maxlength="40" placeholder="New section, e.g. Marketing" />
+            <button class="pill solid" type="submit">Add</button>
+          </div>
+        </form>
+        <div class="verse-hint" id="verseHint" hidden></div>
+        <div class="verse-tip" id="verseTip" hidden></div>
+        <div class="verse-prompt" id="versePrompt" hidden></div>
+        <div class="verse-help">WASD to walk · Shift to run · Space to hop · E to use · drag to look around · scroll to zoom · F to see everything</div>
+      </div>
+
+      <aside class="staff-side">
+        <button class="code-new" id="staffHire" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>
+          Hire an employee
+        </button>
+        <button class="code-new staff-verse" id="staffVerse" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="9.5" ry="4" transform="rotate(-20 12 12)"/></svg>
+          Agent Verse
+        </button>
+        <div class="staff-list" id="staffList"></div>
+      </aside>
+
+      <main class="staff-main">
+        <div class="staff-empty" id="staffEmpty">
+          <div class="staff-empty-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></div>
+          <h2>Employees work while you don't</h2>
+          <p>An employee is an agent with a job. While it is on shift it checks in by itself every so often, does the next piece of work, keeps a to-do list — and messages you when something is done or it needs you. You can message it any time.</p>
+          <button class="pill solid" id="staffHireBig" type="button">Hire your first employee</button>
+        </div>
+
+        <section class="staff-desk" id="staffDesk" hidden>
+          <header class="staff-head">
+            <span class="staff-face" id="sdFace"></span>
+            <div class="staff-who"><b id="sdName"></b><small id="sdRole"></small></div>
+            <span class="staff-state" id="sdState"></span>
+            <div class="staff-actions">
+              <button class="pill" id="sdShift" type="button">Start shift</button>
+              <button class="pill" id="sdCheck" type="button">Check in now</button>
+              <button class="pill" id="sdEdit" type="button">Job</button>
+              <button class="pill sd-close" id="sdClose" type="button">Back to the Verse</button>
+            </div>
+          </header>
+
+          <div class="staff-body">
+            <div class="staff-convo">
+              <div class="staff-thread" id="sdThread"></div>
+              <form class="staff-compose" id="sdCompose">
+                <textarea id="sdInput" rows="1" placeholder="Message"></textarea>
+                <button class="pill solid" id="sdSend" type="submit">Send</button>
+              </form>
+            </div>
+
+            <aside class="staff-panel">
+              <div class="sp-block">
+                <div class="sp-head">To-do</div>
+                <ul class="sp-tasks" id="sdTasks"></ul>
+                <form class="sp-add" id="sdTaskForm"><input id="sdTaskInput" type="text" maxlength="400" placeholder="Add a task…" /></form>
+              </div>
+              <div class="sp-block">
+                <div class="sp-head">Shift</div>
+                <div class="sp-info" id="sdShiftInfo"></div>
+              </div>
+              <div class="sp-block">
+                <div class="sp-head">Work log</div>
+                <ul class="sp-log" id="sdLog"></ul>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- hiring, and editing an employee's job -->
+    <div class="sheet" id="staffSheet" hidden>
+      <div class="sheet-scrim" id="ssScrim"></div>
+      <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="ssTitle">
+        <header class="sheet-top">
+          <h2 id="ssTitle">Hire an employee</h2>
+          <button class="rail-btn" id="ssClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <form class="sheet-body" id="ssForm">
+          <div class="ss-presets" id="ssPresets"></div>
+          <div class="ss-row">
+            <label class="field"><span>Name</span><input id="ssName" type="text" maxlength="40" placeholder="Sam" /></label>
+            <label class="field"><span>Role</span><input id="ssRole" type="text" maxlength="60" placeholder="Research assistant" /></label>
+          </div>
+          <div class="ss-row">
+            <label class="field"><span>Section — where their desk is in the Agent Verse</span><input id="ssSection" type="text" maxlength="40" list="ssSections" placeholder="General" /></label>
+            <datalist id="ssSections"></datalist>
+          </div>
+          <div class="field"><span>Look</span><div class="ss-looks" id="ssLooks"></div></div>
+          <label class="field">
+            <span>Their job — what they work on, and what good looks like</span>
+            <textarea id="ssJob" rows="6" placeholder="Every day, find three new companies in Brisbane that might want a website, and put their name, site and contact on my to-do list for me to check."></textarea>
+          </label>
+          <div class="ss-row">
+            <label class="field"><span>Check in every</span>
+              <select id="ssEvery">
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="60" selected>hour</option>
+                <option value="120">2 hours</option>
+                <option value="240">4 hours</option>
+              </select>
+            </label>
+            <label class="field"><span>Check-ins a day, at most</span><input id="ssCap" type="number" min="1" max="96" value="12" /></label>
+          </div>
+          <div class="ss-row">
+            <label class="field"><span>Working hours</span>
+              <select id="ssHours">
+                <option value="any">Any time</option>
+                <option value="set">Set hours</option>
+              </select>
+            </label>
+            <label class="field ss-when"><span>From</span><input id="ssFrom" type="time" value="09:00" /></label>
+            <label class="field ss-when"><span>To</span><input id="ssTo" type="time" value="17:00" /></label>
+            <label class="field ss-when"><span>Days</span>
+              <select id="ssDays"><option value="every">Every day</option><option value="weekdays">Weekdays</option></select>
+            </label>
+          </div>
+          <label class="ss-check" id="ssStartRow"><input id="ssStart" type="checkbox" checked /> Start their shift now</label>
+          <p class="set-hint">Each check-in is a model run, which is why there is a daily limit. An employee asks you before it spends money, posts anything, messages anyone else or deletes something. It never uses your screen or your browser: it searches the web and reads pages directly. It works while Operator is open, and always steps aside for a task you start yourself.</p>
+          <p class="ss-error" id="ssError" role="alert"></p>
+          <div class="ss-foot">
+            <button class="pill ss-fire" id="ssFire" type="button" hidden>Fire</button>
+            <span class="ss-spacer"></span>
+            <button class="pill solid" id="ssDone" type="submit">Hire</button>
+          </div>
+        </form>
+      </section>
     </div>
 
     <!-- the start screen: what you see when the app opens. Make an agent, or
@@ -980,5 +1143,7 @@
     <script src="markdown.js"></script>
     <script src="mic.js"></script>
     <script src="renderer.js"></script>
+    <script src="employees.js"></script>
+    <script type="module" src="agentverse.js"></script>
   </body>
 </html>

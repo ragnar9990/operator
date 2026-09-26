@@ -36,6 +36,20 @@ contextBridge.exposeInMainWorld('operator', {
   windowMaximize: () => ipcRenderer.invoke('window:maximize'),
   windowClose: () => ipcRenderer.invoke('window:close'),
   onBotsChanged: (cb) => ipcRenderer.on('bots-changed', (_e, payload) => cb(payload)),
+  // Employees — agents that work on a loop and message you first (employees.js)
+  employees: () => ipcRenderer.invoke('employees:list'),
+  employee: (id) => ipcRenderer.invoke('employees:get', id),
+  hireEmployee: (spec) => ipcRenderer.invoke('employees:hire', spec),
+  updateEmployee: (id, patch) => ipcRenderer.invoke('employees:update', id, patch),
+  sayToEmployee: (id, text) => ipcRenderer.invoke('employees:say', id, text),
+  employeeCheckIn: (id) => ipcRenderer.invoke('employees:checkin', id),
+  employeeRead: (id) => ipcRenderer.invoke('employees:read', id),
+  employeeTaskAdd: (id, text) => ipcRenderer.invoke('employees:task-add', id, text),
+  employeeTaskUpdate: (id, taskId, patch) => ipcRenderer.invoke('employees:task-update', id, taskId, patch),
+  employeeTaskRemove: (id, taskId) => ipcRenderer.invoke('employees:task-remove', id, taskId),
+  fireEmployee: (id) => ipcRenderer.invoke('employees:fire', id),
+  onEmployeeEvent: (cb) => ipcRenderer.on('employee-event', (_e, payload) => cb(payload)),
+  onEmployeeOpen: (cb) => ipcRenderer.on('employee-open', (_e, payload) => cb(payload)),
 
   // bots
   listBots: () => ipcRenderer.invoke('bots:list'),

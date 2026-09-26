@@ -31,6 +31,7 @@ const audit = require('./audit');
 const verify = require('./verify');
 const modelOptions = require('./model-options');
 const handover = require('./handover');
+const employees = require('./employees');
 const errors = require('./errors');
 const phone = require('./phone');
 const email = require('./email');
@@ -97,8 +98,8 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
 
   // Live view: whichever surface the agent last looked at, browser or desktop.
-  browser.setFrameListener((b64, url) => send('agent-event', { type: 'screenshot', b64, label: url, mime: 'image/png' }));
-  desktop.setFrameListener((b64, label, mime) => send('agent-event', { type: 'screenshot', b64, label, mime }));
+  browser.setFrameListener((b64, url) => send('agent-event', { type: 'screenshot', b64, label: url, mime: 'image/png', employee: Boolean(running && running.employee) }));
+  desktop.setFrameListener((b64, label, mime) => send('agent-event', { type: 'screenshot', b64, label, mime, employee: Boolean(running && running.employee) }));
 
   // Operator's own purple cursor, so its movements are never mistaken for yours.
   // Pointless when it is driving another machine — the pointer is over there.
@@ -353,7 +354,10 @@ ipcMain.handle('nvidia:sweep', async () => {
   }
 });
 
-async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) {
+// `employee`: an employee's run (employees.js) — its hands for message_boss and
+// its to-do list. `noCheck`: skip the check at the end (a check-in has no goal
+// it could judge).
+async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, employee, noCheck }) {
   if (running) return { ok: false, error: 'A task is already running.' };
 
   const bot = botId ? store.getBot(botId) : null;
@@ -385,8 +389,8 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
   const token = {};
   // Ties every audited step back to the one task that produced it.
   const taskId = crypto.randomUUID();
-  running = { abortController, botId, chatId, token };
-  send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent), dryRun: Boolean(dryRun) });
+  running = { abortController, botId, chatId, token, employee: Boolean(employee) };
+  send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent), dryRun: Boolean(dryRun), employee: Boolean(employee) });
 
   // Whether the agent got far enough to touch anything. If it did not, a retry
   // is free; if it did, a retry would do the same work to the machine twice.
@@ -601,6 +605,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
       codeChats,
       email: emailApi,
       schedule: botId ? scheduleFor(botId) : null,
+      employee: employee || null,
       alwaysSkills,
       activeSkill: again ? null : activeSkill,
       skillIndex,
@@ -618,6 +623,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
 
   // Returns the last verdict, or null when nothing was checked.
   async function checkTheWork() {
+    if (noCheck) return null;
     // A run that did nothing has nothing to check — which is also how ordinary
     // conversation avoids paying for this at all.
     if (store.getPrefs().verify === false) return null;
@@ -740,14 +746,28 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun }) 
     // it alone. Saying "idle" over the top of a live run would blank the UI.
     if (running && running.token === token) {
       running = null;
-      send('agent-event', { type: 'status', text: 'idle', botId, chatId });
+      send('agent-event', { type: 'status', text: 'idle', botId, chatId, employee: Boolean(employee) });
     }
   }
   return { ok: true };
 }
 
-ipcMain.handle('run-task', async (_e, prompt, model, botId, chatId, dryRun) =>
-  runOne({ prompt, model, botId, chatId, dryRun }));
+// Your own work comes first: an employee's check-in or reply stops for it and
+// is picked up again later (employees.js).
+function yieldEmployee() {
+  if (!running || !running.employee) return;
+  const { abortController, botId, chatId } = running;
+  employees.markCutShort(botId);
+  running = null;
+  abortController.abort();
+  overlay.hide();
+  send('agent-event', { type: 'status', text: 'idle', botId, chatId, employee: true });
+}
+
+ipcMain.handle('run-task', async (_e, prompt, model, botId, chatId, dryRun) => {
+  yieldEmployee();
+  return runOne({ prompt, model, botId, chatId, dryRun });
+});
 
 /* ── which computer Operator is driving ──────────────────────────── */
 
@@ -1404,6 +1424,64 @@ ipcMain.handle('routines:run', async (_e, botId, routineId) => {
 
 setInterval(() => { tick().catch(() => {}); }, 30000);
 
+/* ── employees: agents that work on a loop (employees.js) ────────── */
+
+// Said where they will see it: a Windows notification that opens the
+// Employees tab on that employee, and a flashing taskbar button.
+function notifyFromEmployee(name, text, botId) {
+  if (process.env.OPERATOR_NO_NOTIFY === '1') return;   // automated tests
+  try { if (win && !win.isDestroyed() && !win.isFocused()) win.flashFrame(true); } catch (_) {}
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: name, body: String(text).slice(0, 200) });
+    n.on('click', () => {
+      if (!win || win.isDestroyed()) return;
+      win.show(); win.focus();
+      send('employee-open', { botId });
+    });
+    n.show();
+  } catch (_) { /* a missing notification is not worth failing the loop over */ }
+}
+
+employees.init({ runOne, isBusy: () => Boolean(running), send, notify: notifyFromEmployee });
+setInterval(() => { employees.tick().catch(() => {}); }, 15000);
+
+const employeeView = (botId) => {
+  const e = store.getEmployee(botId);
+  if (!e) return null;
+  const chat = e.threads[0] && store.getChat(botId, e.threads[0].id);
+  return { ...e, working: employees.isWorking(botId), turns: ((chat && chat.turns) || []).slice(-200) };
+};
+
+ipcMain.handle('employees:list', async () => store.listEmployees().map((e) => ({ ...e, working: employees.isWorking(e.id) })));
+ipcMain.handle('employees:get', async (_e, botId) => employeeView(botId));
+ipcMain.handle('employees:hire', async (_e, spec) => {
+  const e = store.hireEmployee(spec || {});
+  if (e) setTimeout(() => employees.tick().catch(() => {}), 500);
+  return e;
+});
+ipcMain.handle('employees:update', async (_e, botId, patch) => {
+  const e = store.updateEmployee(botId, patch || {});
+  if (e && 'onShift' in (patch || {})) setTimeout(() => employees.tick().catch(() => {}), 500);
+  return e;
+});
+ipcMain.handle('employees:say', async (_e, botId, text) => ({ ok: employees.say(botId, text) }));
+ipcMain.handle('employees:checkin', async (_e, botId) => employees.checkInNow(botId));
+ipcMain.handle('employees:read', async (_e, botId) => store.updateEmployee(botId, { unread: 0 }));
+ipcMain.handle('employees:task-add', async (_e, botId, text) => store.addEmployeeTask(botId, text, 'you'));
+ipcMain.handle('employees:task-update', async (_e, botId, taskId, patch) => store.updateEmployeeTask(botId, taskId, patch || {}));
+ipcMain.handle('employees:task-remove', async (_e, botId, taskId) => { store.removeEmployeeTask(botId, taskId); return { ok: true }; });
+ipcMain.handle('employees:fire', async (_e, botId) => {
+  if (running && running.botId === botId) {
+    const { abortController } = running;
+    running = null;
+    abortController.abort();
+    send('agent-event', { type: 'status', text: 'idle', botId, employee: true });
+  }
+  store.deleteBot(botId);
+  return { ok: true };
+});
+
 // Sign in to a site once by hand and the agent's browser keeps it. This is the
 // cheapest fix for every "it could not log in" failure.
 ipcMain.handle('browser:open', async (_e, url) => {
@@ -1708,6 +1786,7 @@ ${held}`;
     const thread = store.threadOf(b.id);
     send('voice-open', { botId: b.id });
 
+    yieldEmployee();
     runOne({
       prompt,
       botId: b.id,

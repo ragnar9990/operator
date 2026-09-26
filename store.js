@@ -471,6 +471,8 @@ const card = (b) => ({
   pinned: Boolean(b.pinned),
   role: b.role || null,
   workspaceId: b.workspaceId || null,
+  // Employees live in their own tab; the rail and the start screen skip them.
+  employee: Boolean(b.employee),
   // An agent is one thread, so this is normally a list of one — enough for the
   // rail to open it without a second round trip, and null until it has been
   // spoken to (threadOf makes it on demand). It can still run to more than one:
@@ -779,6 +781,151 @@ function removeChat(botId, chatId) {
   flush();
 }
 
+/* ── employees ───────────────────────────────────────────────────────
+ * An agent with a job, a shift and a to-do list, that works on a loop and
+ * messages the user first (employees.js runs the loop). It is an ordinary bot
+ * underneath — persona, memory, routines and one conversation — with its
+ * working state kept on `employee`. The conversation is chats[0]: your
+ * messages, its messages to you, and a compact entry for each check-in.
+ */
+
+const EVERY_MIN = [15, 30, 60, 120, 240];
+const clampEvery = (n) => (EVERY_MIN.includes(Number(n)) ? Number(n) : 60);
+const cleanHours = (h) => (h && /^\d{2}:\d{2}$/.test(h.from || '') && /^\d{2}:\d{2}$/.test(h.to || '')
+  ? { from: h.from, to: h.to, days: h.days === 'weekdays' ? 'weekdays' : 'every' } : null);
+// Where it sits in the Agent Verse (ui/agentverse.js), and the face picked for it at hiring.
+const cleanSection = (s) => String(s || '').trim().slice(0, 40);
+const cleanFace = (f) => (f && SHAPES.includes(f.shape) && ACCESSORIES.includes(f.accessory) && Number.isFinite(Number(f.hue))
+  ? { hue: Math.round(Number(f.hue)) % 360, shape: f.shape, accessory: f.accessory } : null);
+
+function employeeCard(b) {
+  const e = b.employee;
+  return {
+    ...card(b),
+    role: b.title,
+    job: e.job,
+    section: e.section || '',
+    every: e.every,
+    hours: e.hours,
+    cap: e.cap,
+    onShift: e.onShift,
+    nextAt: e.nextAt,
+    lastAt: e.lastAt,
+    today: e.today,
+    tasks: e.tasks,
+    unread: e.unread,
+    waiting: e.waiting,
+    pending: e.pending,
+    log: e.log.slice(-30),
+  };
+}
+
+function hireEmployee({ name, role, job, every, hours, cap, onShift, section, face } = {}) {
+  if (bots.length >= MAX_BOTS || !String(job || '').trim()) return null;
+  const b = blank(String(name || 'New employee').trim().slice(0, 40), String(role || '').trim().slice(0, 60));
+  if (cleanFace(face)) b.face = cleanFace(face);
+  b.employee = {
+    job: String(job).trim().slice(0, 4000),
+    section: cleanSection(section),
+    every: clampEvery(every),
+    hours: cleanHours(hours),
+    cap: Math.max(1, Math.min(96, Number(cap) || 12)),
+    onShift: Boolean(onShift),
+    // The first check-in comes a minute after the hire, not a whole interval.
+    nextAt: onShift ? Date.now() + 60 * 1000 : null,
+    lastAt: null,
+    today: { day: '', count: 0 },
+    tasks: [],
+    unread: 0,
+    waiting: false,   // it asked you something and wants an answer
+    pending: false,   // you said something it has not answered yet
+    log: [],
+  };
+  b.chats = [{ id: id('c'), title: b.name, sessionId: null, turns: [], updatedAt: Date.now() }];
+  bots.unshift(b);
+  flush();
+  return employeeCard(b);
+}
+
+function listEmployees() { return bots.filter((b) => b.employee).map(employeeCard); }
+
+function getEmployee(botId) {
+  const b = find(botId);
+  return b && b.employee ? employeeCard(b) : null;
+}
+
+// What the job panel, the shift buttons and the loop itself change.
+function updateEmployee(botId, patch = {}) {
+  const b = find(botId);
+  if (!b || !b.employee) return null;
+  const e = b.employee;
+  if (typeof patch.name === 'string' && patch.name.trim()) b.name = patch.name.trim().slice(0, 40);
+  if (typeof patch.role === 'string') b.title = patch.role.trim().slice(0, 60);
+  if (typeof patch.job === 'string' && patch.job.trim()) e.job = patch.job.trim().slice(0, 4000);
+  if ('section' in patch) e.section = cleanSection(patch.section);
+  if (cleanFace(patch.face)) b.face = cleanFace(patch.face);
+  if ('every' in patch) e.every = clampEvery(patch.every);
+  if ('hours' in patch) e.hours = cleanHours(patch.hours);
+  if ('cap' in patch) e.cap = Math.max(1, Math.min(96, Number(patch.cap) || 12));
+  if ('onShift' in patch) {
+    e.onShift = Boolean(patch.onShift);
+    e.nextAt = e.onShift ? Date.now() + 60 * 1000 : null;
+  }
+  for (const k of ['nextAt', 'lastAt', 'today', 'unread', 'waiting', 'pending']) if (k in patch) e[k] = patch[k];
+  b.updatedAt = Date.now();
+  flush();
+  return employeeCard(b);
+}
+
+function addEmployeeTask(botId, text, by) {
+  const b = find(botId);
+  if (!b || !b.employee || !String(text || '').trim()) return null;
+  const t = { id: id('t'), text: String(text).trim().slice(0, 400), by: by === 'them' ? 'them' : 'you', done: false, at: Date.now(), doneAt: null, note: '' };
+  b.employee.tasks.push(t);
+  if (b.employee.tasks.length > 200) b.employee.tasks = b.employee.tasks.filter((x) => !x.done).slice(-200);
+  flush();
+  return t;
+}
+
+function updateEmployeeTask(botId, taskId, patch = {}) {
+  const b = find(botId);
+  const t = b && b.employee && b.employee.tasks.find((x) => x.id === taskId);
+  if (!t) return null;
+  if ('done' in patch) { t.done = Boolean(patch.done); t.doneAt = t.done ? Date.now() : null; }
+  if (typeof patch.note === 'string') t.note = patch.note.slice(0, 400);
+  if (typeof patch.text === 'string' && patch.text.trim()) t.text = patch.text.trim().slice(0, 400);
+  flush();
+  return t;
+}
+
+function removeEmployeeTask(botId, taskId) {
+  const b = find(botId);
+  if (!b || !b.employee) return;
+  b.employee.tasks = b.employee.tasks.filter((x) => x.id !== taskId);
+  flush();
+}
+
+// One line per check-in or reply, for the work log.
+function logEmployee(botId, entry) {
+  const b = find(botId);
+  if (!b || !b.employee) return;
+  b.employee.log.push({ at: Date.now(), ...entry });
+  if (b.employee.log.length > 100) b.employee.log = b.employee.log.slice(-100);
+  flush();
+}
+
+// Add to the conversation without the caller holding the whole transcript.
+function addTurn(botId, turn) {
+  const b = find(botId);
+  const chat = b && b.chats[0];
+  if (!chat) return;
+  chat.turns.push({ at: Date.now(), ...turn });
+  if (chat.turns.length > 600) chat.turns = chat.turns.slice(-600);
+  chat.updatedAt = Date.now();
+  b.updatedAt = Date.now();
+  flush();
+}
+
 /* ── the SDK session behind a chat ───────────────────────────────── */
 
 function sessionOf(botId, chatId) {
@@ -817,5 +964,7 @@ module.exports = {
   listConnectors, getConnector, setConnector, markConnector, removeConnector, getGoogle, setGoogle,
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   getAnthropic, setAnthropic, anthropicStatus,
+  hireEmployee, listEmployees, getEmployee, updateEmployee,
+  addEmployeeTask, updateEmployeeTask, removeEmployeeTask, logEmployee, addTurn,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,
 };

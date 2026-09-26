@@ -25,6 +25,23 @@
     return { id, name, title: title || '', face: faceFor(id + name), persona: '', model: null, memory: [], skills: [], routines: [], chats: [], updatedAt: Date.now() };
   }
 
+  const STAFF_LISTENERS = [];
+  const staffChanged = () => STAFF_LISTENERS.forEach((cb) => cb({}));
+  const hire = (id, name, role, section, face, extra) => ({
+    id, name, role, section, face, job: 'Demo job.', every: 60, cap: 12, hours: null, onShift: true,
+    nextAt: Date.now() + 5 * 60000, today: { day: '', count: 2 }, unread: 0, waiting: false, pending: false, working: false,
+    tasks: [{ id: id + 't1', text: 'Check the inbox', by: 'you', done: false }], log: [],
+    turns: [{ k: 'says', text: 'Morning! Three new leads on the list.', at: Date.now() - 3600000, proactive: true }],
+    ...extra,
+  });
+  const STAFF = [
+    hire('e1', 'Ivy', 'Inbox helper', 'Inbox', { hue: 199, shape: 'squircle', accessory: 'antenna' }, { working: true }),
+    hire('e2', 'Leo', 'Lead finder', 'Sales', { hue: 24, shape: 'round', accessory: 'halo' }, { unread: 2 }),
+    hire('e3', 'Penny', 'Price watcher', 'Sales', { hue: 341, shape: 'dome', accessory: 'bolt' }, { waiting: true }),
+    hire('e4', 'Nova', 'News scout', 'Research', { hue: 262, shape: 'shield', accessory: 'sprout' }, { onShift: false }),
+    hire('e5', 'Max', 'Coder', 'Research', { hue: 152, shape: 'squircle', accessory: 'ears' }, {}),
+  ];
+
   function load() {
     try {
       const v = JSON.parse(sessionStorage.getItem(KEY));
@@ -401,6 +418,26 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     onFsChanged: (cb) => FS_LISTENERS.push(cb),
     pathForFile: (f) => 'C:/demo/dropped/' + f.name,
 
+    // A few employees, so the Employees tab and the Agent Verse have someone in them.
+    employees: async () => STAFF.map((e) => ({ ...e })),
+    employee: async (id) => { const e = STAFF.find((x) => x.id === id); return e ? { ...e } : null; },
+    hireEmployee: async (spec) => {
+      const b = blank(spec.name || 'New employee', spec.role);
+      const e = { id: b.id, name: b.name, role: spec.role || '', face: spec.face || b.face, section: spec.section || '', job: spec.job, every: spec.every || 60, cap: spec.cap || 12, hours: spec.hours || null, onShift: Boolean(spec.onShift), nextAt: Date.now() + 60000, today: { day: '', count: 0 }, tasks: [], unread: 0, waiting: false, pending: false, log: [], turns: [] };
+      STAFF.push(e);
+      setTimeout(staffChanged, 10);
+      return { ...e };
+    },
+    updateEmployee: async (id, patch) => { const e = STAFF.find((x) => x.id === id); if (e) Object.assign(e, patch); setTimeout(staffChanged, 10); return e ? { ...e } : null; },
+    sayToEmployee: async (id, text) => { const e = STAFF.find((x) => x.id === id); if (e) { e.turns.push({ k: 'you', text, at: Date.now() }); e.working = true; setTimeout(() => { e.working = false; e.turns.push({ k: 'says', text: 'On it — done.', at: Date.now() }); staffChanged(); }, 6000); } return { ok: true }; },
+    employeeCheckIn: async () => ({ ok: true }),
+    employeeRead: async (id) => { const e = STAFF.find((x) => x.id === id); if (e) e.unread = 0; return e; },
+    employeeTaskAdd: async (id, text) => { const e = STAFF.find((x) => x.id === id); if (e) e.tasks.push({ id: uid('t'), text, by: 'you', done: false }); return null; },
+    employeeTaskUpdate: async (id, taskId, patch) => { const e = STAFF.find((x) => x.id === id); const t = e && e.tasks.find((x) => x.id === taskId); if (t) Object.assign(t, patch); return t; },
+    employeeTaskRemove: async (id, taskId) => { const e = STAFF.find((x) => x.id === id); if (e) e.tasks = e.tasks.filter((x) => x.id !== taskId); return { ok: true }; },
+    fireEmployee: async (id) => { const i = STAFF.findIndex((x) => x.id === id); if (i >= 0) STAFF.splice(i, 1); setTimeout(staffChanged, 10); return { ok: true }; },
+    onEmployeeEvent: (cb) => STAFF_LISTENERS.push(cb),
+    onEmployeeOpen: () => {},
     anthropicStatus: async () => ({ configured: true, hint: '…demo', devLogin: false, ready: true }),
     anthropicSetKey: async (key) => ({ ok: true, status: { configured: Boolean(key), hint: key ? '…' + String(key).slice(-4) : '', devLogin: false, ready: Boolean(key) } }),
     nvidiaStatus: async () => NVIDIA,

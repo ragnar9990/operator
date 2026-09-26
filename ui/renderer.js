@@ -473,7 +473,8 @@ async function startFresh(botId) {
 /* the roster */
 
 async function loadBots(select) {
-  bots = await window.operator.listBots();
+  // Employees have a tab of their own (ui/employees.js), not a place in the rail.
+  bots = (await window.operator.listBots()).filter((b) => !b.employee);
   if (!bots.length) return;
 
   const wanted = select || (bot && bot.id) || recall(LAST_BOT);
@@ -1730,6 +1731,11 @@ function onHelperEvent(evt) {
 let live = null;
 
 window.operator.onEvent((evt) => {
+  // An employee's run belongs to the Employees tab (employees.js), and a task
+  // started here stops it — so it must not turn this view busy or take over
+  // its live screen.
+  if (evt.employee) return;
+
   // The machine runs one task at a time, but it may not be the one you are
   // reading. Status and the live screen are about the computer, so they always
   // apply; everything else belongs to a particular chat.
@@ -3969,11 +3975,15 @@ document.addEventListener('keydown', (e) => {
   const codeView = document.getElementById('codeView');
   if (!codeView) return;
 
+  const staffView = document.getElementById('staffView');
   modes.forEach((m) => m.addEventListener('click', () => {
     modes.forEach((x) => x.classList.toggle('active', x === m));
     const isCode = m.dataset.mode === 'code';
-    shell.hidden = isCode;
+    const isStaff = m.dataset.mode === 'employees';
+    shell.hidden = isCode || isStaff;
     codeView.hidden = !isCode;
+    if (staffView) staffView.hidden = !isStaff;
+    if (isStaff && window.__employees) window.__employees.show();
     // Ask what is still running before painting the list, so a chat that has
     // been building away while you were on the Agents side shows it.
     if (isCode) { syncRunning().then(loadHistory); loadModels(); loadBotChoices().then(paintBot); }

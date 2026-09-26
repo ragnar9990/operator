@@ -23,6 +23,7 @@ const handover = require('./handover');
 const codes = require('./codes');
 const phone = require('./phone');
 const errors = require('./errors');
+const web = require('./web');
 
 // Driving a GUI is mostly perception plus a short decision, repeated — the kind
 // of loop where a faster model is worth more than a deeper one, because every
@@ -247,6 +248,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
     'browser_click_xy', 'browser_press_key', 'browser_scroll',
     'email_send', 'remember', 'message_bot', 'screen_click_text',
     'schedule', 'cancel_schedule',
+    'message_boss', 'add_task', 'complete_task',
     // A rehearsal describes a hand-over instead of stopping to wait for one.
     'wait_for_user',
     // Stepping onto the user's screen moves their real mouse, so a rehearsal
@@ -302,6 +304,10 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       case 'remember': return `remember "${String(a.note || '').slice(0, 60)}"`;
       case 'schedule': return `${a.kind === 'remind' ? 'remind you' : 'run'} "${String(a.text || '').slice(0, 60)}" ${a.every === 'once' ? 'once' : a.every}${a.at ? ' at ' + a.at : ''}`;
       case 'cancel_schedule': return `cancel ${a.id}`;
+      case 'message_boss': return `message you${a.needs_reply ? ' and ask' : ''}: "${String(a.text || '').slice(0, 70)}"`;
+      case 'add_task': return `add to its list: "${String(a.text || '').slice(0, 60)}"`;
+      case 'complete_task': return `tick off ${a.id}${a.note ? `: ${String(a.note).slice(0, 60)}` : ''}`;
+      case 'list_tasks': return 'look at its to-do list';
       case 'message_bot': return `ask ${a.bot}: "${String(a.message || '').slice(0, 60)}"`;
       case 'run_helpers': return `hand ${(a.tasks || []).length} jobs to helpers at once: ${(a.tasks || []).map((x) => x.name).join(', ')}`;
       default: return name;
@@ -764,6 +770,13 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         minutes: z.number().int().min(1).max(30).optional().describe('how long to wait; 10 by default'),
       },
       async ({ what, until_gone, minutes }) => {
+        // An employee works out of sight of this tab (its conversation is in
+        // the Employees tab), so waiting here would hold the whole computer for
+        // nothing: ask by message and move on.
+        if (ctx.employee) {
+          ctx.employee.message(`I need you to: ${what}`, true);
+          return { content: [{ type: 'text', text: 'You are on a check-in, so nobody is watching this tab. Your boss has been sent a message saying what they need to do. Carry on with something else, and pick this up at a later check-in once they have answered.' }] };
+        }
         const first = await web.page();
         const h = handover.open(first);
         web.say({ type: 'handover', id: h.id, what, url: first.url() });
@@ -905,6 +918,76 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
       }),
     tool('cancel_schedule', 'Stop a reminder or repeating job, by the id list_schedule gives.', { id: z.string() },
       async ({ id }) => say(ctx.schedule && ctx.schedule.remove(id) ? `Cancelled ${id}.` : `There is nothing scheduled with the id ${id}.`)),
+  ] : [];
+
+  /* ── an employee's own tools ─────────────────────────────────── */
+
+  // Only on an employee (store.js): how it reaches its boss unasked, and the
+  // to-do list the two of them share. ctx.employee is handed in per run by
+  // employees.js — what kind of run this is, and its hands into the store.
+  const taskLine = (t) => `${t.id}: ${t.done ? '[done] ' : ''}${t.text}${t.by === 'you' ? ' (from your boss)' : ''}${t.note ? ` — ${t.note}` : ''}`;
+  const employeeTools = bot && bot.employee ? [
+    tool('message_boss',
+      'Send your boss (the user) a chat message now, without waiting to be asked. They get a notification. Use it when you finish something, find something they should know, or need a decision or an answer. Short and specific — never just to say you checked in, and never twice about the same thing.',
+      {
+        text: z.string().describe('the message, written to them directly'),
+        needs_reply: z.boolean().optional().describe('true when you need their answer or go-ahead before you can carry on with that thing'),
+      },
+      async ({ text, needs_reply }) => {
+        if (!ctx.employee) return say('Messaging is not available in this run.');
+        ctx.employee.message(text, Boolean(needs_reply));
+        return say(needs_reply
+          ? 'Sent. Their answer will turn up in your conversation — carry on with something else meanwhile.'
+          : 'Sent.');
+      }),
+    tool('list_tasks', 'Your to-do list, shared with your boss, with ids.', {},
+      async () => {
+        const open = ctx.employee ? ctx.employee.tasks().filter((t) => !t.done) : [];
+        return say(open.length ? open.map(taskLine).join('\n') : 'Your to-do list is empty.');
+      }),
+    tool('add_task', 'Put something on your to-do list, to pick up at a later check-in. Your boss sees the list.', { text: z.string() },
+      async ({ text }) => {
+        const t = ctx.employee && ctx.employee.addTask(text);
+        return say(t ? `Added — ${taskLine(t)}` : 'Could not add that.');
+      }),
+    tool('complete_task', 'Tick an item off your to-do list, with a one-line note on how it went.', { id: z.string(), note: z.string().optional() },
+      async ({ id, note }) => {
+        const t = ctx.employee && ctx.employee.completeTask(id, note || '');
+        return say(t ? `Ticked off — ${taskLine(t)}` : `There is no task with the id ${id}.`);
+      }),
+  ] : [];
+
+  // An employee looks things up over plain HTTP (web.js) instead of driving
+  // the screen or a browser: its check-ins run unwatched, so they never take
+  // over anything the user can see, and never touch the user's own browser.
+  const webTools = bot && bot.employee ? [
+    tool('web_search',
+      'Search the web. Returns the top results, each with its title, link and a snippet. Read one properly with read_webpage.',
+      {
+        query: z.string().describe('what to search for, as you would type it into a search engine'),
+        count: z.number().int().min(1).max(20).optional().describe('how many results, 8 if left out'),
+      },
+      async ({ query, count }) => {
+        try {
+          const found = await web.search(query, count || 8);
+          if (!found.length) return say(`Nothing came up for "${query}". Try other words.`);
+          return say(found.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ''}`).join('\n\n'));
+        } catch (err) {
+          return say(`The search failed: ${err.message}`);
+        }
+      }),
+    tool('read_webpage',
+      'Read a web page as text — its title, its words and the links on it — without opening a browser. Follow a link by reading that address next. Pages that only draw themselves with JavaScript may come back nearly empty; search for another source then.',
+      { url: z.string().describe('the full address, starting https://') },
+      async ({ url }) => {
+        try {
+          const page = await web.read(url);
+          const links = page.links.length ? '\n\nLINKS ON THE PAGE:\n' + page.links.map((l) => `- ${l.text}: ${l.href}`).join('\n') : '';
+          return say(`${page.title ? page.title + '\n' : ''}${page.url}\n\n${page.text || '(no readable text on this page)'}${links}`);
+        } catch (err) {
+          return say(`Could not read that page: ${err.name === 'AbortError' ? 'it took too long to answer' : err.message}`);
+        }
+      }),
   ] : [];
 
   // Talk to another of the user's bots. The active bot names a teammate and a
@@ -1216,9 +1299,13 @@ Finish with a short report. Its first word is DONE if your task is complete, or 
   // remote mode and let the agent open the remote machine's own browser.
   const where = desktop.target();
   const remote = where.kind === 'remote';
-  let tools = remote
-    ? [...desktopTools, ...memoryTools, ...scheduleTools, ...teamTools, ...codeTools, ...emailTools]
-    : [...desktopTools, ...browserTools, ...helperTools, ...memoryTools, ...scheduleTools, ...teamTools, ...codeTools, ...emailTools];
+  // An employee has no screen, mouse, keyboard or browser at all — only the
+  // web tools above and its own desk (to-do list, messages, email, memory).
+  let tools = bot && bot.employee
+    ? [...webTools, ...memoryTools, ...scheduleTools, ...employeeTools, ...teamTools, ...codeTools, ...emailTools]
+    : remote
+      ? [...desktopTools, ...memoryTools, ...scheduleTools, ...employeeTools, ...teamTools, ...codeTools, ...emailTools]
+      : [...desktopTools, ...browserTools, ...helperTools, ...memoryTools, ...scheduleTools, ...employeeTools, ...teamTools, ...codeTools, ...emailTools];
 
   // A bot is the shared instructions plus who it is and what it has learned.
   let systemPrompt = SYSTEM_PROMPT;
@@ -1261,6 +1348,25 @@ YOU ARE DRIVING A DIFFERENT COMPUTER — everything happens on it, nothing on th
     systemPrompt += `
 
 YOU ARE "${bot.name}"${bot.title ? `, ${bot.title}` : ''}. Answer to that name.`;
+    if (bot.employee) {
+      systemPrompt += `
+
+YOU ARE AN EMPLOYEE, working for the user — your boss. You work on a loop: while you are on shift, Operator's clock wakes you for a check-in, and your boss can message you at any time.
+YOUR JOB, in their words:
+${bot.employee.job}
+
+HOW YOU WORK:
+- A message that starts "[Check-in" is Operator's clock, not your boss. Do the most useful next piece of work towards your job — the to-do list first — then stop. Keep a check-in to about ten minutes of work; put anything bigger on your list and carry on next time.
+- Keep your to-do list up to date (list_tasks, add_task, complete_task). It is how work carries over between check-ins, and your boss reads it.
+- message_boss is how you talk to your boss unasked: when something is done, when they should know something, or when you need a decision. Never just to say you checked in, and never twice about the same thing. If a check-in finds nothing worth doing, end it quietly in one line.
+- ASK FIRST, with message_boss and needs_reply, before spending or buying anything, posting publicly, messaging or emailing anyone else, signing up for anything, or deleting. Then work on something else until they answer — their reply will be in this conversation.
+- When your boss messages you, answer them directly in a sentence or two, the way a good colleague would, and do what they ask.
+
+YOU HAVE NO SCREEN AND NO BROWSER. Everything above about screenshots, clicking, typing, windows, the browser and apps does not apply to you — those tools are not yours. You work entirely through:
+- web_search to find things, and read_webpage to read a page (its text and links). To go deeper, read the links it lists. This is how you research, check prices, find businesses and follow the news.
+- Your to-do list, message_boss, your email tools if you have them, and remember.
+- A job that truly needs a screen — logging in to a site, filling in a form, clicking through a page that only works in a browser — you cannot do. Tell your boss with message_boss what you would need done, and carry on with what you can.`;
+    }
     if (bot.persona && bot.persona.trim()) {
       systemPrompt += `
 
@@ -1330,8 +1436,9 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
 
   // Has to happen before the MCP server is built below and before the NIM
   // branch: allowedTools alone does not do it, because bypassPermissions means
-  // the model may call anything the server actually registered.
-  if (!textPath) {
+  // the model may call anything the server actually registered. An employee
+  // has no screen tools to take out.
+  if (!textPath && !(bot && bot.employee)) {
     const n = tools.length;
     tools = tools.filter((t) => t.name !== 'screen_read' && t.name !== 'screen_click_text');
     if (tools.length !== n - 2) throw new Error('textPath:false expected to remove exactly 2 tools');
@@ -1427,6 +1534,9 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
     if (task.codeChats) ctx.codeChats = task.codeChats;
     if (task.email) ctx.email = task.email;
     if (task.schedule) ctx.schedule = task.schedule;
+    // Per run, never carried over: a reply and a check-in differ, and a plain
+    // task must not find a previous employee's hands still here.
+    ctx.employee = task.employee || null;
     const onEvent = ctx.onEvent;
     const abortController = ctx.abortController;
 
@@ -1596,6 +1706,8 @@ function sessionKey(o) {
     o.tuning || {},
     // So is the inbox it is told it can read.
     (o.email && o.email.address) || null,
+    // And an employee's job: edit it, and the next run is told the new one.
+    o.bot && o.bot.employee ? [o.bot.name, o.bot.title, o.bot.employee.job] : null,
   ]);
 }
 
@@ -1641,6 +1753,7 @@ async function runTask(prompt, opts) {
       codeChats: opts.codeChats,
       email: opts.email,
       schedule: opts.schedule,
+      employee: opts.employee,
     });
   } catch (err) {
     // A broken session must not be handed to the next task.

@@ -141,6 +141,26 @@ The first click on the microphone loads large-v3 onto the GPU, which takes a few
 seconds; after that a sentence comes back in well under a second. The model
 stays loaded in a local whisper.cpp server between utterances.
 
+## Employees
+
+The **Employees** tab is for agents that work without being asked. Hire one
+(there are ready-made roles: inbox helper, lead finder, price watcher, news
+scout), give it a job in plain English, and start its shift:
+
+- **It checks in by itself** every 15 minutes to 4 hours, inside its working
+  hours, does the next useful piece of its job, and stops.
+- **It messages you first** when something is done, when you should know
+  something, or when it needs a decision — with a Windows notification and a
+  badge on the tab. You can message it any time; it answers as soon as the
+  computer is free.
+- **It keeps a to-do list** you share: add to it, and it ticks things off with
+  a note on how they went.
+- **It asks before** spending money, posting, messaging anyone else or
+  deleting, and it never sits waiting on you mid-check-in.
+- **Your work comes first.** Start a task yourself and a check-in in progress
+  steps aside. Each employee has a daily limit on check-ins, because each one
+  is a model run.
+
 ## Giving it a different computer
 
 Operator can drive another Windows machine on your network instead of this one —
@@ -278,6 +298,7 @@ npm run dist     # produces dist\Operator Setup <version>.exe
 | `speech.js` + `speech-helper.ps1` | Speaking — the Windows SAPI voice |
 | `agent.js` | The brain — builds the tools and the prompt, then hands them to Claude or to NIM |
 | `voice.js` | The other brain — hands-free mode, which drives the app itself rather than the computer |
+| `employees.js` + `ui/employees.js` | Employees — the loop that wakes them for check-ins, and the tab you watch them from |
 | `piper.js` + `ui/vox.js` | The neural voice: a warm Piper process streaming PCM, played through Web Audio |
 | `verify.js` | The second pass that decides whether a run actually met its goal |
 | `nim.js` | The other brain — NVIDIA's catalog, and the tool-calling loop that drives it |
