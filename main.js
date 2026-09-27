@@ -14,7 +14,7 @@ if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined) {
 // saved in Settings falls back to it rather than to nothing.
 const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 
-const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -33,6 +33,7 @@ const modelOptions = require('./model-options');
 const handover = require('./handover');
 const employees = require('./employees');
 const errors = require('./errors');
+const crash = require('./crash');
 const phone = require('./phone');
 const email = require('./email');
 const code = require('./code');
@@ -95,7 +96,21 @@ function createWindow() {
     console.error('[ui]' + where + ' ' + message);
   });
 
+  // The renderer going down (a crash, an out-of-memory kill) is the one failure
+  // the user sees as a blank window with no idea why. Log it so the report has
+  // it; a killed/crashed renderer also gets reloaded so the app is not a corpse.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details && details.reason === 'clean-exit') return;
+    crash.record('renderer-gone', new Error(`renderer ${details.reason} (exit ${details.exitCode})`), details);
+    if ((details.reason === 'crashed' || details.reason === 'oom') && win && !win.isDestroyed()) {
+      try { win.webContents.reload(); } catch { /* nothing more to try */ }
+    }
+  });
+
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
+
+  // Once the window is actually up, offer to send anything that crashed before.
+  win.webContents.once('did-finish-load', () => setTimeout(surfacePendingCrashes, 1200));
 
   // Live view: whichever surface the agent last looked at, browser or desktop.
   browser.setFrameListener((b64, url) => send('agent-event', { type: 'screenshot', b64, label: url, mime: 'image/png', employee: Boolean(running && running.employee) }));
@@ -120,6 +135,23 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // First, before anything else can throw: catch what nothing else catches.
+  // An uncaught error in the main process leaves state unknown, so it is logged
+  // and the app comes back up clean rather than limping on — unless it fell over
+  // almost at once, which would just loop a relaunch.
+  crash.init(app.getPath('userData'), {
+    onFatal: (rec) => {
+      try {
+        dialog.showErrorBox('Operator needs to restart',
+          'Operator hit an unexpected error and has to restart.\n\n' +
+          (rec && rec.reason ? rec.reason + '\n\n' : '') +
+          'A crash report was saved on this computer — you can send it to get the bug fixed.');
+      } catch { /* a dialog that will not show is not a reason to hang */ }
+      try { if (process.uptime() > 8) app.relaunch(); } catch { /* relaunch is best-effort */ }
+      app.exit(1);
+    },
+  });
+
   store.init(app.getPath('userData'));
   audit.init(app.getPath('userData'));
   checkEmailSoon();
@@ -171,6 +203,40 @@ app.on('before-quit', () => { phone.stop(); agent.closeSession(); voice.close();
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
+
+// A GPU, utility or Chromium child process that dies takes something with it —
+// the live view, a browser tab — without throwing anywhere JS can see. Log it so
+// the pattern shows up in a report, but do not quit: the app usually recovers.
+app.on('child-process-gone', (_e, details) => {
+  if (details && details.reason === 'clean-exit') return;
+  crash.record('child-gone', new Error(`${details.type} ${details.reason} (exit ${details.exitCode})`), details);
+});
+
+// The saved crashes the user has not yet sent or dismissed. Offered once, when
+// the window is up, as a plain choice — nothing is sent without the click.
+function surfacePendingCrashes() {
+  let rows = [];
+  try { rows = crash.pending(); } catch { return; }
+  if (!rows.length || !win || win.isDestroyed()) return;
+  let choice = 2;
+  try {
+    choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      title: 'Operator closed unexpectedly',
+      message: rows.length === 1 ? 'Operator hit a problem recently.' : `Operator hit ${rows.length} problems recently.`,
+      detail: 'A crash report was saved on this computer. Sending it helps get the bug fixed — nothing else leaves your machine.',
+      buttons: ['Copy report', 'Show the file', 'Not now'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    });
+  } catch { return; }
+  try {
+    if (choice === 0) { clipboard.writeText(crash.reportText()); crash.markHandled(); }
+    else if (choice === 1) { shell.openPath(crash.dir()); crash.markHandled(); }
+    // "Not now" leaves them pending, to be offered again next launch.
+  } catch { /* the offer failing is not worth a crash of its own */ }
+}
 
 const profileDir = () => path.join(app.getPath('userData'), 'agent-profile');
 
