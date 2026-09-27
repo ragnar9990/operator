@@ -51,13 +51,35 @@ for (const key of Object.keys(SHOTS)) {
 }
 
 /* ── buying ────────────────────────────────────────────────────────
-   There is no checkout yet. Rather than dead-ending on an anchor that does not
-   exist, the button says so and sends you to the one thing that does work. */
+   Checkout is Paddle (the merchant of record — it charges tax and handles
+   refunds). It turns on the moment config.js has a real client token and price
+   id; until then the button is honest about not being open yet and sends you to
+   the email list, exactly as before. */
+
+const cfg = window.OPERATOR_SITE || {};
+const paddleReady = Boolean(
+  cfg.set && cfg.paddle && cfg.set(cfg.paddle.token) && cfg.set(cfg.paddle.priceId) &&
+  typeof Paddle !== 'undefined',
+);
+
+if (paddleReady) {
+  try {
+    if (cfg.paddle.environment === 'sandbox') Paddle.Environment.set('sandbox');
+    Paddle.Initialize({ token: cfg.paddle.token });
+  } catch (_) { /* a checkout that will not initialise falls through to the notice */ }
+}
 
 const email = document.getElementById('earlyEmail');
 const msg = document.getElementById('earlyMsg');
 
-document.getElementById('buyBtn').addEventListener('click', () => {
+document.getElementById('buyBtn').addEventListener('click', (e) => {
+  if (paddleReady) {
+    e.preventDefault();
+    try {
+      Paddle.Checkout.open({ items: [{ priceId: cfg.paddle.priceId, quantity: 1 }] });
+      return;
+    } catch (_) { /* fall through to the email notice below */ }
+  }
   msg.classList.remove('is-bad');
   msg.textContent = 'Checkout opens at launch. Leave your email and you get the $49 launch price.';
   email.focus({ preventScroll: true });

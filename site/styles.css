@@ -502,3 +502,23 @@ a { color: inherit; }
 .vtab.is-on { border-color: var(--line-hi); }
 
 .faq summary:hover { color: var(--signal-hi); }
+
+/* Footer legal links, and the long-form legal pages (refund / privacy / terms).
+   Reuses the page shell; these just make prose readable and links visible. */
+.foot-links { margin-top: 16px; font-size: 13.5px; color: var(--ash-2); display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.foot-links a { color: var(--ash); text-decoration: none; border-bottom: 1px solid var(--line-hi); }
+.foot-links a:hover { color: var(--signal-hi); border-color: var(--signal-hi); }
+
+.legal { padding: calc(var(--nav-h) + 40px) 0 64px; }
+.legal .wrap { max-width: 760px; }
+.legal h1 { font-size: clamp(30px, 5vw, 46px); font-variation-settings: "wdth" 112; letter-spacing: -0.02em; }
+.legal .updated { margin-top: 12px; font-size: 14px; color: var(--ash-2); }
+.legal h2 { margin-top: 40px; font-size: 1.28rem; }
+.legal p, .legal li { color: var(--ash); font-size: 16px; max-width: 68ch; }
+.legal p { margin-top: 14px; }
+.legal ul { margin-top: 14px; padding-left: 22px; }
+.legal li { margin-top: 8px; }
+.legal a { color: var(--bone); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-max); }
+.legal a:hover { color: var(--signal-hi); }
+.legal .back { display: inline-block; margin-top: 40px; font-size: 14.5px; }
+.legal [data-cfg] { color: var(--bone); }
