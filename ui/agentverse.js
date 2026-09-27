@@ -34,21 +34,31 @@ function start() {
   const statsEl = $('verseStats');
   const pop = $('versePop');
 
-  const OFF = 'operator.verse.off';
+  const ON = 'operator.verse.on';
+  const SEEN = 'operator.verse.seen';
   const SECTIONS = 'operator.verse.sections';
   const read = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
   const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* fine */ } };
 
   /* ── on and off ─────────────────────────────────────────────────── */
 
+  // Off unless chosen: the plain list is the default, and the Verse is one
+  // click away — from the list, from the invite card, or in Settings.
+  const sw = $('verseOn');
   function setVerse(on) {
     view.classList.toggle('verse-on', on);
     if (!on) closeScreen(true);
-    write(OFF, !on);
+    write(ON, on);
+    if (on) write(SEEN, true);
+    sw.checked = on;
+    paintNudge();
     wake();
   }
   $('verseList').addEventListener('click', () => setVerse(false));
   $('staffVerse').addEventListener('click', () => setVerse(true));
+  $('verseNudgeGo').addEventListener('click', () => setVerse(true));
+  $('verseNudgeX').addEventListener('click', () => { write(SEEN, true); paintNudge(); });
+  sw.addEventListener('change', () => setVerse(sw.checked));
 
   let renderer;
   try {
@@ -57,9 +67,11 @@ function start() {
     // No WebGL on this machine: the plain list is still all there.
     view.classList.remove('verse-on');
     $('staffVerse').hidden = true;
+    $('verseRow').hidden = true;
     return;
   }
-  view.classList.toggle('verse-on', !read(OFF, false));
+  sw.checked = read(ON, false);
+  view.classList.toggle('verse-on', sw.checked);
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1176,6 +1188,7 @@ function start() {
     firstPaint = false;
     paintStats();
     paintHint();
+    paintNudge();
     paintRoster();
   }
 
@@ -1909,6 +1922,12 @@ function start() {
   function paintHint() {
     hint.hidden = people.length > 0;
     hint.innerHTML = '<b>Welcome to the Agent Verse.</b> Click a glowing <span>+</span> desk to hire your first employee into that section.';
+  }
+
+  // The invite in the list: once there is someone to see, until the Verse
+  // has been opened or the card closed.
+  function paintNudge() {
+    $('verseNudge').hidden = !people.length || read(SEEN, false) || view.classList.contains('verse-on');
   }
 
   $('verseHire').addEventListener('click', () => window.__employees && window.__employees.hire(''));

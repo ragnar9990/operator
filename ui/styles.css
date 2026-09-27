@@ -3581,6 +3581,15 @@ body.your-turn {
 .staffview { position: relative; }
 .verse { display: none; }
 .staff-verse { margin-top: -4px; }
+.verse-badge { font-size: 10px; font-weight: 600; letter-spacing: .04em; padding: 1px 5px; border-radius: 5px; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.verse-nudge { position: relative; margin: 0 12px 10px; display: flex; flex-direction: column; gap: 6px; padding: 12px 12px 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+.verse-nudge[hidden] { display: none; }
+.verse-nudge b { font-size: 13px; font-weight: 600; color: var(--ink); padding-right: 18px; }
+.verse-nudge .pill { align-self: flex-start; margin-top: 2px; }
+.verse-nudge small { font-size: 11px; opacity: .8; }
+.verse-nudge-x { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--ink-3); font-size: 16px; line-height: 1; cursor: pointer; }
+.verse-nudge-x:hover { background: var(--raise-hi); color: var(--ink); }
+.staffview.verse-on .verse-nudge { display: none; }
 .staffview.verse-on .staff-verse { display: none; }
 .staffview.verse-on .verse { display: block; position: absolute; inset: 0; overflow: hidden; background: #03040b; }
 .staffview.verse-on .staff-side { display: none; }

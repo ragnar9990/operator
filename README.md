@@ -161,6 +161,11 @@ scout), give it a job in plain English, and start its shift:
   steps aside. Each employee has a daily limit on check-ins, because each one
   is a model run.
 
+The tab is a plain list. To watch them work, switch on the **Agent Verse**
+(the button in the list, or Settings → Appearance): a 3D office in space where
+each employee is a robot at a desk — typing on shift, waving when it needs
+you, dozing off. Walk up to a computer to open that employee's desk.
+
 ## Giving it a different computer
 
 Operator can drive another Windows machine on your network instead of this one —

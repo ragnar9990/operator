@@ -415,8 +415,16 @@
         </button>
         <button class="code-new staff-verse" id="staffVerse" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="9.5" ry="4" transform="rotate(-20 12 12)"/></svg>
-          Agent Verse
+          Agent Verse <span class="verse-badge">3D</span>
         </button>
+        <!-- shown once there is an employee to see, until it is opened or closed (agentverse.js) -->
+        <div class="verse-nudge" id="verseNudge" hidden>
+          <button class="verse-nudge-x" id="verseNudgeX" type="button" aria-label="Don't show this again">&times;</button>
+          <b>Your employees have desks</b>
+          <span>See them at work in a 3D office — typing, waving when they need you, dozing off shift.</span>
+          <button class="pill solid" id="verseNudgeGo" type="button">Take a look</button>
+          <small>Turn it on or off any time in Settings → Appearance.</small>
+        </div>
         <div class="staff-list" id="staffList"></div>
       </aside>
 
@@ -1017,6 +1025,15 @@
           </div>
           <div class="tab-panel" data-panel="appearance" hidden>
             <div class="set-section">
+              <div class="set-label">Employees</div>
+              <label class="hands-off" id="verseRow">
+                <span class="ho-text">
+                  <span class="ho-name">Agent Verse</span>
+                  <span class="ho-sub">Open the Employees tab as a 3D office you can walk around, with each employee at a desk. Off, it is a plain list. The 3D office uses more graphics power.</span>
+                </span>
+                <span class="switch"><input type="checkbox" id="verseOn" /><span class="knob"></span></span>
+              </label>
+
               <div class="set-label">Theme</div>
               <div class="swatches" id="apTheme">
                 <button class="swatch" data-value="warm" type="button" title="Warm black">
