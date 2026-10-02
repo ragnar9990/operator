@@ -180,6 +180,7 @@ app.whenReady().then(() => {
   audit.init(app.getPath('userData'));
   playbooks.init(app.getPath('userData'));
   watchers.init(app.getPath('userData'), watcherHooks);
+  setTimeout(() => { checkMachines().catch(() => {}); }, 3000);
   checkEmailSoon();
 
   // The NVIDIA NIM key, if there is one, and the live list of what that key
@@ -304,7 +305,10 @@ const profileDir = () => path.join(app.getPath('userData'), 'agent-profile');
 // remote machine can be paired or dropped while a task is still running.
 function computerLabel() {
   const t = desktop.target();
-  if (t.kind === 'remote') return `remote ${t.url}`;
+  if (t.kind === 'remote') {
+    const m = store.listMachines().find((x) => x.url === t.url);
+    return m ? `${m.name} (${t.url})` : `remote ${t.url}`;
+  }
   return desktop.isPrivate() ? 'private desktop' : 'this desktop';
 }
 
@@ -840,8 +844,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
   // Whether the run ended well enough to offer saving it as a playbook.
   let finalVerdict = null;
   let failed = false;
+  let machine = null;   // the computer this agent is set to work on, for this run
 
   try {
+    machine = await onMachine(bot && bot.machine);
     const resume = botId && chatId ? store.sessionOf(botId, chatId) : null;
     try {
       await go(resume);
@@ -878,9 +884,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
     // Raw SDK and Node failures mean nothing to someone who has just installed
     // this. errors.js turns the common ones into a sentence plus the fix, and
     // keeps the original so a bug report still has it.
-    const e = errors.explain(err);
+    const e = err.friendly ? { ...err.friendly, detail: err.message } : errors.explain(err);
     if (!e.stopped) onEvent({ type: 'error', title: e.title, fix: e.fix, text: e.detail || e.title });
   } finally {
+    if (machine) machine.restore();
     // A job that worked, and did something a playbook can repeat, is offered
     // as one: next time it runs with no model at all. Only to someone watching.
     const worked = !failed && !abortController.signal.aborted && !(finalVerdict && finalVerdict.ok === false);
@@ -999,6 +1006,9 @@ ipcMain.handle('remote:connect', async (_e, url, token) => {
     desktop.useRemote({ url, token });
     remoteHost = (pong && pong.host) || null;
     overlay.hide();
+    // Remembered in the list of computers, so next time it is one click.
+    store.saveMachine({ url, token, host: remoteHost });
+    send('machines-changed', {});
     return { ok: true, host: remoteHost };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1008,8 +1018,126 @@ ipcMain.handle('remote:connect', async (_e, url, token) => {
 ipcMain.handle('remote:disconnect', async () => {
   desktop.useRemote(null);
   remoteHost = null;
+  send('machines-changed', {});
   return { ok: true };
 });
+
+/* ── computers: a fleet of machines to work on ───────────────────── */
+
+// Each saved machine is asked "are you there?" every half minute, so the list
+// can say which are up — and a run on one that is not fails with a sentence,
+// not a stack trace, before anything has been done.
+const machineHealth = new Map();   // id → { online, lastSeen, host, error }
+
+async function checkMachines() {
+  let changed = false;
+  await Promise.all(store.listMachines().map(async ({ id }) => {
+    const m = store.getMachine(id);
+    if (!m) return;
+    const prev = machineHealth.get(id) || {};
+    let next;
+    try {
+      const pong = await desktop.ping({ url: m.url, token: m.token });
+      next = { online: true, lastSeen: Date.now(), host: (pong && pong.host) || prev.host || m.host || null, error: null };
+    } catch (err) {
+      next = { online: false, lastSeen: prev.lastSeen || null, host: prev.host || m.host || null, error: err.message };
+    }
+    if (prev.online !== next.online || prev.error !== next.error) changed = true;
+    machineHealth.set(id, next);
+  }));
+  if (changed) send('machines-changed', {});
+}
+setInterval(() => { checkMachines().catch(() => {}); }, 30000);
+
+function machineView(m) {
+  const h = machineHealth.get(m.id) || {};
+  const t = desktop.target();
+  return {
+    ...m, host: h.host || m.host, online: h.online === undefined ? null : h.online, lastSeen: h.lastSeen || null, error: h.error || null,
+    inUse: t.kind === 'remote' && t.url === m.url,
+    busy: Boolean(running && running.machine === m.id),
+  };
+}
+
+// What the node prints, pasted whole, is enough: the address and the token
+// are taken out of it.
+function machineFrom(spec = {}) {
+  const text = [spec.url, spec.token, spec.paste].filter(Boolean).join('\n');
+  const url = (String(spec.url || '').match(/https?:\/\/[^\s"'`]+/) || text.match(/https?:\/\/[^\s"'`]+/) || [])[0]
+    || (spec.url ? 'http://' + String(spec.url).trim() : '');
+  const token = (spec.token && String(spec.token).trim()) || (text.match(/token\s*[:=]?\s+([A-Za-z0-9._~+/=-]{4,})/i) || [])[1] || '';
+  return { url: url.replace(/\/+$/, ''), token };
+}
+
+ipcMain.handle('machines:list', () => ({ machines: store.listMachines().map(machineView), target: desktop.target() }));
+
+ipcMain.handle('machines:add', async (_e, spec) => {
+  const { url, token } = machineFrom(spec || {});
+  if (!url) return { ok: false, error: 'Give its address — the node prints it, like http://192.168.1.50:8391.' };
+  try {
+    const pong = await desktop.ping({ url, token });
+    const m = store.saveMachine({ name: spec && spec.name, url, token, host: pong && pong.host });
+    machineHealth.set(m.id, { online: true, lastSeen: Date.now(), host: (pong && pong.host) || null, error: null });
+    send('machines-changed', {});
+    return { ok: true, machine: machineView(m) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('machines:rename', (_e, id, name) => { const m = store.renameMachine(id, name); send('machines-changed', {}); return m; });
+
+ipcMain.handle('machines:remove', (_e, id) => {
+  const m = store.getMachine(id);
+  if (m && desktop.target().url === m.url) { desktop.useRemote(null); remoteHost = null; }
+  machineHealth.delete(id);
+  const r = store.removeMachine(id);
+  send('machines-changed', {});
+  send('bots-changed', {});
+  return r;
+});
+
+// Point Operator at one of them from now on (null: this computer) — the same
+// as connecting in the form above, without typing it all again.
+ipcMain.handle('machines:use', async (_e, id) => {
+  if (running) return { ok: false, error: 'Finish or stop what is running first.' };
+  if (!id) { desktop.useRemote(null); remoteHost = null; send('machines-changed', {}); return { ok: true }; }
+  const m = store.getMachine(id);
+  if (!m) return { ok: false, error: 'That computer has been removed.' };
+  try {
+    const pong = await desktop.ping({ url: m.url, token: m.token });
+    desktop.useRemote({ url: m.url, token: m.token });
+    remoteHost = (pong && pong.host) || m.host || null;
+    overlay.hide();
+    send('machines-changed', {});
+    return { ok: true, host: remoteHost, name: m.name };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// A run on a particular machine: its tools point there for the run, then back
+// to whatever Settings says. One run at a time, so swapping the target for the
+// length of one is safe. Returns null when there is nothing to swap.
+async function onMachine(machineId) {
+  if (!machineId) return null;
+  const m = store.getMachine(machineId);
+  const fail = (title, fix) => Object.assign(new Error(title), { friendly: { title, fix } });
+  if (!m) throw fail('The computer this was set to run on has been removed', 'Choose another one for it, or "This computer".');
+  try {
+    await desktop.ping({ url: m.url, token: m.token });
+  } catch (err) {
+    const h = machineHealth.get(m.id) || {};
+    machineHealth.set(m.id, { ...h, online: false, error: err.message });
+    send('machines-changed', {});
+    throw fail(`${m.name} is not answering, so nothing was done on it`,
+      `${err.message}${h.lastSeen ? ` It was last seen ${new Date(h.lastSeen).toLocaleString()}.` : ''}`);
+  }
+  const prev = desktop.currentRemote();
+  desktop.useRemote({ url: m.url, token: m.token });
+  if (running) running.machine = m.id;
+  return { name: m.name, restore: () => desktop.useRemote(prev) };
+}
 
 /* ── code mode: ChatGPT-style history of coding conversations ─────── */
 
@@ -1691,7 +1819,11 @@ async function runPlaybook(id, { inputs = {}, trigger = {}, dryRun = false, sile
 
   const email = connectedEmail();
   let result;
+  let machine = null;   // the computer this playbook is set to run on
   try {
+    machine = await onMachine(pb.machine);
+    // Built after the switch: on another computer there is no browser here
+    // to hand it, and a browser step says so plainly.
     const hands = await agent.hands({ userDataDir: profileDir(), email, dryRun, onEvent, abortController });
     result = await playbooks.run(id, {
       hands, inputs, trigger, dryRun,
@@ -1716,10 +1848,11 @@ async function runPlaybook(id, { inputs = {}, trigger = {}, dryRun = false, sile
       heal: (job) => healStep(pb, job, { email, abortController, onEvent, say }),
     });
   } catch (err) {
-    const e = errors.explain(err);
+    const e = err.friendly || errors.explain(err);
     result = { ok: false, error: e.fix ? `${e.title} — ${e.fix}` : e.title };
     say({ type: 'pb_end', ok: false, error: result.error });
   } finally {
+    if (machine) machine.restore();
     // Hand the screen back, as a task does.
     if (tookTheScreen && ownDesktopPref && desktop.target().kind !== 'remote') {
       try { desktop.usePrivateDesktop(true); } catch (_) {}

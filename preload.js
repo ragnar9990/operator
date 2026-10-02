@@ -116,6 +116,13 @@ contextBridge.exposeInMainWorld('operator', {
   remoteStatus: () => ipcRenderer.invoke('remote:status'),
   remoteConnect: (url, token) => ipcRenderer.invoke('remote:connect', url, token),
   remoteDisconnect: () => ipcRenderer.invoke('remote:disconnect'),
+  // computers: the saved machines it can work on, and how each one is (main.js)
+  machines: () => ipcRenderer.invoke('machines:list'),
+  machineAdd: (spec) => ipcRenderer.invoke('machines:add', spec),
+  machineRename: (id, name) => ipcRenderer.invoke('machines:rename', id, name),
+  machineRemove: (id) => ipcRenderer.invoke('machines:remove', id),
+  machineUse: (id) => ipcRenderer.invoke('machines:use', id),
+  onMachinesChanged: (cb) => ipcRenderer.on('machines-changed', (_e, payload) => cb(payload)),
 
   codeChatsList: () => ipcRenderer.invoke('codeChats:list'),
   codeChatGet: (id) => ipcRenderer.invoke('codeChats:get', id),

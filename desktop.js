@@ -26,6 +26,10 @@ function target() {
   return remote ? { kind: 'remote', url: remote.url } : { kind: 'local' };
 }
 
+// The whole remote setting, token included, so a run pointed at one machine
+// can put back whatever was there before it.
+const currentRemote = () => (remote ? { ...remote } : null);
+
 async function remoteCall(payload, timeoutMs) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs || 30000);
@@ -295,6 +299,7 @@ module.exports = {
   setFrameListener,
   setPointerListener,
   useRemote,
+  currentRemote,
   usePrivateDesktop,
   isPrivate,
   target,

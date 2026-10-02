@@ -311,6 +311,54 @@ function setAnthropic(key) {
   return anthropicStatus();
 }
 
+/* ── computers: the machines Operator can drive (remote-node.ps1) ─────
+   A spare PC in the office becomes somewhere for the work to happen. The
+   token is the only thing between the network and that machine, so it stays
+   here: the UI only ever learns which machine it is, never the token. */
+
+const machineCard = (m) => ({ id: m.id, name: m.name, url: m.url, host: m.host || null, addedAt: m.addedAt });
+
+function listMachines() { return (settings.machines || []).map(machineCard); }
+
+function getMachine(machineId) { return (settings.machines || []).find((m) => m.id === machineId) || null; }
+
+// Saving the same address again updates it — a new token after the node was
+// restarted — rather than listing the machine twice.
+function saveMachine({ name, url, token, host }) {
+  if (!settings.machines) settings.machines = [];
+  const clean = String(url || '').trim().replace(/\/+$/, '');
+  if (!clean) return null;
+  let m = settings.machines.find((x) => x.url === clean);
+  if (m) {
+    if (token !== undefined) m.token = token;
+    if (host) m.host = host;
+    if (name) m.name = String(name).trim().slice(0, 40);
+  } else {
+    m = { id: id('m'), name: String(name || host || clean.replace(/^https?:\/\//, '')).trim().slice(0, 40), url: clean, token: token || '', host: host || null, addedAt: Date.now() };
+    settings.machines.push(m);
+  }
+  flushSettings();
+  return machineCard(m);
+}
+
+function renameMachine(machineId, name) {
+  const m = getMachine(machineId);
+  if (!m || !String(name || '').trim()) return null;
+  m.name = String(name).trim().slice(0, 40);
+  flushSettings();
+  return machineCard(m);
+}
+
+// Agents that ran there go back to wherever the app is pointed.
+function removeMachine(machineId) {
+  settings.machines = (settings.machines || []).filter((m) => m.id !== machineId);
+  flushSettings();
+  let touched = false;
+  for (const b of bots) if (b.machine === machineId) { b.machine = null; touched = true; }
+  if (touched) flush();
+  return { ok: true };
+}
+
 /* ── a model server on this computer ─────────────────────────────────
    Ollama, LM Studio and llama.cpp are found by themselves (local.js); this is
    only for one somewhere else — another port, or a box on the network. */
@@ -478,6 +526,7 @@ const card = (b) => ({
   title: b.title,
   face: b.face,
   model: b.model,
+  machine: b.machine || null,
   persona: b.persona,
   memoryCount: b.memory.length,
   routineCount: b.routines.filter((r) => !r.paused).length,
@@ -530,6 +579,8 @@ function updateBot(botId, patch = {}) {
   if (typeof patch.title === 'string') b.title = patch.title.trim().slice(0, 60);
   if (typeof patch.persona === 'string') b.persona = patch.persona.slice(0, 4000);
   if ('model' in patch) b.model = patch.model || null;
+  // Which computer it works on; null is wherever the app is pointed.
+  if ('machine' in patch) b.machine = patch.machine && getMachine(patch.machine) ? patch.machine : null;
   if (patch.face) b.face = patch.face;
   if ('pinned' in patch) b.pinned = Boolean(patch.pinned);
   // Only a pinned agent wears a badge, so unpinning takes the role with it
@@ -981,6 +1032,7 @@ module.exports = {
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   getAnthropic, setAnthropic, anthropicStatus,
   getLocal, setLocal,
+  listMachines, getMachine, saveMachine, renameMachine, removeMachine,
   hireEmployee, listEmployees, getEmployee, updateEmployee,
   addEmployeeTask, updateEmployeeTask, removeEmployeeTask, logEmployee, addTurn,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,

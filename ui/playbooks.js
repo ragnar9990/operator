@@ -111,6 +111,7 @@
     paintSteps();
     paintInputs();
     paintModel();
+    paintMachine();
     paintPlaybookWatches();
   }
 
@@ -295,6 +296,23 @@
   }
 
   $('pbModel').addEventListener('change', (e) => change({ model: e.target.value || null }));
+
+  // Which computer it runs on (ui/fleet.js has the list). Operator's own
+  // browser only exists on the computer Operator is open on, so a playbook
+  // with web steps is told so rather than finding out at step one.
+  function paintMachine() {
+    const sel = $('pbMachine');
+    if (!sel || !current || !window.__fleet) return;
+    window.__fleet.fillSelect(sel, current.machine, 'Wherever Operator is pointed');
+    const note = $('pbMachineNote');
+    const m = window.__fleet.list().find((x) => x.id === current.machine);
+    note.textContent = !window.__fleet.list().length ? 'Add spare PCs in Settings → Computer, and this one can run there instead.'
+      : m && current.usesBrowser ? "Its web steps use Operator's own browser, which is only on this computer — they will stop there."
+      : m ? `Runs on ${m.name}${m.online === false ? ', which is not answering right now' : ''}, so this computer stays free.`
+      : 'Settings → Computer decides.';
+  }
+  $('pbMachine').addEventListener('change', (e) => change({ machine: e.target.value || null }));
+  document.addEventListener('fleet:changed', () => { if (shown) paintMachine(); });
 
   // Rename in place.
   const nameEl = $('pbName');

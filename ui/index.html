@@ -442,6 +442,11 @@
                 <div class="pb-watches" id="pbWatches"></div>
                 <button class="pill sm" id="pbAddWatch" type="button">Add a watcher</button>
               </div>
+              <div class="sp-block">
+                <div class="sp-head">Runs on</div>
+                <select class="pb-select" id="pbMachine"></select>
+                <p class="field-hint" id="pbMachineNote">Add spare PCs in Settings → Computer.</p>
+              </div>
               <div class="sp-block" id="pbComputerBlock">
                 <div class="sp-head">Repairs a step with</div>
                 <select class="pb-select" id="pbModel"></select>
@@ -812,6 +817,12 @@
           </label>
 
           <label class="field">
+            <span>Computer</span>
+            <select id="fMachine"></select>
+            <p class="field-hint">Where this agent does its work. Add spare PCs in <b>Settings → Computer</b>.</p>
+          </label>
+
+          <label class="field">
             <span>Workspace</span>
             <select id="fWorkspace"></select>
             <p class="field-hint">Filing only. A workspace groups agents in the rail — it does not wall them off from each other or from anything on this computer.</p>
@@ -977,6 +988,25 @@
               </span>
               <span class="switch"><input type="checkbox" id="bootOn" /><span class="knob"></span></span>
             </label>
+          </div>
+
+          <!-- the fleet: spare PCs it can work on (main.js machines:*, ui/fleet.js) -->
+          <div class="set-section" id="fleetSection">
+            <div class="set-label">Your computers</div>
+            <p class="set-hint">Spare PCs Operator can do the work on, each running the node (<code>start-operator-node.cmd</code>). Set an agent or a playbook to run on one and this computer stays free. Each is checked every half minute.</p>
+            <div class="fleet-list" id="fleetList"></div>
+            <form class="fleet-add" id="fleetAdd">
+              <div class="ss-row">
+                <label class="field"><span>Name</span><input id="fleetName" type="text" maxlength="40" placeholder="Back office PC" /></label>
+                <label class="field"><span>Address</span><input id="fleetUrl" type="text" spellcheck="false" placeholder="http://192.168.1.50:8391" /></label>
+                <label class="field"><span>Token</span><input id="fleetToken" type="password" spellcheck="false" autocomplete="off" placeholder="what the node printed" /></label>
+              </div>
+              <div class="remote-actions">
+                <button class="pill ghost" id="fleetAddBtn" type="submit">Add computer</button>
+                <span class="remote-status" id="fleetStatus"></span>
+              </div>
+              <p class="set-hint">The node's whole printout can be pasted into Address. The token is the only thing protecting that computer, and it travels unencrypted — keep this to your own network, or Tailscale.</p>
+            </form>
           </div>
           </div>
 
@@ -1382,6 +1412,7 @@
     <script src="employees.js"></script>
     <script src="playbooks.js"></script>
     <script src="local.js"></script>
+    <script src="fleet.js"></script>
     <script type="module" src="agentverse.js"></script>
   </body>
 </html>
