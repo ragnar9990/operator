@@ -4,16 +4,11 @@
     <meta charset="utf-8" />
     <!-- Scripts only from this folder: text an agent or a web page puts on screen
          can never run as code here, where the preload can drive the machine.
-         Styles may be inline (the UI sets them on elements); fonts come from Google. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'" />
+         Styles may be inline (the UI sets them on elements); fonts ship in fonts/. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Operator</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@100..900&display=swap"
-    />
+    <link rel="stylesheet" href="fonts/fonts.css" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="editor.css" />
     <link rel="stylesheet" href="code.css" />
@@ -139,6 +134,7 @@
             <div class="dock">
               <div class="slash-menu" id="slashMenu" hidden></div>
               <form class="composer" id="composer">
+                <i class="halo halo-bloom" aria-hidden="true"><i></i></i>
                 <textarea
                   id="input"
                   rows="1"
@@ -204,6 +200,7 @@
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11.5 12 5.5l6 6" /></svg>
                   </button>
                 </div>
+                <i class="halo halo-line" aria-hidden="true"><i></i></i>
               </form>
 
               <div class="suggestions" id="suggestions">
@@ -281,6 +278,7 @@
 
         <div class="dock">
           <form class="composer" id="codeComposer">
+            <i class="halo halo-bloom" aria-hidden="true"><i></i></i>
             <div class="code-refs" id="codeRefs" hidden></div>
             <textarea id="codeInput" rows="1" placeholder="Build, fix or explain anything" autocomplete="off" spellcheck="false"></textarea>
             <div class="controls">
@@ -336,6 +334,7 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 11.5 12 5.5l6 6"/></svg>
               </button>
             </div>
+            <i class="halo halo-line" aria-hidden="true"><i></i></i>
           </form>
         </div>
 
@@ -713,36 +712,47 @@
     <!-- the start screen: what you see when the app opens. Make an agent, or
          find one you already have. Esc drops you into a chat with the main one. -->
     <div class="launch" id="launch" hidden>
-      <!-- the moving background: colour drifting under a field of motes, a glow
-           that trails the pointer, and grain so the gradients never band -->
-      <div class="launch-bg" id="launchBg" aria-hidden="true">
-        <i class="launch-blob b1"></i><i class="launch-blob b2"></i><i class="launch-blob b3"></i>
-        <span class="launch-motes" id="launchMotes"></span>
-      </div>
-      <i class="launch-spot" id="launchSpot" aria-hidden="true"></i>
-      <i class="launch-grain" aria-hidden="true"></i>
       <div class="launch-inner">
-        <span class="launch-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="13" rx="3"/><path d="M9.5 20.5h5"/><circle cx="14.2" cy="11.4" r="1.5"/></svg>
-        </span>
-        <h1 id="launchTitle">Welcome to Operator</h1>
-        <p>Make a new agent, or pick up one you already have.</p>
+        <header class="launch-hero">
+          <h1 id="launchTitle">Good morning</h1>
+          <span class="launch-date" id="launchDate"></span>
+        </header>
 
-        <button class="launch-new" id="launchNew" type="button">
-          <span class="launch-new-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
-          <span class="launch-new-text"><b id="launchNewLabel">Create a new agent</b><small>Give it a name, a job and a face</small></span>
-          <kbd>Ctrl N</kbd>
-        </button>
+        <!-- A line of help, until you point at an agent (or arrow to one): then
+             that agent, with the last thing it said to you, in the same spot -->
+        <div class="launch-peek" id="launchPeek">
+          <p class="launch-lede">Pick up where you left off, or make a new agent.</p>
+          <div class="launch-peek-card" aria-live="polite">
+            <span class="launch-peek-face" id="launchPeekFace"></span>
+            <div class="launch-bubble">
+              <small id="launchPeekWho"></small>
+              <p id="launchPeekSaid"></p>
+            </div>
+          </div>
+        </div>
 
-        <label class="launch-find">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
-          <input id="launchSearch" type="search" placeholder="Search your agents" spellcheck="false" autocomplete="off" aria-label="Search your agents" aria-controls="launchList" />
-          <span class="launch-count" id="launchCount"></span>
-        </label>
+        <!-- one panel, like a switchboard: search at the top, a line for each
+             agent (the last one you worked with first), and New at the bottom -->
+        <div class="launch-panel">
+          <label class="launch-find">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+            <input id="launchSearch" type="search" placeholder="Find an agent by name, job or chat" spellcheck="false" autocomplete="off" aria-label="Search your agents" aria-controls="launchList" />
+            <span class="launch-count" id="launchCount"></span>
+          </label>
 
-        <div class="launch-list" id="launchList" role="listbox" aria-label="Your agents"></div>
+          <div class="launch-list" id="launchList" role="listbox" aria-label="Your agents"></div>
 
-        <button class="launch-skip" id="launchSkip" type="button"><span id="launchSkipText">Skip — just start a chat</span> <kbd>Esc</kbd></button>
+          <button class="launch-new" id="launchNew" type="button">
+            <span class="launch-new-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></span>
+            <span class="launch-new-label" id="launchNewLabel">New agent</span>
+            <kbd>Ctrl N</kbd>
+          </button>
+        </div>
+
+        <footer class="launch-foot">
+          <span class="launch-keys" aria-hidden="true"><kbd>↑</kbd><kbd>↓</kbd> to choose, <kbd>Enter</kbd> to open</span>
+          <button class="launch-skip" id="launchSkip" type="button"><span id="launchSkipText">Skip to a new chat</span> <kbd>Esc</kbd></button>
+        </footer>
       </div>
     </div>
 

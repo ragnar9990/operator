@@ -516,3 +516,29 @@
 :root[data-edge="silver"] .starter:hover .starter-ic { color: var(--ink); }
 .starter-project svg { color: var(--ink-3); }
 .starter-project:hover svg { color: var(--edge); }
+
+/* ── one look, everywhere (see the end of styles.css) ─────────────────
+   Code in the start screen's language: sentence-case headings, and the
+   starters as solid cards whose icon sits on a plate of its own colour, the
+   way an agent's face does. */
+
+.code-history-head, .starter-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.starter {
+  border-color: var(--line-hi);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+.starter:hover { border-color: color-mix(in srgb, var(--c, var(--accent)) 40%, var(--line-hi)); background: var(--card); }
+.starter-ic {
+  background: color-mix(in srgb, var(--c, var(--accent)) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--accent)) 26%, transparent);
+  color: var(--c, var(--accent));
+}
+.starter-project { border-color: var(--line-hi); background: var(--card); }

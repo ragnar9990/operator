@@ -2,7 +2,9 @@
 // Persistent profile means logins (YouTube, etc.) stick between sessions.
 
 const path = require('path');
-const { chromium } = require('playwright');
+// Playwright takes about half a second to load, and nothing needs it until the
+// agent first opens its browser, so it is loaded then rather than at start.
+const chromium = () => require('playwright').chromium;
 
 const VIEWPORT = { width: 1280, height: 800 };
 
@@ -64,10 +66,10 @@ async function ensureBrowser(userDataDir) {
 
 async function launch(userDataDir) {
   try {
-    context = await chromium.launchPersistentContext(userDataDir, { ...LAUNCH, channel: 'chrome' });
+    context = await chromium().launchPersistentContext(userDataDir, { ...LAUNCH, channel: 'chrome' });
     usingChrome = true;
   } catch (err) {
-    context = await chromium.launchPersistentContext(userDataDir, LAUNCH);
+    context = await chromium().launchPersistentContext(userDataDir, LAUNCH);
     usingChrome = false;
   }
 

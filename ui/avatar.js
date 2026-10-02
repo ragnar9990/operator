@@ -52,5 +52,14 @@
     return span;
   }
 
+  // Every idle face blinks at once, for 0.42s in each 5.2s (styles.css,
+  // av-blinking). Skipped while the window is hidden or in the background.
+  setInterval(() => {
+    if (document.hidden || !document.hasFocus()) return;
+    const root = document.documentElement;
+    root.classList.add('av-blinking');
+    setTimeout(() => root.classList.remove('av-blinking'), 420);
+  }, 5200);
+
   global.Avatar = { svg, el };
 })(window);

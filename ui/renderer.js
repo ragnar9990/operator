@@ -56,9 +56,34 @@ function turn(kind, html) {
   const el = document.createElement('div');
   el.className = 'turn ' + kind;
   el.innerHTML = html;
-  thread.appendChild(el);
+  if (kind.split(' ')[0] === 'says' && bot) thread.appendChild(said(el, kind));
+  else thread.appendChild(el);
   if (stick) thread.scrollTop = thread.scrollHeight;
   return el;
+}
+
+// A reply is said by someone: the agent's face and name go above it, in its
+// own colour, the way the start screen shows it talking. Once per answer — a
+// second reply before your next message carries on under the same name. The
+// reply itself stays the element the caller writes into.
+function said(el, kind) {
+  const wrap = document.createElement('div');
+  wrap.className = 'turn said';
+  wrap.style.setProperty('--h', (bot.face && bot.face.hue) || 199);
+  el.className = kind;
+  let prev = thread.lastElementChild;
+  while (prev && !prev.classList.contains('you') && !prev.classList.contains('said')) prev = prev.previousElementSibling;
+  if (!prev || prev.classList.contains('you')) {
+    const head = document.createElement('div');
+    head.className = 'said-head';
+    head.appendChild(Avatar.el(bot.face, 22, 'idle'));
+    const name = document.createElement('b');
+    name.textContent = bot.name;
+    head.appendChild(name);
+    wrap.appendChild(head);
+  }
+  wrap.appendChild(el);
+  return wrap;
 }
 
 /* ── status ──────────────────────────────────────────────────────── */
@@ -541,6 +566,7 @@ function paintRoster() {
     row.type = 'button';
     row.className = 'bot-row' + (isOpen(r) ? ' on' : '');
     row.dataset.id = b.id;
+    row.style.setProperty('--h', (b.face && b.face.hue) || 199);   // the highlight takes the face's colour
 
     row.appendChild(Avatar.el(b.face, 26, 'idle'));
 
@@ -761,6 +787,7 @@ function agentRow(r) {
 
   const row = document.createElement('div');
   row.className = 'chat-row' + (isOpen(r) ? ' on' : '');
+  row.style.setProperty('--h', (r.bot.face && r.bot.face.hue) || 199);
   row.draggable = true;
   row.addEventListener('dragstart', (e) => {
     dragging = r.bot.id;
@@ -2899,6 +2926,43 @@ let launchPick = 0;   // the highlighted row, for the arrow keys
 // On its way out counts as gone, so a key pressed mid-exit is the chat's.
 const launchOpen = () => !launchEl.hidden && !launchEl.classList.contains('leaving');
 
+// Styles that only matter while someone can see them: the start screen covers
+// the task box (launch-up), and a window in the background is 'away'. Both let
+// the lit edge stand still instead of repainting for nobody.
+document.body.classList.toggle('launch-up', !launchEl.hidden);
+const markAway = () => document.body.classList.toggle('away', !document.hasFocus());
+window.addEventListener('focus', markAway);
+window.addEventListener('blur', markAway);
+markAway();
+
+// The line that runs round a hovered button keeps time with the one round the
+// task box: the same speed (--lit-dur in styles.css) and the same place in
+// its turn. Every one of them is set to the same clock — the page's — when
+// it starts, and the task box's again whenever it has been held still
+// (window in the background, start screen up) or changes speed (working).
+const LIT = new Set(['lit-sweep', 'lit-spin']);
+// the buttons that carry the line (styles.css, 'the lit edge')
+const LIT_HOSTS = '.pill, .round, .chip, .mode, .rail-btn, .picker-btn, .dry-toggle, .target, .mini, .solid-btn, .gbtn, .conn-more, .folder-btn, .code-new, .danger, .expand';
+function syncLit(anims) {
+  const now = document.timeline.currentTime;
+  if (now == null) return;
+  for (const a of anims) if (LIT.has(a.animationName)) a.currentTime = now;
+}
+document.addEventListener('mouseover', (e) => {
+  const el = e.target instanceof Element ? e.target.closest(LIT_HOSTS) : null;
+  // a frame later: the hover's own animation only exists once styles update
+  if (el) requestAnimationFrame(() => syncLit(el.getAnimations({ subtree: true })));
+});
+let litState = '';
+new MutationObserver(() => {
+  const b = document.body.classList;
+  const now = [b.contains('working'), b.contains('away'), b.contains('launch-up')].join();
+  if (now === litState) return;
+  litState = now;
+  requestAnimationFrame(() => syncLit(document.getAnimations()));
+}).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+requestAnimationFrame(() => syncLit(document.getAnimations()));
+
 // Most recent conversation first — the same order the rail reads in.
 const lastTouched = (b) => Math.max(b.updatedAt || 0, ...b.threads.map((t) => t.updatedAt || 0));
 
@@ -2926,12 +2990,63 @@ function launchMatches() {
   });
 }
 
+let launchFound = [];   // what the list shows, in order
+
 function markPick() {
   launchList.querySelectorAll('.launch-row').forEach((row, i) => {
     row.classList.toggle('on', i === launchPick);
     row.setAttribute('aria-selected', String(i === launchPick));
     if (i === launchPick) row.scrollIntoView({ block: 'nearest' });
   });
+  peekLaunch();
+}
+
+// The top of the screen: the highlighted agent, with the last thing it said to
+// you in a bubble. It follows the highlight, keys or pointer, so you see who
+// you are about to talk to and where you left off before you open it.
+const launchPeek = document.getElementById('launchPeek');
+const launchPeekFace = document.getElementById('launchPeekFace');
+const launchPeekSaid = document.getElementById('launchPeekSaid');
+const launchPeekWho = document.getElementById('launchPeekWho');
+let launchPeeked;
+
+// Shown only once you point at an agent or arrow to one — not just because the
+// screen opened with the first one highlighted. Until then, the line of help.
+function peeking(on) {
+  launchPeek.classList.toggle('peeking', on && Boolean(launchFound[launchPick]));
+}
+
+function peekLaunch() {
+  const b = launchFound[launchPick] || null;
+  const q = launchSearch.value.trim();
+  const key = b ? b.id : 'new:' + q;
+  if (key === launchPeeked) return;
+  const first = launchPeeked === undefined;
+  launchPeeked = key;
+
+  launchPeekFace.textContent = '';
+  launchPeekWho.textContent = '';
+  if (b) {
+    launchPeek.style.setProperty('--h', (b.face && b.face.hue) || 199);
+    launchPeekFace.appendChild(Avatar.el(b.face, 26, 'idle'));
+    launchPeekSaid.textContent = b.lastLine || 'No messages yet.';
+    launchPeekSaid.classList.toggle('quiet', !b.lastLine);
+    const who = document.createElement('b');
+    who.textContent = b.name;
+    launchPeekWho.append(who, (b.lastLine ? '' : 'made ') + ago(lastTouched(b)));
+  } else {
+    launchPeek.style.removeProperty('--h');
+    launchPeekFace.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>';
+    launchPeekSaid.textContent = q ? 'No one here is called "' + trim(q, 40) + '" yet. Press Enter to make them.' : 'No agents yet. Make one to get started.';
+    launchPeekSaid.classList.add('quiet');
+  }
+  launchPeekFace.classList.toggle('empty', !b);
+  launchPeek.classList.toggle('empty', !b);
+  // a quick settle when it changes hands, not on the first paint
+  launchPeek.classList.remove('swap');
+  if (first) return;
+  void launchPeek.offsetWidth;
+  launchPeek.classList.add('swap');
 }
 
 // `typed`: repainted by the search, so the rows get a quick fade of their own.
@@ -2943,9 +3058,11 @@ function paintLaunch(typed) {
   launchPick = Math.min(launchPick, Math.max(0, found.length - 1));
   // Searching for something that is not there is usually the name of the
   // agent you were about to make, so the button offers exactly that.
-  launchNewLabel.textContent = q && !found.length ? 'Create "' + trim(q, 40) + '"' : 'Create a new agent';
+  launchNewLabel.textContent = q && !found.length ? 'New agent "' + trim(q, 24) + '"' : 'New agent';
   launchCount.textContent = q ? found.length + ' of ' + bots.length : bots.length + (bots.length === 1 ? ' agent' : ' agents');
   launchList.textContent = '';
+  launchFound = found;
+  peekLaunch();
 
   if (!found.length) {
     const p = document.createElement('p');
@@ -2961,8 +3078,8 @@ function paintLaunch(typed) {
     row.className = 'launch-row' + (i === launchPick ? ' on' : '') + (typed ? ' typed' : '');
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', String(i === launchPick));
-    row.style.setProperty('--i', Math.min(i, 10));   // its place in the rise-in; the tail arrives together
-    row.appendChild(Avatar.el(b.face, 32, 'idle'));
+    row.style.setProperty('--h', (b.face && b.face.hue) || 199);   // the highlight takes the face's colour
+    row.appendChild(Avatar.el(b.face, 30, 'idle'));
 
     const text = document.createElement('span');
     text.className = 'launch-text';
@@ -2978,7 +3095,7 @@ function paintLaunch(typed) {
       name.appendChild(tag);
     }
     const line = document.createElement('small');
-    line.textContent = b.lastLine || b.title || 'Nothing yet';
+    line.textContent = b.title || b.lastLine || 'No chats yet';   // what it last said is up in the bubble
     text.append(name, line);
 
     const meta = document.createElement('span');
@@ -2991,16 +3108,22 @@ function paintLaunch(typed) {
       meta.appendChild(chip);
     }
     const at = document.createElement('span');
+    at.className = 'launch-at';
     at.textContent = ago(lastTouched(b));
     meta.appendChild(at);
-    // Shown on the highlighted row only: Enter opens this one.
-    meta.insertAdjacentHTML('beforeend', '<svg class="launch-go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7v4.5a2 2 0 0 0 2 2h8M15.5 10l3.5 3.5-3.5 3.5"/></svg>');
+    // In place of the time on the highlighted row: Enter opens this one.
+    meta.insertAdjacentHTML('beforeend', '<kbd class="launch-go" aria-hidden="true">Enter</kbd>');
 
     row.append(text, meta);
     row.addEventListener('click', () => launchInto(b));
-    row.addEventListener('mousemove', () => { if (launchPick !== i) { launchPick = i; markPick(); } });
+    row.addEventListener('mousemove', () => { if (launchPick !== i) { launchPick = i; markPick(); } peeking(true); });
     launchList.appendChild(withBin(row, 'launch-item', b));
   });
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
 
 let launchTimer = null;
@@ -3021,15 +3144,20 @@ function showLaunch(quick) {
   launchBusy = false;
   launchSearch.value = '';
   launchPick = 0;
+  launchPeeked = undefined;   // the bubble arrives with the screen, not as a swap
+  peeking(false);
   // Opening an agent does not make it recent — talking to it does — so look
   // for it rather than assuming it is at the top.
   if (quick === true && bot) launchPick = Math.max(0, launchMatches().findIndex((b) => b.id !== bot.id));
   paintLaunch();
-  document.getElementById('launchTitle').textContent = quick === true ? 'Your agents' : 'Welcome to Operator';
-  document.getElementById('launchSkipText').textContent = quick === true ? 'Back to where you were' : 'Skip — just start a chat';
+  document.getElementById('launchTitle').textContent = quick === true ? 'Switch agent' : greeting();
+  document.getElementById('launchDate').textContent =
+    new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  document.getElementById('launchSkipText').textContent = quick === true ? 'Back to where you were' : 'Skip to a new chat';
   launchEl.classList.remove('leaving');
   launchEl.classList.toggle('arriving', quick !== true);
   launchEl.hidden = false;
+  document.body.classList.add('launch-up');
   launchSearch.focus();
 }
 
@@ -3043,6 +3171,7 @@ function hideLaunch(now) {
     const gone = () => {
       launchEl.hidden = true;
       launchEl.classList.remove('leaving', 'arriving', 'behind', 'pointer');
+      document.body.classList.remove('launch-up');
       input.focus();
       done();
     };
@@ -3130,9 +3259,10 @@ async function settleLaunch() {
   launchSearch.focus();
 }
 
-document.getElementById('launchNew').addEventListener('click', launchCreate);
+document.getElementById('launchNew').addEventListener('click', () => launchCreate());
 document.getElementById('launchSkip').addEventListener('click', () => hideLaunch());
-launchSearch.addEventListener('input', () => { launchPick = 0; paintLaunch(true); });
+launchSearch.addEventListener('input', () => { launchPick = 0; paintLaunch(true); peeking(false); });
+launchList.addEventListener('mouseleave', () => peeking(false));
 launchSearch.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
@@ -3140,6 +3270,7 @@ launchSearch.addEventListener('keydown', (e) => {
     if (!n) return;
     launchPick = (launchPick + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
     markPick();
+    peeking(true);
   } else if (e.key === 'Enter') {
     e.preventDefault();
     const found = launchMatches();
@@ -3186,50 +3317,6 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   findAgent();
 });
-
-/* the moving background: colour drifting behind, motes rising through it, and
-   a glow that trails the pointer. Everything moves by transform alone, so it
-   is the GPU's work and the page never repaints for it. */
-
-const launchBg = document.getElementById('launchBg');
-const launchSpot = document.getElementById('launchSpot');
-
-// Motes: scattered once, each on its own slow loop, started part-way through
-// (negative delays) so they never rise in step.
-for (let i = 0; i < 12; i++) {
-  const m = document.createElement('i');
-  m.style.left = (Math.random() * 100).toFixed(1) + '%';
-  m.style.top = (15 + Math.random() * 85).toFixed(1) + '%';
-  m.style.setProperty('--s', (1 + Math.random()).toFixed(1) + 'px');
-  m.style.animationDuration = (18 + Math.random() * 14).toFixed(1) + 's';
-  m.style.animationDelay = (-Math.random() * 32).toFixed(1) + 's';
-  document.getElementById('launchMotes').appendChild(m);
-}
-
-// The glow eases after the pointer and the colour behind shifts a little the
-// other way, which is what gives it depth. Two transforms a frame, and only
-// while the glow is still catching up — nothing runs once it has arrived.
-let spot = null;      // where the glow is
-let aim = null;       // where it is heading
-let spotFrame = 0;
-
-function spotStep() {
-  spot.x += (aim.x - spot.x) * 0.12;
-  spot.y += (aim.y - spot.y) * 0.12;
-  launchSpot.style.transform = `translate3d(${spot.x}px, ${spot.y}px, 0)`;
-  launchBg.style.transform = `translate3d(${(spot.x / innerWidth - 0.5) * -12}px, ${(spot.y / innerHeight - 0.5) * -8}px, 0)`;
-  const moving = Math.abs(aim.x - spot.x) + Math.abs(aim.y - spot.y) > 0.4;
-  spotFrame = moving && launchOpen() ? requestAnimationFrame(spotStep) : 0;
-}
-
-launchEl.addEventListener('pointermove', (e) => {
-  if (stillMotion()) return;
-  aim = { x: e.clientX, y: e.clientY - launchEl.offsetTop };   // the screen starts under the mode bar
-  if (!spot) spot = { ...aim };
-  launchEl.classList.add('pointer');
-  if (!spotFrame) spotFrame = requestAnimationFrame(spotStep);
-});
-launchEl.addEventListener('pointerleave', () => launchEl.classList.remove('pointer'));
 
 /* ── start ───────────────────────────────────────────────────────── */
 

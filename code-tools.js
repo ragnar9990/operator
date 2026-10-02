@@ -12,7 +12,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
-const { z } = require('zod');
+// zod is only needed once tools are built, not at start; this stands in for it
+// until then (require caches it after the first use).
+const z = new Proxy({}, { get: (_t, k) => require('zod').z[k] });
 
 const MAX_READ = 60000;        // characters handed back from one file
 const MAX_OUTPUT = 20000;      // characters from a command or a search

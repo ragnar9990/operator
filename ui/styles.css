@@ -169,11 +169,10 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .chat-row:hover .chat-del, .chat-del:focus-visible { opacity: 1; }
 .chat-del:hover { color: var(--fail); background: rgba(244, 104, 95, 0.12); }
 
-/* The same bin on a pinned agent and on a start-screen row, laid over the
-   row's right end, in space the row keeps free for it. */
+/* The same bin on a pinned agent and on a start-screen line, laid over the
+   line's right end. */
 .bot-item, .launch-item { position: relative; }
 .bot-item .bot-row { padding-right: 36px; }
-.launch-item .launch-row { padding-right: 46px; }
 .bot-item > .chat-del, .launch-item > .chat-del {
   -webkit-app-region: no-drag;
   position: absolute;
@@ -181,7 +180,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
   right: 5px;
   margin: -13px 0 0;
 }
-.launch-item > .chat-del { right: 10px; color: var(--ink-3); }
+.launch-item > .chat-del { right: 8px; color: var(--ink-3); }
 .launch-item > .chat-del:hover { color: var(--fail); }
 .bot-item:hover > .chat-del, .launch-item:hover > .chat-del { opacity: 1; }
 
@@ -1168,8 +1167,11 @@ body.started #intro { display: none; }
 .av-eyes { transform-origin: 16px 16.7px; }
 
 /* at rest: calm, with an occasional blink */
-.av.idle .av-eyes { animation: av-blink 5.2s ease-in-out infinite; }
-@keyframes av-blink { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.12); } }
+/* avatar.js sets av-blinking on the page for one blink every 5.2s. An endless
+   animation on every face did the same, and restyled the page on every frame
+   in between for a blink it only showed 8% of the time. */
+.av-blinking .av.idle .av-eyes { animation: av-blink 0.42s ease-in-out; }
+@keyframes av-blink { 50% { transform: scaleY(0.12); } }
 
 /* thinking: glancing about */
 .av.thinking .av-eyes { animation: av-glance 2.4s ease-in-out infinite; }
@@ -2116,8 +2118,7 @@ html, body { display: flex; flex-direction: column; }
 
 /* Paint only the outer ring of a box: fill the whole thing, then punch out the
    content box so just the padding is left. */
-.composer::before,
-.composer::after,
+.halo,
 .pill::after, .round::after, .chip::after, .mode::after, .rail-btn::after,
 .picker-btn::after, .dry-toggle::after, .target::after, .mini::after,
 .solid-btn::after, .gbtn::after, .conn-more::after, .folder-btn::after,
@@ -2129,6 +2130,12 @@ html, body { display: flex; flex-direction: column; }
 }
 
 @keyframes lit-sweep { to { --lit-angle: 360deg; } }
+
+/* One speed for every travelling line — the task box's, and a hovered
+   button's — so they go round together: slow at rest, quick while a task
+   runs. renderer.js (syncLit) puts them at the same place in the turn. */
+:root { --lit-dur: 6s; }
+body.working { --lit-dur: 1.8s; }
 
 
 /* Buttons: one bright arc travelling the perimeter rather than the whole ring
@@ -2173,7 +2180,7 @@ html, body { display: flex; flex-direction: column; }
 .folder-btn:hover:not(:disabled)::after, .code-new:hover:not(:disabled)::after,
 .danger:hover:not(:disabled)::after, .expand:hover:not(:disabled)::after {
   opacity: 1;
-  animation: lit-sweep 1.6s linear infinite;
+  animation: lit-sweep var(--lit-dur) linear infinite;
 }
 
 /* A disabled button is not offering anything, so it does not light up. */
@@ -2232,12 +2239,36 @@ html, body { display: flex; flex-direction: column; }
 
 .composer { position: relative; }
 
-/* Declared on the pseudo-elements, not the box: a variable is resolved where
-   it is declared, and the angle only animates here. On .composer the lights
-   would be frozen at 0deg. */
-.composer::before,
-.composer::after {
-  --comets: conic-gradient(from var(--lit-angle),
+/* The lights are painted once, on a square wider than the box, and the square
+   is turned round behind the ring: a transform, which the GPU runs on its own.
+   Sweeping the gradient's angle instead (--lit-angle) restyled and repainted
+   the window on every frame the box was on screen — most of what Operator
+   cost while it sat doing nothing. The ring is a real element (.halo) because
+   a pseudo-element cannot hold the square that turns. */
+.halo {
+  position: absolute;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.halo > i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150%;              /* wider than the box's diagonal, so no corner shows */
+  aspect-ratio: 1;
+  background: var(--comets);
+  transform: translate(-50%, -50%);
+  animation: lit-spin var(--lit-dur) linear infinite;
+}
+@keyframes lit-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.composer > .halo {
+  --comets: conic-gradient(
     transparent 0%, transparent 16%,
     color-mix(in srgb, var(--edge) 45%, transparent) 38%,
     var(--edge) 47%,
@@ -2249,47 +2280,37 @@ html, body { display: flex; flex-direction: column; }
     transparent 99.7%);
 }
 
-.composer::before,
-.composer::after {
-  content: '';
-  position: absolute;
-  border-radius: inherit;
-  animation: lit-sweep 6s linear infinite;
-  transition: opacity 0.25s ease;
-  pointer-events: none;
-}
-
 /* the bloom: the lights only, never the ring, or the whole box would haze */
-.composer::before {
+.composer > .halo-bloom {
   inset: -2px;
   padding: 3px;
-  background: var(--comets);
   filter: blur(9px);
   opacity: 0.55;
 }
 
 /* the line itself */
-.composer::after {
+.composer > .halo-line {
   inset: -1px;
   padding: 1.5px;
-  background: var(--comets), linear-gradient(var(--edge-rest), var(--edge-rest));
+  background: linear-gradient(var(--edge-rest), var(--edge-rest));
   opacity: 0.95;
 }
 
-.composer:focus-within::before { opacity: 0.85; }
-.composer:focus-within::after { opacity: 1; }
+.composer:focus-within > .halo-bloom { opacity: 0.85; }
+.composer:focus-within > .halo-line { opacity: 1; }
 
 /* Working. Faster, and the bloom opens up — the same sweep, turned up. */
-body.working .composer::before,
-body.working .composer::after {
-  animation-duration: 1.8s;
-  opacity: 1;
-}
-body.working .composer::before { filter: blur(11px); }
+body.working .composer > .halo { opacity: 1; }
+body.working .composer > .halo-bloom { filter: blur(11px); }
+
+/* Nobody can see the box while the start screen covers the window, and a
+   window you are not using does not need to be busy: the lights hold still,
+   except while a task runs, when they are how you know it is working. */
+body.launch-up .composer > .halo > i,
+body.away:not(.working) .composer > .halo > i { animation-play-state: paused; }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer::before,
-  .composer::after { animation: none; }
+  .halo > i { animation: none; }
 }
 
 /* ── themes ─────────────────────────────────────────────────────────
@@ -2362,13 +2383,13 @@ body.working .composer::before { filter: blur(11px); }
    brightness comes from. "off" removes both rings entirely rather than making
    them transparent, so nothing is painted or animated at all. */
 
-:root[data-glow="subtle"] .composer::before { opacity: 0; }
-:root[data-glow="subtle"] .composer::after { opacity: 0.5; }
-:root[data-glow="subtle"] body.working .composer::after { opacity: 0.8; }
-:root[data-glow="subtle"] body.working .composer::before { opacity: 0; }
+/* "subtle" takes the bloom away rather than hiding it: a blur that is still
+   there at opacity 0 is still worked out on every frame. */
+:root[data-glow="subtle"] .composer > .halo-bloom { display: none; }
+:root[data-glow="subtle"] .composer > .halo-line { opacity: 0.5; }
+:root[data-glow="subtle"] body.working .composer > .halo-line { opacity: 0.8; }
 
-:root[data-glow="off"] .composer::before,
-:root[data-glow="off"] .composer::after { content: none; }
+:root[data-glow="off"] .halo { display: none; }
 
 /* Buttons keep their travelling line on "subtle" and lose it on "off". */
 :root[data-glow="off"] .pill::after, :root[data-glow="off"] .round::after,
@@ -2384,8 +2405,7 @@ body.working .composer::before { filter: blur(11px); }
    The colours stay; only the sweeping stops. Same thing the OS setting does,
    which is why that still wins on its own. */
 
-:root[data-motion="off"] .composer::before,
-:root[data-motion="off"] .composer::after { animation: none; }
+:root[data-motion="off"] .halo > i { animation: none; }
 :root[data-motion="off"] *:hover::after { animation: none !important; }
 
 /* ── Settings → Appearance ──────────────────────────────────────── */
@@ -2642,8 +2662,12 @@ body.working .composer::before { filter: blur(11px); }
 .intro-face .av { width: 44px; height: 44px; }
 
 /* ── the start screen ─────────────────────────────────────────────────
-   Covers everything under the mode bar when the app opens. One column: make
-   an agent, or search the ones you have. */
+   Covers everything under the mode bar when the app opens. A greeting; the
+   highlighted agent saying the last thing it said to you; then one panel like
+   a switchboard — search, a line for each agent, New. No glows or gradients:
+   the colour is the faces, and whichever agent is highlighted tints its
+   bubble and its line in its own hue, and faint rings spread from its face
+   like a signal — the one decoration on the screen, and nowhere else. */
 
 .launch {
   position: fixed;
@@ -2651,97 +2675,175 @@ body.working .composer::before { filter: blur(11px); }
   z-index: 40;                /* below .sheet, which opens straight after Create */
   display: flex;
   justify-content: center;
-  overflow: hidden;           /* the background layers are bigger than the window */
+  overflow-y: auto;
   background: var(--bg);
   animation: fade 0.18s both;
+  --card: color-mix(in srgb, var(--ink) 4%, var(--bg));   /* solid, so the rings pass behind it */
 }
+
+:root[data-theme="light"] .launch { --card: var(--panel); }
 .launch[hidden] { display: none; }
 
 .launch-inner {
-  position: relative;
-  z-index: 1;                 /* above the glow */
+  position: relative;         /* over the dots */
   width: min(600px, 100%);
-  max-height: 100%;
-  overflow-y: auto;           /* only a very short window needs it to scroll */
-  margin: auto 0;
-  padding: 48px 16px 36px;
+  padding: clamp(24px, 9vh, 96px) 20px 40px;   /* pinned from the top, so a search never moves it */
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  text-align: center;
 }
 
-.launch-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 16px;
+.launch kbd {
+  display: inline-block;
+  padding: 0 5px;
   border: 1px solid var(--line-hi);
-  border-radius: 14px;
-  background: var(--raise);
-  color: var(--accent);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--ink-3);
 }
-.launch-mark svg { width: 24px; height: 24px; }
 
+.launch-inner > * { flex: none; }
+.launch-hero {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 2px 18px;
+}
 .launch h1 {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: 24px;
-  font-weight: 550;
-  letter-spacing: -0.48px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
-.launch p { margin: 0 0 26px; color: var(--ink-3); font-size: 14px; }
+.launch-date { color: var(--ink-4); font-size: 13px; white-space: nowrap; }
 
-.launch kbd { font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); }
-
-/* the one big action */
-.launch-new {
+/* The slot under the greeting. A line of help, until you point at an agent
+   or arrow to one; then that agent, with the last thing it said to you. The
+   two share one fixed-height spot, so nothing below ever moves. */
+.launch-peek {
+  --tint: hsl(var(--h, 215) 60% 60%);
+  position: relative;
+  height: 80px;
+  margin: 0 0 16px;
+}
+.launch-lede {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  margin: 0;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  font-size: 14px;
+  transition: opacity 0.18s;
+}
+.launch-peek-card {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 13px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line-hi));
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  gap: 14px;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.launch-new:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); transform: translateY(-1px); }
-.launch-new:active { transform: translateY(0); }
-.launch-new-ic {
+.launch-peek.peeking .launch-lede { opacity: 0; }
+.launch-peek.peeking .launch-peek-card { opacity: 1; transform: none; }
+
+/* the face: a plain circle with a thin ring in the agent's colour */
+.launch-peek-face {
+  position: relative;
   flex: none;
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  background: var(--accent);
-  color: var(--on-accent);
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tint) 50%, transparent);
 }
-.launch-new-ic svg { width: 20px; height: 20px; stroke-width: 2; }
-.launch-new-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.launch-new-text b { font-size: 14px; font-weight: 550; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.launch-new-text small { font-size: 12px; color: var(--ink-3); }
+/* The rings: hairline circles (an SVG mask, so they stay crisp) filled with
+   the agent's colour, behind the card and the panel. */
+.launch-peek-face::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  width: 340px;
+  height: 340px;
+  transform: translate(-50%, -50%);
+  background: var(--tint);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 340 340' fill='none' stroke='black'><circle cx='170' cy='170' r='36' stroke-opacity='.8'/><circle cx='170' cy='170' r='60' stroke-opacity='.5'/><circle cx='170' cy='170' r='90' stroke-opacity='.28'/><circle cx='170' cy='170' r='128' stroke-opacity='.12'/></svg>") center / contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 340 340' fill='none' stroke='black'><circle cx='170' cy='170' r='36' stroke-opacity='.8'/><circle cx='170' cy='170' r='60' stroke-opacity='.5'/><circle cx='170' cy='170' r='90' stroke-opacity='.28'/><circle cx='170' cy='170' r='128' stroke-opacity='.12'/></svg>") center / contain no-repeat;
+  opacity: 0.3;
+  pointer-events: none;
+  transition: background-color 0.3s;
+}
+:root[data-theme="light"] .launch-peek-face::before { opacity: 0.4; }
 
-/* search */
+/* what it last said: a quiet card, its edge in the agent's colour */
+.launch-bubble {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line-hi);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: inset 2px 0 0 var(--tint), var(--card-edge);
+}
+.launch-bubble small { display: block; margin-bottom: 2px; font-size: 12px; line-height: 17px; color: var(--ink-4); }
+.launch-bubble small b { margin-right: 6px; font-weight: 600; color: var(--ink-2); }
+.launch-bubble p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: 2.9em;          /* always two lines tall */
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.launch-bubble p.quiet { color: var(--ink-3); }
+
+/* the panel stays over the rings, even while the card fades */
+.launch-panel { position: relative; z-index: 1; }
+
+/* changing hands: the new one settles in, and the rings pulse out once */
+.launch-peek.swap .launch-bubble p,
+.launch-peek.swap .launch-bubble small { animation: peek-text 0.22s ease-out both; }
+.launch-peek.swap .launch-peek-face::before { animation: peek-ring 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes peek-text { from { opacity: 0; transform: translateX(-4px); } }
+@keyframes peek-ring { from { opacity: 0; transform: translate(-50%, -50%) scale(0.86); } }
+
+/* the switchboard */
+.launch-panel {
+  border: 1px solid var(--line-hi);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 5%, transparent), 0 24px 60px -32px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+:root[data-theme="light"] .launch-panel { box-shadow: 0 18px 44px -28px rgba(20, 20, 30, 0.22); }
+
 .launch-find {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin: 22px 0 8px;
-  padding: 0 12px;
-  height: 42px;
-  border: 1px solid var(--line-hi);
-  border-radius: 12px;
-  background: var(--raise);
+  gap: 10px;
+  height: 46px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
   color: var(--ink-4);
   cursor: text;
-  transition: border-color 0.15s, background 0.15s;
 }
-.launch-find:focus-within { border-color: var(--line-max); background: var(--raise-hi); }
 .launch-find svg { flex: none; width: 16px; height: 16px; }
+.launch-find:focus-within svg { color: var(--ink-2); }
 .launch-find input {
   flex: 1;
   min-width: 0;
@@ -2754,238 +2856,160 @@ body.working .composer::before { filter: blur(11px); }
 }
 .launch-find input::placeholder { color: var(--ink-4); }
 .launch-find input::-webkit-search-cancel-button { display: none; }
-.launch-count { flex: none; font-size: 12px; color: var(--ink-4); }
+.launch-count { flex: none; font-size: 12px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 
-/* the agents you have */
+/* a line for each agent; seven show before it scrolls */
 .launch-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: min(40vh, 420px);
+  gap: 1px;
+  max-height: max(3 * 51px + 12px, min(7 * 51px + 12px, 100vh - 460px));   /* New and the keys stay on screen */
   overflow-y: auto;
-  padding: 2px;
-  text-align: left;
+  padding: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-max) transparent;
 }
 .launch-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 9px 10px;
-  border: 1px solid transparent;
-  border-radius: 11px;
+  height: 50px;
+  padding: 0 10px 0 12px;
+  border: 0;
+  border-radius: 9px;
   background: transparent;
   color: var(--ink);
   text-align: left;
   cursor: pointer;
 }
-.launch-row.on { background: var(--raise-hi); border-color: var(--line); }
+.launch-row.on { background: color-mix(in srgb, hsl(var(--h) 60% 60%) 10%, transparent); }
+/* the highlighted line's mark, in its agent's colour */
+.launch-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 15px;
+  bottom: 15px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: hsl(var(--h) 65% 62%);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.launch-row.on::before { opacity: 1; }
+.launch-row.on .av .av-eyes { animation: av-glance 2.4s ease-in-out infinite; }
+
 .launch-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .launch-name { display: flex; align-items: center; min-width: 0; }
-.launch-name b { min-width: 0; font-size: 13.5px; font-weight: 550; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.launch-text small { font-size: 12px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.launch-meta { flex: none; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-4); }
+.launch-name b { min-width: 0; font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch .role-tag { text-transform: none; letter-spacing: 0; font-size: 10.5px; }
+.launch-text small { font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.launch-meta { flex: none; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-4); }
 .launch-ws {
   max-width: 120px;
-  padding: 1px 7px;
+  padding: 0 7px;
   border-radius: 9999px;
   background: var(--raise-hi);
   color: var(--ink-3);
+  line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.launch-empty { margin: 0; padding: 18px 10px; color: var(--ink-4); font-size: 13px; text-align: center; }
+/* Enter stands in for the time on the highlighted line */
+.launch .launch-go { display: none; }
+.launch-row.on .launch-at { display: none; }
+.launch .launch-row.on .launch-go { display: inline-block; }
+/* the bin takes the right end while the pointer is on a line */
+.launch-item:hover .launch-meta { visibility: hidden; }
 
-.launch-skip {
-  align-self: center;
-  margin-top: 18px;
-  padding: 6px 10px;
+.launch-empty { margin: 0; padding: 14px 12px; color: var(--ink-3); font-size: 13px; }
+
+/* New, as the panel's last line */
+.launch-new {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 50px;
+  padding: 0 16px 0 18px;
   border: 0;
-  border-radius: 8px;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.launch-new:hover { background: var(--raise); color: var(--ink); }
+.launch-new-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px dashed var(--line-max);
+  border-radius: 9px;
+  color: var(--accent);
+}
+.launch-new:hover .launch-new-ic { border-style: solid; border-color: var(--accent); }
+.launch-new-ic svg { width: 15px; height: 15px; stroke-width: 2; }
+.launch-new-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.launch-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--ink-4);
+}
+.launch-keys { display: inline-flex; align-items: center; gap: 4px; }
+.launch-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 -6px 0 auto;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 .launch-skip:hover { color: var(--ink); background: var(--raise); }
 
 @media (max-width: 520px) {
-  .launch-new kbd, .launch-ws { display: none; }
+  .launch-keys, .launch-new kbd, .launch-ws { display: none; }
 }
 
 /* ── the start screen, moving ─────────────────────────────────────────
-   Arrives in order — the mark, the words, the button, the search, then the
-   agents one after another — and leaves by lifting away over the chat it
-   opened. In between: the lit edge runs round Create the way it runs round
-   the task box, and whichever agent is highlighted wakes up and looks about. */
+   One entrance — the whole column fades up once — and it leaves by lifting
+   away over the chat it opened. In between only the highlighted face moves. */
 
-/* a soft pool of the accent behind the mark, breathing slowly */
-.launch::before {
-  content: '';
-  position: absolute;
-  top: -180px;
-  left: 50%;
-  width: 920px;
-  height: 620px;
-  translate: -50% 0;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 10%, transparent), transparent);
-  pointer-events: none;
-  animation: launch-aura 9s ease-in-out infinite;
-}
-@keyframes launch-aura {
-  0%, 100% { opacity: 0.75; transform: scale(1); }
-  50%      { opacity: 1;    transform: scale(1.08); }
-}
+.launch.arriving .launch-inner { animation: launch-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes launch-rise { from { opacity: 0; transform: translateY(8px); } }
 
-/* arriving */
-.launch.arriving .launch-inner > * { animation: launch-rise 0.62s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.launch.arriving .launch-mark    { animation-name: launch-pop; animation-delay: 0.02s; }
-.launch.arriving h1              { animation-delay: 0.08s; }
-.launch.arriving p               { animation-delay: 0.13s; }
-.launch.arriving .launch-new     { animation-delay: 0.19s; }
-.launch.arriving .launch-find    { animation-delay: 0.25s; }
-.launch.arriving .launch-list    { animation: none; }
-.launch.arriving .launch-skip    { animation-delay: 0.5s; }
-.launch.arriving .launch-row {
-  animation: launch-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(0.3s + var(--i, 0) * 0.045s);
-}
-@keyframes launch-rise { from { opacity: 0; transform: translateY(14px); } }
-@keyframes launch-pop  { from { opacity: 0; transform: scale(0.6) rotate(-12deg); } }
-
-/* rows repainted by the search: quick, no stagger */
+/* lines repainted by the search: a quick fade */
 .launch .launch-list .launch-row.typed,
-.launch .launch-list .launch-empty.typed { animation: launch-row-in 0.18s ease-out both; animation-delay: 0s; }
-@keyframes launch-row-in { from { opacity: 0; transform: translateY(4px); } }
+.launch .launch-list .launch-empty.typed { animation: launch-row-in 0.15s ease-out both; }
+@keyframes launch-row-in { from { opacity: 0; } }
 
 /* Leaving. Only opacity on the screen and transform on its content, so the
-   GPU can run it without the page repainting, and it starts fast (ease-out)
-   so it answers the click at once instead of seeming to hang first.
-   The screen is already on its own layer while it is up, so the exit does not
-   have to build one on its first frame. */
+   GPU can run it without the page repainting. */
 .launch { will-change: opacity; }
 .launch.leaving { animation: launch-out 0.24s ease-out both; }
 .launch.leaving .launch-inner { animation: launch-lift 0.24s cubic-bezier(0.32, 0.72, 0, 1) both; will-change: transform; }
 @keyframes launch-out  { to { opacity: 0; } }
-@keyframes launch-lift { to { transform: translateY(-12px) scale(0.985); } }
-
-/* Everything inside freezes where it is for the exit. The lit edge and the
-   blurred bloom under it repaint on every frame they move, which is what kept
-   the exit from being a cheap fade of a still picture. */
-.launch.leaving::before,
-.launch.leaving .launch-bg *,
-.launch.leaving .launch-inner *,
-.launch.leaving .launch-inner *::before,
-.launch.leaving .launch-inner *::after { animation-play-state: paused !important; }
-
-/* ── the moving background ────────────────────────────────────────────
-   Kept quiet on purpose — the ground is still the warm near-black, and blue
-   is still the one colour. Two faint pools of the accent and one of plain
-   light drift on long, out-of-step loops; a few motes rise through them; a
-   glow trails the pointer; grain over the lot. Each piece is painted once and
-   then only moved (transform / opacity), so it is GPU work. */
-
-.launch-bg {
-  position: absolute;
-  inset: -40px;               /* room for the parallax, so no edge ever shows */
-  pointer-events: none;
-  opacity: 0.95;
-  will-change: transform;
-}
-:root[data-theme="light"] .launch-bg { opacity: 0.6; }
-
-.launch-blob {
-  position: absolute;
-  width: 58vmax;
-  height: 58vmax;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, var(--c), transparent);
-  will-change: transform;
-}
-.launch-blob.b1 {
-  --c: color-mix(in srgb, var(--accent) 14%, transparent);
-  left: -16vmax; top: -24vmax;
-  animation: launch-drift-1 50s ease-in-out infinite alternate;
-}
-.launch-blob.b2 {
-  --c: color-mix(in srgb, var(--ink) 5%, transparent);
-  right: -22vmax; top: 4vh;
-  animation: launch-drift-2 64s ease-in-out infinite alternate;
-}
-.launch-blob.b3 {
-  --c: color-mix(in srgb, var(--accent) 8%, transparent);
-  left: 12vw; bottom: -34vmax;
-  animation: launch-drift-3 56s ease-in-out infinite alternate;
-}
-@keyframes launch-drift-1 {
-  0%   { transform: translate(0, 0) scale(1); }
-  50%  { transform: translate(8vw, 5vh) scale(1.08); }
-  100% { transform: translate(15vw, -1vh) scale(0.96); }
-}
-@keyframes launch-drift-2 {
-  0%   { transform: translate(0, 0) scale(1.02); }
-  50%  { transform: translate(-9vw, 8vh) scale(0.95); }
-  100% { transform: translate(-3vw, 15vh) scale(1.07); }
-}
-@keyframes launch-drift-3 {
-  0%   { transform: translate(0, 0) scale(0.97); }
-  50%  { transform: translate(11vw, -6vh) scale(1.06); }
-  100% { transform: translate(-5vw, -10vh) scale(1); }
-}
-
-/* motes — placed and timed by renderer.js */
-.launch-motes { position: absolute; inset: 0; }
-.launch-motes i {
-  position: absolute;
-  width: var(--s, 2px);
-  height: var(--s, 2px);
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--ink) 80%, var(--accent));
-  opacity: 0;
-  will-change: transform, opacity;
-  animation: launch-mote 24s linear infinite;
-}
-:root[data-theme="light"] .launch-motes i { background: var(--ink-3); }
-@keyframes launch-mote {
-  0%   { transform: translate3d(0, 20px, 0); opacity: 0; }
-  20%  { opacity: 0.35; }
-  70%  { opacity: 0.2; }
-  100% { transform: translate3d(8px, -120px, 0); opacity: 0; }
-}
-
-/* the glow that trails the pointer — moved by renderer.js, faded in here */
-.launch-spot {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 560px;
-  height: 560px;
-  margin: -280px 0 0 -280px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 6%, transparent), transparent);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.6s ease;
-  will-change: transform;
-}
-.launch.pointer .launch-spot { opacity: 1; }
-
-/* grain, and a vignette that pulls the eye to the middle */
-.launch-grain {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.28)),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  opacity: 0.16;
-}
-:root[data-theme="light"] .launch-grain {
-  background:
-    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.06)),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .35 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-}
+@keyframes launch-lift { to { transform: translateY(-10px) scale(0.99); } }
+.launch.leaving .launch-inner * { animation-play-state: paused !important; }
 
 /* ── Create → its panel ───────────────────────────────────────────────
    The card grows out of the button (renderer.js animates its transform from
@@ -3026,97 +3050,27 @@ body.working .composer::before { filter: blur(11px); }
 @keyframes sheet-fade-out { to { opacity: 0; } }
 @keyframes sheet-card-out { to { opacity: 0; transform: translateY(6px) scale(0.98); } }
 
-/* the start screen, with the panel over it: pushed back a little, and its own
-   little lights stilled — the scrim blurs what is behind it, and a still
-   picture is far cheaper to keep blurred. The colour behind keeps drifting. */
+/* the start screen, with the panel over it: pushed back a little, and its
+   faces stilled — the scrim blurs what is behind it, and a still picture is
+   far cheaper to keep blurred. */
 .launch-inner { transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.45s ease; }
-.launch.behind .launch-inner { transform: scale(0.96); opacity: 0.5; }
+.launch.behind .launch-inner { transform: scale(0.97); opacity: 0.5; }
 .launch.behind .launch-inner *,
 .launch.behind .launch-inner *::before,
 .launch.behind .launch-inner *::after { animation-play-state: paused !important; }
 
-/* the mark floats, and sends out a slow ring now and then */
-.launch-mark { position: relative; }
-.launch-mark svg { animation: launch-float 4.5s ease-in-out infinite; }
-@keyframes launch-float { 50% { transform: translateY(-2px); } }
-.launch-mark::after {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border: 1px solid var(--accent);
-  border-radius: inherit;
-  opacity: 0;
-  pointer-events: none;
-  animation: launch-ring 3.6s cubic-bezier(0.22, 1, 0.36, 1) 1s infinite;
-}
-@keyframes launch-ring {
-  0%       { opacity: 0.55; transform: scale(1); }
-  60%, 100% { opacity: 0; transform: scale(1.6); }
-}
-
-/* Create carries the lit edge — the task box's comet, one head instead of two */
-.launch-new { position: relative; }
-.launch-new::before,
-.launch-new::after {
-  --comets: conic-gradient(from var(--lit-angle),
-    transparent 0%, transparent 52%,
-    color-mix(in srgb, var(--edge) 45%, transparent) 84%,
-    var(--edge) 97%,
-    var(--edge-head) 99.4%,
-    transparent 99.7%);
-  content: '';
-  position: absolute;
-  border-radius: inherit;
-  pointer-events: none;
-  animation: lit-sweep 5s linear infinite;
-  transition: opacity 0.25s ease;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-}
-.launch-new::before { inset: -2px; padding: 3px; background: var(--comets); filter: blur(8px); opacity: 0.5; }
-.launch-new::after  { inset: -1px; padding: 1.5px; background: var(--comets); opacity: 0.9; }
-.launch-new:hover::before,
-.launch-new:hover::after { animation-duration: 1.8s; opacity: 1; }
-.launch-new-ic { transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s; }
-.launch-new:hover .launch-new-ic { transform: rotate(90deg) scale(1.06); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent); }
-.launch-new:active .launch-new-ic { transform: rotate(90deg) scale(0.94); }
-
-:root[data-glow="subtle"] .launch-new::before { opacity: 0; }
-:root[data-glow="off"] .launch-new::before,
-:root[data-glow="off"] .launch-new::after { content: none; }
-
-/* the search box lights up a little when it has you */
-.launch-find { transition: border-color 0.2s, background 0.2s, box-shadow 0.25s; }
-.launch-find:focus-within { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 11%, transparent); }
-.launch-find:focus-within svg { color: var(--accent); transition: color 0.2s; }
-
-/* the highlighted agent: the row eases in, the face lifts and glances about,
-   and the Enter arrow slides in on the right */
-.launch-row { transition: background 0.18s, border-color 0.18s; }
-.launch-row .av { transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.launch-row.on .av { transform: scale(1.08) translateY(-1px); }
-.launch-row.on .av .av-eyes { animation: av-glance 2.4s ease-in-out infinite; }
-.launch-go {
-  width: 15px;
-  height: 15px;
-  color: var(--ink-3);
-  opacity: 0;
-  transform: translateX(-5px);
-  transition: opacity 0.18s, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.launch-row.on .launch-go { opacity: 1; transform: none; }
+/* With the window in the background, the one loop holds still. */
+body.away .launch-row .av-eyes,
+body.away .launch-peek .av-eyes { animation-play-state: paused; }
 
 /* Motion off, from Settings or the OS: everything above holds still, and
    the screen just appears and goes. */
 :root[data-motion="off"] .launch,
 :root[data-motion="off"] .launch *,
-:root[data-motion="off"] .launch::before,
 :root[data-motion="off"] .launch *::before,
 :root[data-motion="off"] .launch *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
-  .launch, .launch *, .launch::before, .launch *::before, .launch *::after { animation: none !important; transition: none !important; }
+  .launch, .launch *, .launch *::before, .launch *::after { animation: none !important; transition: none !important; }
 }
 
 /* Motion off: the panel just appears and goes (renderer.js skips the grow and
@@ -3740,6 +3694,122 @@ body.your-turn {
 .vr-row b { font-weight: 600; }
 .vr-row small { flex: 1; min-width: 0; color: #8f99bd; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vt-z { color: #8f99bd; font-size: 11px; font-style: italic; animation: vt-bounce 1.6s ease-in-out infinite; }
+
+/* ── one look, everywhere ─────────────────────────────────────────────
+   The start screen's language, carried through the rest of the app, so it
+   all reads as one thing:
+   · panels are solid cards with a hairline edge, a faint light along the
+     top and a soft shadow under them;
+   · each agent has a colour — its face's — and whatever is about it takes
+     it: its selected row (a tint and a short bar) and its name over a reply;
+   · headings are sentence case, never capitals;
+   · no haze of colour at rest. The task box lights up while it works. */
+
+:root {
+  --card: color-mix(in srgb, var(--ink) 4%, var(--bg));
+  --card-edge: inset 0 1px 0 color-mix(in srgb, var(--ink) 5%, transparent);
+  --card-lift: 0 24px 60px -32px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme="light"] {
+  --card: var(--panel);
+  --card-lift: 0 18px 44px -28px rgba(20, 20, 30, 0.22);
+}
+
+/* headings in sentence case, the way the start screen writes them */
+.rail-head, .sp-head, .conn-divider, .skill-editor-head, .role-tag {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.rail-head, .sp-head { font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.role-tag { font-size: 10.5px; }
+
+/* keys, drawn the same wherever they are shown */
+kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--line-hi);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--ink-3);
+}
+
+/* the task box: a card like the start screen's panel. The blurred bloom only
+   shows while a task runs — at rest it is just the thin lit line. */
+.composer {
+  border-color: var(--line-hi);
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: var(--card-edge), var(--card-lift);
+}
+body:not(.working) .composer > .halo-bloom { display: none; }
+
+/* your messages: a bubble on the card, its square corner towards you */
+.turn.you > span {
+  border: 1px solid var(--line-hi);
+  border-radius: 16px 4px 16px 16px;
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+/* the agent's replies: its face and its name, in its colour, above them */
+.said-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.said-head b { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: hsl(var(--h) 60% 64%); }
+:root[data-theme="light"] .said-head b { color: hsl(var(--h) 55% 40%); }
+.said > .says { padding-left: 30px; }   /* under the name, clear of the face */
+
+/* an agent's selected row, in the rail and on the Employees list: a tint and
+   a short bar in its own colour */
+.bot-row, .chat-row, .staff-row { position: relative; }
+.bot-row.on, .chat-row.on, .staff-row.on { background: color-mix(in srgb, hsl(var(--h, 215) 60% 60%) 11%, transparent); }
+.bot-row.on::before, .chat-row.on::before, .staff-row.on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 0 3px 3px 0;
+  background: hsl(var(--h, 215) 65% 62%);
+}
+
+/* an employee's messages: the start screen's bubble, in its colour */
+.sd-msg.them .sd-bubble {
+  border: 1px solid color-mix(in srgb, hsl(var(--h, 215) 60% 60%) 24%, var(--line-hi));
+  border-radius: 4px 16px 16px 16px;
+  background: color-mix(in srgb, hsl(var(--h, 215) 60% 60%) 8%, var(--card));
+}
+.sd-msg.you .sd-bubble {
+  border: 1px solid var(--line-hi);
+  border-radius: 16px 4px 16px 16px;
+  background: var(--card);
+}
+.sd-msg.first .sd-bubble { border-color: color-mix(in srgb, hsl(var(--h, 215) 60% 60%) 45%, var(--line-hi)); }
+.sd-msg.ask .sd-bubble { border-color: rgba(240, 161, 46, 0.55); }
+
+/* panels that float — Settings, an agent's panel, menus — get the same edge */
+.sheet-card, .menu {
+  box-shadow: var(--card-edge), 0 30px 70px -20px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme="light"] .sheet-card,
+:root[data-theme="light"] .menu { box-shadow: var(--card-edge), 0 24px 60px rgba(20, 20, 30, 0.18); }
+
+/* the box you message an employee in: the task box's card */
+.staff-compose { border-top-color: transparent; }
+.staff-compose textarea {
+  border-color: var(--line-hi);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-edge), var(--card-lift);
+}
+
 /* ── Playbooks (ui/playbooks.js) ───────────────────────────────────── */
 .pb-row-ic { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--raise-hi); color: var(--ink-3); }
 .pb-row-ic svg, .pb-mark svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -3925,12 +3995,14 @@ body.your-turn {
 #wtFolderBox, #wtEmailBox, #wtTaskRow { display: flex; flex-direction: column; gap: 18px; }
 #wtFolderBox[hidden], #wtEmailBox[hidden], #wtTaskRow[hidden], #wtPbRow[hidden] { display: none; }
 #wtFolderBox .field-hint, #wtEmailBox .field-hint { margin-top: -10px; }
+
 /* ── a model on this computer (ui/local.js) ────────────────────────── */
 .lc-models { display: flex; flex-direction: column; gap: 6px; }
 .lc-models[hidden] { display: none; }
 .lc-model { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raise); font-size: 12.5px; }
 .lc-model b { font-weight: 550; }
 .lc-model small { flex: 1; min-width: 0; color: var(--ink-4); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ── computers (ui/fleet.js) ───────────────────────────────────────── */
 .fleet-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .fleet-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--raise); }

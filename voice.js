@@ -19,7 +19,9 @@
 //   paragraph that reads fine on screen is unbearable out loud, so the prompt
 //   is blunt about length and the tools return short summaries, not dumps.
 
-const { z } = require('zod');
+// zod is only needed once tools are built, not at start; this stands in for it
+// until then (require caches it after the first use).
+const z = new Proxy({}, { get: (_t, k) => require('zod').z[k] });
 const errors = require('./errors');
 
 // Haiku, and not as a compromise. This is routing and short decisions over a

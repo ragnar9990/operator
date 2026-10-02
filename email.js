@@ -5,8 +5,10 @@
 // Providers are matched by the address domain so the user only types their email
 // and an app password; the server details are filled in for them.
 
-const { ImapFlow } = require('imapflow');
-const nodemailer = require('nodemailer');
+// Loaded on first use: together they add about a third of a second to every
+// start, and most runs never touch email.
+const imap = () => require('imapflow');
+const mailer = () => require('nodemailer');
 
 const PROVIDERS = {
   'gmail.com':      { imap: 'imap.gmail.com',        smtp: 'smtp.gmail.com',        label: 'Gmail', appPassword: true },
@@ -51,7 +53,7 @@ function authFor(c) {
 async function withImap(cfg, fn) {
   const c = resolve(cfg);
   if (!c.imapHost) throw new Error('unknown email provider — set the IMAP server manually');
-  const client = new ImapFlow({
+  const client = new (imap().ImapFlow)({
     host: c.imapHost,
     port: c.imapPort,
     secure: true,
@@ -86,7 +88,7 @@ async function test(cfg) {
       lock.release();
     });
     // SMTP too, so "connected" means it can actually send, not just read.
-    const t = nodemailer.createTransport({
+    const t = mailer().createTransport({
       host: c.smtpHost, port: c.smtpPort, secure: c.smtpPort === 465,
       auth: { user: c.email, pass: c.password },
       connectionTimeout: 15000, greetingTimeout: 10000, socketTimeout: 20000,
@@ -237,7 +239,7 @@ async function read({ cfg, uid, mailbox = 'INBOX' }) {
 async function send({ cfg, to, subject, body }) {
   const c = resolve(cfg);
   if (!c.smtpHost) throw new Error('unknown email provider — set the SMTP server manually');
-  const t = nodemailer.createTransport({
+  const t = mailer().createTransport({
     host: c.smtpHost, port: c.smtpPort, secure: c.smtpPort === 465,
     auth: c.oauth
       ? { type: 'OAuth2', user: c.email, accessToken: c.accessToken }

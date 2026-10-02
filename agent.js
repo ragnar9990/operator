@@ -14,7 +14,9 @@
 // system prompt below are built once and handed to whichever one is driving,
 // so the two halves cannot drift apart.
 
-const { z } = require('zod');
+// zod is only needed once tools are built, not at start; this stands in for it
+// until then (require caches it after the first use).
+const z = new Proxy({}, { get: (_t, k) => require('zod').z[k] });
 const browser = require('./browser');
 const desktop = require('./desktop');
 const nim = require('./nim');

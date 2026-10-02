@@ -97,6 +97,7 @@
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'staff-row' + (current && current.id === e.id ? ' on' : '');
+      row.style.setProperty('--h', (e.face && e.face.hue) || 199);   // the highlight takes the face's colour
       row.appendChild(Avatar.el(e.face, 30, e.working ? 'working' : e.waiting ? 'waiting' : 'idle'));
       const s = status(e);
       const text = document.createElement('span');
@@ -192,6 +193,7 @@
     const e = current;
     const nearBottom = threadEl.scrollHeight - threadEl.scrollTop - threadEl.clientHeight < 80;
     threadEl.textContent = '';
+    threadEl.style.setProperty('--h', (e.face && e.face.hue) || 199);   // its bubbles are in its colour
     const turns = e.turns || [];
 
     if (!turns.length) {
