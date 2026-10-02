@@ -821,6 +821,7 @@ function replay(turns) {
     else if (t.k === 'error') turn('', errorCard(t.title, t.fix, t.text));
     else if (t.k === 'note') turn('', noteCard(t.text));
     else if (t.k === 'check') turn('', checkCard(t));
+    else if (t.k === 'offer') turn('', offerCard(t));
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'screen') turn('', screenCard(t));
     else if (t.k === 'helpers') turn('', '').appendChild(helpersCard(t));
@@ -1113,6 +1114,15 @@ function screenCard(v) {
     ? 'Working on <b>your</b> screen' + (v.reason ? ' — ' + esc(v.reason) : '')
     : (v.auto ? 'Finished — your screen is yours again' : 'Gave your screen back');
   return '<div class="event screen"><svg viewBox="0 0 24 24" aria-hidden="true">' + icon + '</svg><span>' + text + '</span></div>';
+}
+
+// A job that worked, offered as a playbook: the next time it runs with no
+// model. The button is wired once, on the thread (see below), because cards
+// are redrawn from the saved transcript.
+function offerCard(v) {
+  return '<div class="pb-offer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg>' +
+    '<span class="pb-offer-text"><b>Save this as a playbook?</b><i>Its ' + Number(v.steps) + ' steps replay with no AI next time — free, in seconds.</i></span>' +
+    '<button class="pill sm" type="button" data-pb-task="' + esc(v.taskId) + '">Save as playbook</button></div>';
 }
 
 function routineCard(name) {
@@ -1905,6 +1915,12 @@ window.operator.onEvent((evt) => {
       if (evt.ok === false) showDots();
       break;
 
+    case 'playbook_offer':
+      closeGroup();
+      turn('', offerCard(evt));
+      rec({ k: 'offer', taskId: evt.taskId, steps: evt.steps });
+      break;
+
     // text is null when the result just repeats what was already said
     case 'done':
       closeGroup();
@@ -1976,8 +1992,29 @@ async function run(override) {
 
   if (override === undefined) { input.value = ''; resize(); }
   startRun();
-  await window.operator.runTask(task, runModel(), bot.id, chat.id, dryRun);
+  const r = await window.operator.runTask(task, runModel(), bot.id, chat.id, dryRun);
+  // Turned away before it started — something else (a playbook, a routine)
+  // already has the computer. Say so, rather than looking busy for ever.
+  if (r && r.ok === false) {
+    turn('', errorCard('Not started', 'Something else is running on this computer — a playbook or a routine. Wait for it to finish, then try again.', r.error));
+    endRun();
+  }
 }
+
+// "Save as playbook" on a finished run (offerCard): make it, then go to it.
+thread.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-pb-task]');
+  if (!b || b.disabled) return;
+  b.disabled = true;
+  const r = await window.operator.playbookFromTask(b.dataset.pbTask);
+  if (!r || !r.ok) {
+    b.disabled = false;
+    turn('', errorCard('Could not save that', (r && r.error) || 'Something went wrong.'));
+    return;
+  }
+  b.textContent = 'Saved';
+  if (window.__playbooks) window.__playbooks.open(r.playbook.id);
+});
 
 composer.addEventListener('submit', (e) => { e.preventDefault(); run(); });
 // Stop is instant here, not when the backend gets round to confirming it: a
@@ -3976,14 +4013,18 @@ document.addEventListener('keydown', (e) => {
   if (!codeView) return;
 
   const staffView = document.getElementById('staffView');
+  const pbView = document.getElementById('pbView');
   modes.forEach((m) => m.addEventListener('click', () => {
     modes.forEach((x) => x.classList.toggle('active', x === m));
     const isCode = m.dataset.mode === 'code';
     const isStaff = m.dataset.mode === 'employees';
-    shell.hidden = isCode || isStaff;
+    const isPb = m.dataset.mode === 'playbooks';
+    shell.hidden = isCode || isStaff || isPb;
     codeView.hidden = !isCode;
     if (staffView) staffView.hidden = !isStaff;
     if (isStaff && window.__employees) window.__employees.show();
+    if (pbView) pbView.hidden = !isPb;
+    if (window.__playbooks) window.__playbooks.shown(isPb);
     // Ask what is still running before painting the list, so a chat that has
     // been building away while you were on the Agents side shows it.
     if (isCode) { syncRunning().then(loadHistory); loadModels(); loadBotChoices().then(paintBot); }

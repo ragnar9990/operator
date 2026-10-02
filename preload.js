@@ -145,6 +145,29 @@ contextBridge.exposeInMainWorld('operator', {
   codeRunningChats: () => ipcRenderer.invoke('code:running'),
   onCode: (cb) => ipcRenderer.on('code-event', (_e, payload) => cb(payload)),
 
+  // playbooks: a job that worked, replayed with no model (playbooks.js)
+  playbooks: () => ipcRenderer.invoke('playbooks:list'),
+  playbook: (id) => ipcRenderer.invoke('playbooks:get', id),
+  playbooksRecent: () => ipcRenderer.invoke('playbooks:recent'),
+  playbookFromTask: (taskId) => ipcRenderer.invoke('playbooks:fromTask', taskId),
+  playbookUpdate: (id, patch) => ipcRenderer.invoke('playbooks:update', id, patch),
+  playbookMakeInput: (id, value, name) => ipcRenderer.invoke('playbooks:makeInput', id, value, name),
+  playbookDelete: (id) => ipcRenderer.invoke('playbooks:delete', id),
+  playbookRun: (id, opts) => ipcRenderer.invoke('playbooks:run', id, opts),
+  playbookStop: () => ipcRenderer.invoke('playbooks:stop'),
+  playbookSuggest: (id) => ipcRenderer.invoke('playbooks:suggest', id),
+  onPlaybookEvent: (cb) => ipcRenderer.on('playbook-event', (_e, payload) => cb(payload)),
+  onPlaybooksChanged: (cb) => ipcRenderer.on('playbooks-changed', (_e, payload) => cb(payload)),
+  onPlaybookOpen: (cb) => ipcRenderer.on('playbook-open', (_e, payload) => cb(payload)),
+
+  // watchers: run a playbook or a job when a file lands or an email arrives (watchers.js)
+  watchers: () => ipcRenderer.invoke('watchers:list'),
+  watcherCreate: (spec) => ipcRenderer.invoke('watchers:create', spec),
+  watcherUpdate: (id, spec) => ipcRenderer.invoke('watchers:update', id, spec),
+  watcherDelete: (id) => ipcRenderer.invoke('watchers:delete', id),
+  watcherTest: (id) => ipcRenderer.invoke('watchers:test', id),
+  onWatchersChanged: (cb) => ipcRenderer.on('watchers-changed', (_e, payload) => cb(payload)),
+
   // audit trail (Settings → Audit) — query and export only; nothing here writes
   auditQuery: (filter) => ipcRenderer.invoke('audit:query', filter),
   auditFacets: () => ipcRenderer.invoke('audit:facets'),

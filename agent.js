@@ -144,6 +144,21 @@ GENERAL:
 // was scheduled or cancelled — so the check at the end is shown it.
 const SHOW_RESULT = new Set(['run_command', 'schedule', 'list_schedule', 'cancel_schedule']);
 
+// Where a step left the world — the page it was on, the window in front — read
+// back out of what the tool already returned. A playbook (playbooks.js) keeps
+// it as the step's checkpoint, so a replay can tell it has gone off course
+// without asking a model. A code fetched for a sign-in is kept too, only so the
+// recording can tell which later keystrokes were that code; it never reaches disk.
+function afterOf(name, out) {
+  const text = out && Array.isArray(out.content)
+    ? out.content.filter((x) => x.type === 'text').map((x) => x.text).join('\n') : '';
+  if (!text) return undefined;
+  const url = (text.match(/^URL: (\S+)/m) || [])[1];
+  const win = (text.match(/Foreground window: (.+)$/m) || text.match(/(?:Now showing|^Reading) (.+)$/m) || [])[1];
+  const code = name === 'get_verification_code' ? (text.match(/^Code (\S+)/) || [])[1] : undefined;
+  return url || win || code ? { url, window: win ? win.trim() : undefined, code } : undefined;
+}
+
 // Microsoft Store apps, by the names and links people launch them with. They
 // cannot open on the agent's hidden desktop (see launch_app).
 const STORE_APP = /^(calc|calc\.exe|calculator|settings|ms-settings:.*|photos|ms-photos:.*|camera|microsoft\.windows\.camera:.*|clock|alarms|alarms & clock|ms-clock:.*|microsoft store|store|ms-windows-store:.*|mail|calendar|maps|bingmaps:.*|xbox|media player|mswindowsmusic:.*|sticky notes|weather|msnweather:.*|snipping tool|ms-screenclip:.*|sound recorder|voice recorder|microsoft to ?do|ms-todo:.*|phone link)$/i;
@@ -223,7 +238,7 @@ function makeCtx({ onEvent, abortController, dryRun }) {
 // screen_do does the same job in one round trip. The tools are still here and
 // still correct; pass textPath:true to use them.
 async function createSession({ userDataDir, model, resume, bot, teammates, messageBot, codeChats, email, schedule, alwaysSkills, skillIndex, dryRun, textPath = false,
-                               tuning = {},
+                               tuning = {}, handsOnly = false,
                                hasMessageBot = Boolean(messageBot), hasCodeChats = Boolean(codeChats), hasEmail = Boolean(email) }) {
   const ctx = makeCtx({ dryRun });
   ctx.messageBot = messageBot; ctx.codeChats = codeChats; ctx.email = email; ctx.schedule = schedule;
@@ -344,7 +359,7 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
         // check at the end (main.js → verify.js) gets to see it.
         const output = SHOW_RESULT.has(name) && out && Array.isArray(out.content)
           ? out.content.map((x) => x.text || '').join('\n').slice(0, 1500) : undefined;
-        c.onEvent({ type: 'tool_done', name, input: args, text, ok: !failed, ms: Date.now() - started, output });
+        c.onEvent({ type: 'tool_done', name, input: args, text, ok: !failed, ms: Date.now() - started, output, after: afterOf(name, out) });
         return out;
       } catch (err) {
         c.onEvent({ type: 'tool_done', name, input: args, text, ok: false, ms: Date.now() - started,
@@ -1444,6 +1459,10 @@ YOU ARE REHEARSING (DRY RUN). Nothing you do can change anything. Looking is rea
     if (tools.length !== n - 2) throw new Error('textPath:false expected to remove exactly 2 tools');
   }
 
+  // A playbook replays steps without a model, through these same tools — so a
+  // replayed click is timed, audited and rehearsed exactly like the agent's.
+  if (handsOnly) return { tools, ctx };
+
   // An unknown id from the renderer falls back rather than failing the task.
   const chosen = isModel(model) ? model : DEFAULT_MODEL;
 
@@ -1764,4 +1783,17 @@ async function runTask(prompt, opts) {
   }
 }
 
-module.exports = { runTask, askBot, closeSession, MODELS, CLAUDE_MODELS, listModels, DEFAULT_MODEL, isClaudeModel, nim };
+// The agent's hands with no brain attached: every tool, by name, for a playbook
+// to call in order. Built with the text path on, so a step recorded as a named
+// click can be replayed as one. `onEvent` gets the same tool_done events a run does.
+async function hands({ userDataDir, email, dryRun, onEvent, abortController }) {
+  const { tools, ctx } = await createSession({
+    userDataDir, email, hasEmail: Boolean(email), dryRun, textPath: true, handsOnly: true,
+  });
+  ctx.onEvent = onEvent || (() => {});
+  ctx.abortController = abortController;
+  ctx.dryRun = Boolean(dryRun);
+  return new Map(tools.map((t) => [t.name, t]));
+}
+
+module.exports = { runTask, askBot, closeSession, hands, MODELS, CLAUDE_MODELS, listModels, DEFAULT_MODEL, isClaudeModel, nim };

@@ -39,6 +39,8 @@ const email = require('./email');
 const code = require('./code');
 const googleOAuth = require('./google-oauth');
 const files = require('./files');
+const playbooks = require('./playbooks');
+const watchers = require('./watchers');
 
 let win = null;
 let running = null; // { abortController }
@@ -175,6 +177,8 @@ app.whenReady().then(() => {
 
   store.init(app.getPath('userData'));
   audit.init(app.getPath('userData'));
+  playbooks.init(app.getPath('userData'));
+  watchers.init(app.getPath('userData'), watcherHooks);
   checkEmailSoon();
 
   // The NVIDIA NIM key, if there is one, and the live list of what that key
@@ -508,6 +512,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
   running = { abortController, botId, chatId, token, employee: Boolean(employee) };
   send('agent-event', { type: 'status', text: 'running', botId, chatId, silent: Boolean(silent), dryRun: Boolean(dryRun), employee: Boolean(employee) });
 
+  // Every run is recorded as it goes, so one that worked can be saved as a
+  // playbook afterwards (playbooks.js). An employee has no hands to replay.
+  if (!employee) playbooks.startRun(taskId, { prompt, botId, botName: bot && bot.name, model: model || (bot && bot.model) || agent.DEFAULT_MODEL, dryRun });
+
   // Whether the agent got far enough to touch anything. If it did not, a retry
   // is free; if it did, a retry would do the same work to the machine twice.
   let progressed = false;
@@ -541,6 +549,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
       } else if (evt.name !== 'run_helpers') acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
       if (/^(screen_|launch_app|focus_window|list_windows)/.test(evt.name)) usedScreen = true;
       if (evt.name.startsWith('browser_')) usedBrowser = true;
+      playbooks.recordStep(taskId, evt);
       audit.write({
         botId: botId || null,
         botName: (bot && bot.name) || null,
@@ -657,22 +666,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
     return reply;
   };
 
-  // Email connector: hand the agent a facade bound to the stored account, if one
-  // is connected. Credentials stay here — the agent only ever calls these. For a
-  // Google (OAuth) account we refresh the access token on demand, since a task
-  // can outlast the token's hour, and pass the fresh one into email.js.
-  const emailConnected = store.getConnector('email');
-  // An expired sign-in is not handed over: the agent would be told it can read
-  // codes and then fail at every one.
-  const emailApi = emailConnected && emailConnected.connected && !emailConnected.expired ? {
-    // Which inbox this is, so the agent signs up with it — codes sent to any
-    // other address are ones it can never fetch.
-    address: emailConnected.email || null,
-    list: async (o) => email.list({ cfg: await freshEmailCfg(), ...o }),
-    read: async (o) => email.read({ cfg: await freshEmailCfg(), ...o }),
-    send: async (o) => email.send({ cfg: await freshEmailCfg(), ...o }),
-    mailboxes: async () => email.mailboxes({ cfg: await freshEmailCfg() }),
-  } : null;
+  const emailApi = connectedEmail();
 
   // What a bot can do with the coding side: see the conversations, read one for
   // context, and send it a task. Reading is free; messaging actually runs the
@@ -812,6 +806,10 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
     return r;
   }
 
+  // Whether the run ended well enough to offer saving it as a playbook.
+  let finalVerdict = null;
+  let failed = false;
+
   try {
     const resume = botId && chatId ? store.sessionOf(botId, chatId) : null;
     try {
@@ -843,13 +841,22 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
         'If you need something else only they can do or tell you, call wait_for_user, or end with NEEDS YOU: and what you need.');
       verdict = await checkTheWork();
     }
+    finalVerdict = verdict;
   } catch (err) {
+    failed = true;
     // Raw SDK and Node failures mean nothing to someone who has just installed
     // this. errors.js turns the common ones into a sentence plus the fix, and
     // keeps the original so a bug report still has it.
     const e = errors.explain(err);
     if (!e.stopped) onEvent({ type: 'error', title: e.title, fix: e.fix, text: e.detail || e.title });
   } finally {
+    // A job that worked, and did something a playbook can repeat, is offered
+    // as one: next time it runs with no model at all. Only to someone watching.
+    const worked = !failed && !abortController.signal.aborted && !(finalVerdict && finalVerdict.ok === false);
+    const kept = employee ? null : playbooks.endRun(taskId, { ok: worked });
+    if (kept && worked && !kept.usedHelpers && !dryRun && !silent && kept.steps >= 2) {
+      onEvent({ type: 'playbook_offer', taskId, steps: kept.steps });
+    }
     // Hand the screen back. A follow-up that needs it again can simply ask for
     // it; leaving the agent holding the user's mouse after the job is done is
     // the thing the private desktop exists to prevent.
@@ -866,6 +873,25 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
     }
   }
   return { ok: true };
+}
+
+// Email connector: hand the agent a facade bound to the stored account, if one
+// is connected. Credentials stay here — the agent only ever calls these. For a
+// Google (OAuth) account we refresh the access token on demand, since a task
+// can outlast the token's hour, and pass the fresh one into email.js.
+function connectedEmail() {
+  const emailConnected = store.getConnector('email');
+  // An expired sign-in is not handed over: the agent would be told it can read
+  // codes and then fail at every one.
+  return emailConnected && emailConnected.connected && !emailConnected.expired ? {
+    // Which inbox this is, so the agent signs up with it — codes sent to any
+    // other address are ones it can never fetch.
+    address: emailConnected.email || null,
+    list: async (o) => email.list({ cfg: await freshEmailCfg(), ...o }),
+    read: async (o) => email.read({ cfg: await freshEmailCfg(), ...o }),
+    send: async (o) => email.send({ cfg: await freshEmailCfg(), ...o }),
+    mailboxes: async () => email.mailboxes({ cfg: await freshEmailCfg() }),
+  } : null;
 }
 
 // Your own work comes first: an employee's check-in or reply stops for it and
@@ -1597,6 +1623,248 @@ ipcMain.handle('routines:run', async (_e, botId, routineId) => {
 });
 
 setInterval(() => { tick().catch(() => {}); }, 30000);
+
+/* ── playbooks: a job that worked, replayed with no model ────────── */
+
+// A playbook run holds the computer the way a task does — one mouse, one at a
+// time — but nothing in it asks a model anything unless a step stops landing.
+// Its steps go through the agent's own tools (agent.hands), so they are timed,
+// audited and rehearsed exactly like the agent's.
+async function runPlaybook(id, { inputs = {}, trigger = {}, dryRun = false, silent = false } = {}) {
+  const pb = playbooks.raw(id);
+  if (!pb) return { ok: false, error: 'That playbook has been deleted.' };
+  if (running) return { ok: false, busy: true, error: 'Something is already running.' };
+
+  const abortController = new AbortController();
+  const token = {};
+  const runId = crypto.randomUUID();
+  running = { abortController, botId: null, chatId: null, token, playbook: id };
+  const say = (e) => send('playbook-event', { ...e, playbookId: id, runId });
+  say({ type: 'status', text: 'running', dryRun: Boolean(dryRun) });
+
+  let tookTheScreen = false;
+  const onEvent = (evt) => {
+    if (evt.type === 'tool_done') {
+      audit.write({
+        botId: null, botName: `Playbook · ${pb.name}`, chatId: null, taskId: runId, mode: 'playbook',
+        tool: evt.name, text: evt.text, args: evt.input, ok: evt.ok !== false, error: evt.error || null,
+        ms: evt.ms, computer: computerLabel(), model: null, dryRun: Boolean(evt.dryRun),
+      });
+      return;
+    }
+    if (abortController.signal.aborted) return;
+    if (evt.type === 'desktop') { if (evt.mine) tookTheScreen = true; return; }
+    if (evt.type === 'handover') tellUserItIsTheirTurn(evt);
+    if (evt.type === 'handover' || evt.type === 'handover_end') say(evt);
+  };
+
+  const email = connectedEmail();
+  let result;
+  try {
+    const hands = await agent.hands({ userDataDir: profileDir(), email, dryRun, onEvent, abortController });
+    result = await playbooks.run(id, {
+      hands, inputs, trigger, dryRun,
+      signal: abortController.signal,
+      emit: (e) => { if (!abortController.signal.aborted || e.type === 'pb_end') say(e); },
+      // Where things are now, for a step's checkpoint. The browser is never
+      // started just to be looked at.
+      probe: async (check) => {
+        if (check.url) { const p = browser.getPage(); return p && !p.isClosed() ? { url: p.url() } : null; }
+        return { window: (await desktop.listWindows()).foreground };
+      },
+      // The user's turn: a password it does not keep, or a step that asks first.
+      ask: async ({ what, kind, browser: inBrowser }) => {
+        const page = inBrowser ? await browser.ensureBrowser(profileDir()).then(() => browser.getPage()).catch(() => null) : null;
+        const h = handover.open(page);
+        onEvent({ type: 'handover', id: h.id, what, kind });
+        if (page) page.bringToFront().catch(() => {});
+        const r = await handover.watch({ h, getPage: page ? async () => browser.getPage() : null, minutes: 30, signal: abortController.signal });
+        onEvent({ type: 'handover_end', id: h.id, outcome: r.outcome, what });
+        return handover.carriedOn(r.outcome) ? 'yes' : r.outcome === 'skipped' ? 'skip' : 'none';
+      },
+      heal: (job) => healStep(pb, job, { email, abortController, onEvent, say }),
+    });
+  } catch (err) {
+    const e = errors.explain(err);
+    result = { ok: false, error: e.fix ? `${e.title} — ${e.fix}` : e.title };
+    say({ type: 'pb_end', ok: false, error: result.error });
+  } finally {
+    // Hand the screen back, as a task does.
+    if (tookTheScreen && ownDesktopPref && desktop.target().kind !== 'remote') {
+      try { desktop.usePrivateDesktop(true); } catch (_) {}
+    }
+    overlay.hide();
+    if (running && running.token === token) running = null;
+    say({ type: 'status', text: 'idle' });
+    send('playbooks-changed', { id });
+  }
+
+  audit.write({
+    botId: null, botName: `Playbook · ${pb.name}`, chatId: null, taskId: runId, mode: 'playbook', tool: 'playbook',
+    text: result.ok
+      ? `Ran "${pb.name}" — it worked${result.healed ? `, after repairing ${result.healed} step${result.healed === 1 ? '' : 's'}` : ''}`
+      : `Ran "${pb.name}" — it stopped: ${result.error}`,
+    args: { playbook: id, trigger, inputs }, ok: Boolean(result.ok), error: result.ok ? null : result.error || null,
+    ms: result.ms || null, computer: computerLabel(), model: null, dryRun: Boolean(dryRun),
+  });
+  // Nobody watching: say so where they will see it.
+  if (!result.ok && silent && !result.stopped) notifyPlaybook(`Playbook stopped: ${pb.name}`, result.error || 'It did not finish.', id);
+  return result;
+}
+
+function notifyPlaybook(title, text, id) {
+  if (process.env.OPERATOR_NO_NOTIFY === '1') return;   // automated tests
+  try { if (win && !win.isDestroyed() && !win.isFocused()) win.flashFrame(true); } catch (_) {}
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title, body: String(text).slice(0, 200) });
+    n.on('click', () => {
+      if (!win || win.isDestroyed()) return;
+      win.show(); win.focus();
+      send('playbook-open', { id });
+    });
+    n.show();
+  } catch (_) { /* a missing notification is not worth failing anything over */ }
+}
+
+// One step that no longer lands, handed to a model on its own. It sees the
+// job, what has already run, the step and why it failed — and what it does to
+// get past it becomes that step (playbooks.js).
+async function healStep(pb, { step, index, steps, reason }, { email, abortController, onEvent, say }) {
+  const model = pb.model || agent.DEFAULT_MODEL;
+  try { needClaudeKey(model); } catch {
+    return { ok: false, error: 'repairing a step needs a model, and Claude has no API key here — add one in Settings → Models, or choose another model for this playbook' };
+  }
+  const healId = 'heal-' + crypto.randomUUID();
+  playbooks.startRun(healId, { prompt: pb.goal });
+  const done = steps.slice(0, index).map((s, i) => `${i + 1}. ${s.text}`).join('\n') || '(nothing yet — this is the first step)';
+  const want = !step.check ? ''
+    : step.check.url ? `\nWhen it has worked, the browser is on ${step.check.url}.`
+    : `\nWhen it has worked, the window in front is "${step.check.window}".`;
+  const prompt = `You are repairing ONE step of a saved playbook — a recorded job that normally replays with no model at all. The steps before this one have already run.
+
+The whole job: ${pb.goal}
+
+Already done this run:
+${done}
+
+The step that did not work: ${step.text}
+(It was ${step.tool} with ${JSON.stringify(step.args).slice(0, 600)}.)
+Why: ${reason}${want}
+
+Look at the screen first. Then do ONLY what that one step was meant to achieve, in the fewest actions — not the steps after it, and not the ones before. When it is done, reply DONE in one line. If it cannot be done, reply CANNOT and one line saying why.`;
+
+  let reply = '';
+  try {
+    await agent.runTask(prompt, {
+      userDataDir: profileDir(), abortController, model,
+      modelOptions: store.getModelOptions('agents'),
+      chatId: healId, email, dryRun: false,
+      onEvent: (evt) => {
+        if (evt.type === 'tool_done') { playbooks.recordStep(healId, evt); onEvent(evt); return; }
+        if (evt.type === 'tool') say({ type: 'pb_heal_step', i: index, name: evt.name });
+        if ((evt.type === 'say_end' || evt.type === 'assistant' || evt.type === 'done') && evt.text) reply = evt.text;
+        if (evt.type === 'handover' || evt.type === 'handover_end' || evt.type === 'desktop') onEvent(evt);
+      },
+    });
+  } catch (err) {
+    playbooks.takeRun(healId);
+    return { ok: false, error: errors.explain(err).title };
+  }
+  const fixed = playbooks.takeRun(healId);
+  if (/\bCANNOT\b|\bNEEDS YOU\b/.test(reply)) {
+    return { ok: false, error: reply.replace(/^[\s\S]*?\b(CANNOT|NEEDS YOU)\b[\s:—–-]*/, '').trim().slice(0, 300) || 'the model could not do it' };
+  }
+  return { ok: true, steps: fixed, reply };
+}
+
+ipcMain.handle('playbooks:list', () => playbooks.list());
+ipcMain.handle('playbooks:get', (_e, id) => playbooks.get(id));
+ipcMain.handle('playbooks:recent', () => playbooks.listRecent());
+ipcMain.handle('playbooks:fromTask', (_e, taskId) => {
+  const r = playbooks.fromTask(taskId);
+  if (r.ok) send('playbooks-changed', { id: r.playbook.id });
+  return r;
+});
+ipcMain.handle('playbooks:update', (_e, id, patch) => playbooks.update(id, patch || {}));
+ipcMain.handle('playbooks:makeInput', (_e, id, value, name) => playbooks.makeInput(id, value, name));
+ipcMain.handle('playbooks:delete', (_e, id) => { const r = playbooks.remove(id); watchers.forgetPlaybook(id); send('playbooks-changed', {}); return r; });
+
+// Started, not awaited: the window follows it through playbook-event.
+ipcMain.handle('playbooks:run', (_e, id, opts) => {
+  yieldEmployee();
+  if (running) return { ok: false, error: 'Something else is running on this computer. Wait for it to finish, or stop it.' };
+  runPlaybook(id, opts || {});
+  return { ok: true };
+});
+
+ipcMain.handle('playbooks:stop', () => {
+  if (!running || !running.playbook) return { ok: true };
+  const { abortController } = running;
+  running = null;
+  abortController.abort();
+  overlay.hide();
+  return { ok: true };
+});
+
+// Which typed values look like they change from run to run — one cheap
+// question, on the playbook's own kind of model.
+ipcMain.handle('playbooks:suggest', async (_e, id) => {
+  const pb = playbooks.raw(id);
+  if (!pb) return { ok: false, error: 'That playbook has been deleted.' };
+  const model = pb.model || agent.DEFAULT_MODEL;
+  try { needClaudeKey(model); } catch {
+    return { ok: false, error: 'Suggesting inputs needs a model — add your Anthropic key in Settings → Models.' };
+  }
+  try {
+    const r = await verify.askOnce({ system: playbooks.SUGGEST_RULES, body: playbooks.suggestBrief(pb), model });
+    return { ok: true, suggestions: playbooks.parseSuggestions(r.text, pb) };
+  } catch (err) {
+    return { ok: false, error: errors.explain(err).title };
+  }
+});
+
+/* ── watchers: work that starts when something happens ───────────── */
+
+// A watcher (watchers.js) saw a file land or an email arrive. It runs a
+// playbook with what it saw handed in, or gives an agent the job the way a
+// routine does — in a conversation of its own, written down for later.
+async function fireWatcher(w, detail) {
+  if (w.action.kind === 'playbook') return runPlaybook(w.action.playbookId, { trigger: detail, silent: true });
+
+  const bot = (w.action.botId && store.getBot(w.action.botId)) || store.listBots().find((b) => !b.employee);
+  if (!bot) return { ok: false, error: 'the agent it was meant for has been deleted' };
+  if (running) return { ok: false, busy: true };
+  const prompt = watchers.fillPrompt(w.action.prompt, detail);
+  const chat = store.createChat(bot.id);
+  store.saveChat(bot.id, chat.id, { title: w.name.slice(0, 60) });
+  send('agent-event', { type: 'routine', name: w.name, botId: bot.id, chatId: chat.id });
+  let failedWith = null;
+  const record = makeRecorder(bot.id, chat.id, prompt);
+  const r = await runOne({
+    prompt, botId: bot.id, chatId: chat.id, silent: true,
+    record: (evt) => { if (evt.type === 'error') failedWith = evt.text; record(evt); },
+  });
+  send('bots-changed', { botId: bot.id });
+  if (r && r.ok === false) return { ok: false, busy: true, error: r.error };
+  return failedWith ? { ok: false, error: failedWith } : { ok: true };
+}
+
+// Handed to watchers.init once the app is ready (see whenReady).
+const watcherHooks = {
+  fire: fireWatcher,
+  isBusy: () => Boolean(running),
+  email: () => connectedEmail(),
+  notify: (title, text) => notifyPlaybook(title, text, null),
+  changed: () => send('watchers-changed', {}),
+};
+setInterval(() => { watchers.tick().catch(() => {}); }, 5000);
+
+ipcMain.handle('watchers:list', () => watchers.list());
+ipcMain.handle('watchers:create', (_e, spec) => watchers.create(spec || {}));
+ipcMain.handle('watchers:update', (_e, id, spec) => watchers.update(id, spec || {}));
+ipcMain.handle('watchers:delete', (_e, id) => watchers.remove(id));
+ipcMain.handle('watchers:test', (_e, id) => watchers.test(id));
 
 /* ── employees: agents that work on a loop (employees.js) ────────── */
 

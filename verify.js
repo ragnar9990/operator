@@ -238,4 +238,13 @@ The check says: ${why}
 That check saw the goal, every action you took and the screen as it is now. Do not argue with it, and do not send the same summary again. Either finish the job properly, or — if it genuinely cannot be done on this machine — say plainly what you could not do and why, and stop claiming it is done.`;
 }
 
-module.exports = { check, critique, CHECKER };
+// One cheap question with no tools, on the same brain the check would use:
+// Haiku for a Claude run, the run's own model for one on NVIDIA or this PC.
+// Playbooks use it to suggest which values should become inputs.
+function askOnce({ system, body, model, abortController }) {
+  return nim.isNimModel(model)
+    ? askNim({ system, body, model, abortController })
+    : askClaude({ system, body, abortController });
+}
+
+module.exports = { check, critique, askOnce, CHECKER };

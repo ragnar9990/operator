@@ -26,6 +26,11 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="13" rx="3"/><path d="M9.5 20.5h5"/><circle cx="14.2" cy="11.4" r="1.5"/></svg>
           Agents
         </button>
+        <button class="mode" data-mode="playbooks" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg>
+          Playbooks
+          <span class="mode-badge" id="pbBadge" hidden></span>
+        </button>
         <button class="mode" data-mode="code" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 6l-3 12"/></svg>
           Code
@@ -372,6 +377,166 @@
       <!-- the editor: its own file tree, tabs and code view (editor.js) -->
       <div class="ed-resize" id="edResize" hidden title="Drag to resize"></div>
       <aside class="ed" id="editor" hidden aria-label="Editor"></aside>
+    </div>
+
+    <!-- PLAYBOOKS mode: a job that worked, replayed with no model (playbooks.js, ui/playbooks.js) -->
+    <div class="staffview pbview" id="pbView" hidden>
+      <aside class="staff-side">
+        <button class="code-new" id="pbNew" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg>
+          Save a run as a playbook
+        </button>
+        <div class="staff-list">
+          <div class="pb-group" id="pbList"></div>
+          <div class="pb-side-head"><span>Watchers</span><button class="mini" id="wtNew" type="button" title="Run something when a file lands or an email arrives">New</button></div>
+          <div class="pb-group" id="wtList"></div>
+        </div>
+      </aside>
+
+      <main class="staff-main">
+        <div class="staff-empty" id="pbEmpty">
+          <div class="staff-empty-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg></div>
+          <h2>Do a job once. After that it runs by itself.</h2>
+          <p>When Operator finishes a job, save it as a playbook. Next time the same steps replay straight through — no AI, nothing to pay, done in seconds, the same way every time. If a screen has changed since, only that one step goes back to the AI to be repaired, and the repair is kept.</p>
+          <button class="pill solid" id="pbNewBig" type="button">Save a recent run</button>
+        </div>
+
+        <section class="staff-desk" id="pbDesk" hidden>
+          <header class="staff-head">
+            <span class="pb-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg></span>
+            <div class="staff-who">
+              <b id="pbName" tabindex="0" title="Click to rename"></b>
+              <small id="pbSub"></small>
+            </div>
+            <span class="staff-state" id="pbState"></span>
+            <div class="staff-actions">
+              <button class="pill" id="pbRehearse" type="button" title="Go through it without changing anything">Rehearse</button>
+              <button class="pill solid" id="pbRun" type="button">Run</button>
+              <button class="pill" id="pbStop" type="button" hidden>Stop</button>
+            </div>
+          </header>
+
+          <div class="staff-body">
+            <div class="pb-main">
+              <div class="pb-stats" id="pbStats"></div>
+              <div class="pb-turn" id="pbTurn" hidden></div>
+              <div class="pb-result" id="pbResult" hidden></div>
+              <div class="pb-steps-head">
+                <span class="sp-head">Steps</span>
+                <small id="pbStepsNote"></small>
+              </div>
+              <ol class="pb-steps" id="pbSteps"></ol>
+              <p class="set-hint pb-limits">A playbook does the same thing every time. A job that needs judgement each time — reading an email and deciding what to answer — is an agent's job, unless the parts that change are made into inputs. Passwords are never kept: a step that types one stops for you to type it.</p>
+            </div>
+
+            <aside class="staff-panel pb-panel">
+              <div class="sp-block">
+                <div class="sp-head">Inputs</div>
+                <div class="pb-inputs" id="pbInputs"></div>
+                <button class="pill sm" id="pbSuggest" type="button">Suggest inputs</button>
+                <div class="pb-suggest" id="pbSuggestions"></div>
+                <p class="field-hint">Write <code>{{name}}</code> in a step to fill it in when it runs. Dates fill themselves: <code>{{today}}</code>, <code>{{yesterday:DD/MM/YYYY}}</code>, <code>{{last_month:MMMM YYYY}}</code>.</p>
+              </div>
+              <div class="sp-block">
+                <div class="sp-head">Starts by itself</div>
+                <div class="pb-watches" id="pbWatches"></div>
+                <button class="pill sm" id="pbAddWatch" type="button">Add a watcher</button>
+              </div>
+              <div class="sp-block" id="pbComputerBlock">
+                <div class="sp-head">Repairs a step with</div>
+                <select class="pb-select" id="pbModel"></select>
+                <p class="field-hint">Only used when a screen has changed and one step needs working out again. A model on this computer keeps that private too.</p>
+              </div>
+              <div class="sp-block pb-live" id="pbLive" hidden>
+                <div class="sp-head">On screen</div>
+                <img id="pbFrame" alt="What the playbook is looking at" />
+              </div>
+              <div class="sp-block">
+                <button class="pill pb-delete" id="pbDelete" type="button">Delete playbook</button>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- saving a recent run as a playbook -->
+    <div class="sheet" id="pbSheet" hidden>
+      <div class="sheet-scrim" id="pbScrim"></div>
+      <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="pbSheetTitle">
+        <header class="sheet-top">
+          <h2 id="pbSheetTitle">Save a run as a playbook</h2>
+          <button class="rail-btn" id="pbSheetClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <div class="sheet-body">
+          <p class="set-hint">The jobs Operator has done lately. Pick one that worked and its steps become a playbook you can run again without the AI.</p>
+          <div class="pb-recent" id="pbRecent"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- a watcher: what to wait for, and what to do when it comes (watchers.js) -->
+    <div class="sheet" id="wtSheet" hidden>
+      <div class="sheet-scrim" id="wtScrim"></div>
+      <section class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="wtTitle">
+        <header class="sheet-top">
+          <h2 id="wtTitle">New watcher</h2>
+          <button class="rail-btn" id="wtClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </header>
+        <form class="sheet-body" id="wtForm">
+          <div class="wt-status" id="wtStatus" hidden></div>
+          <label class="field"><span>When</span>
+            <select id="wtKind">
+              <option value="folder">A file lands in a folder</option>
+              <option value="email">An email arrives</option>
+            </select>
+          </label>
+          <div id="wtFolderBox">
+            <div class="ss-row wt-path-row">
+              <label class="field wt-grow"><span>Folder</span><input id="wtPath" type="text" spellcheck="false" placeholder="C:\Users\you\Documents\Invoices" /></label>
+              <button class="pill" id="wtBrowse" type="button">Browse…</button>
+            </div>
+            <label class="field"><span>Which files</span><input id="wtPattern" type="text" spellcheck="false" placeholder="*.pdf  — or *.pdf; *.xlsx — or * for any" /></label>
+            <p class="field-hint">Only files that arrive after this is made, and only in that folder — not the ones inside it. A file is picked up once it has finished copying.</p>
+          </div>
+          <div id="wtEmailBox" hidden>
+            <div class="ss-row">
+              <label class="field"><span>From — contains</span><input id="wtFrom" type="text" spellcheck="false" placeholder="accounts@supplier.com, or blank for anyone" /></label>
+              <label class="field"><span>Subject — contains</span><input id="wtSubject" type="text" spellcheck="false" placeholder="Invoice, or blank for any" /></label>
+            </div>
+            <p class="field-hint">Looks at the connected inbox every two minutes, for mail that arrives after this is made.</p>
+          </div>
+          <label class="field"><span>Then</span>
+            <select id="wtDo">
+              <option value="playbook">Run a playbook — no AI</option>
+              <option value="task">Give an agent a job</option>
+            </select>
+          </label>
+          <label class="field" id="wtPbRow"><span>Playbook</span><select id="wtPlaybook"></select></label>
+          <div id="wtTaskRow" hidden>
+            <label class="field"><span>Agent</span><select id="wtBot"></select></label>
+            <label class="field"><span>The job</span><textarea id="wtPrompt" rows="4" placeholder="Rename {{file}} to the supplier's name and the invoice date, then move it into the folder for its month."></textarea></label>
+          </div>
+          <p class="field-hint">What it saw is handed in: <code>{{file}}</code>, <code>{{file_name}}</code> and <code>{{folder}}</code> for a file; <code>{{email_from}}</code> and <code>{{email_subject}}</code> for an email. A playbook can use them as inputs.</p>
+          <div class="ss-row">
+            <label class="field"><span>Runs an hour, at most</span><input id="wtPerHour" type="number" min="1" max="120" value="12" /></label>
+            <label class="field"><span>Seconds between runs, at least</span><input id="wtCooldown" type="number" min="0" max="86400" value="30" /></label>
+          </div>
+          <label class="field"><span>Name — optional</span><input id="wtName" type="text" maxlength="80" placeholder="Worked out for you if left blank" /></label>
+          <p class="set-hint">One that fails three times in a row switches itself off and tells you. While the computer is busy, what it saw waits its turn — nothing is dropped.</p>
+          <p class="ss-error" id="wtError" role="alert"></p>
+          <div class="ss-foot">
+            <button class="pill ss-fire" id="wtDelete" type="button" hidden>Delete</button>
+            <button class="pill" id="wtTest" type="button" hidden>Run it on the newest one</button>
+            <span class="ss-spacer"></span>
+            <button class="pill solid" id="wtSave" type="submit">Start watching</button>
+          </div>
+        </form>
+      </section>
     </div>
 
     <!-- EMPLOYEES mode: agents that work on a loop and message you first (employees.js, ui/employees.js) -->
@@ -1190,6 +1355,7 @@
     <script src="mic.js"></script>
     <script src="renderer.js"></script>
     <script src="employees.js"></script>
+    <script src="playbooks.js"></script>
     <script type="module" src="agentverse.js"></script>
   </body>
 </html>
