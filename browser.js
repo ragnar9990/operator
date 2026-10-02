@@ -82,6 +82,13 @@ async function launch(userDataDir) {
   page = context.pages()[0] || (await context.newPage());
   await page.setViewportSize(VIEWPORT);
 
+  // Downloads. Left alone, the driver saves them under random names in a
+  // temporary folder that is deleted when the browser closes — so "download
+  // the invoices" seemed to work and left nothing behind. Every tab's
+  // downloads go to the real Downloads folder under their own names instead.
+  for (const p of context.pages()) keepDownloads(p);
+  context.on('page', keepDownloads);
+
   // Follow the active tab if the site opens a new one — unless it is a helper's
   // tab, or a pop-up from one, which that helper follows instead.
   const adopt = (p) => {
@@ -95,6 +102,54 @@ async function launch(userDataDir) {
   });
 
   return page;
+}
+
+// Where downloads go: the user's Downloads folder (OPERATOR_DOWNLOADS_DIR for
+// tests). A name already there gets " (1)", " (2)"… as Windows itself does.
+const downloadsDir = () => process.env.OPERATOR_DOWNLOADS_DIR || path.join(require('os').homedir(), 'Downloads');
+const downloads = [];   // { at, file, error } — the latest few, for the step that started them
+let pendingDownloads = 0;
+
+function freeName(dir, name) {
+  const fs = require('fs');
+  const ext = path.extname(name);
+  const base = name.slice(0, name.length - ext.length) || 'download';
+  let file = path.join(dir, base + ext);
+  for (let i = 1; fs.existsSync(file) && i < 1000; i++) file = path.join(dir, `${base} (${i})${ext}`);
+  return file;
+}
+
+function keepDownloads(p) {
+  p.on('download', async (d) => {
+    pendingDownloads++;
+    const entry = { at: Date.now(), file: null, error: null };
+    downloads.push(entry);
+    if (downloads.length > 20) downloads.shift();
+    try {
+      const dir = downloadsDir();
+      require('fs').mkdirSync(dir, { recursive: true });
+      const name = String(d.suggestedFilename() || 'download').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      const file = freeName(dir, name);
+      await d.saveAs(file);
+      entry.file = file;
+    } catch (err) {
+      entry.error = String((err && err.message) || err).split('\n')[0];
+    } finally {
+      pendingDownloads--;
+    }
+  });
+}
+
+// Downloads not yet reported, once they have finished (or a minute has gone
+// by), so the step that started them can say where the file went. Each is
+// handed over once.
+async function takeDownloads(wait = 60000) {
+  const until = Date.now() + wait;
+  if (!pendingDownloads && !downloads.some((x) => !x.told)) return [];
+  while (pendingDownloads > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
+  const fresh = downloads.filter((x) => !x.told);
+  for (const x of fresh) x.told = true;
+  return fresh;
 }
 
 // A new tab for a helper. The helper works on `lane.page`, which moves to any
@@ -390,4 +445,5 @@ module.exports = {
   waitForChange,
   closeBrowser,
   setFrameListener,
+  takeDownloads,
 };

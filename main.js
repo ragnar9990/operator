@@ -45,6 +45,11 @@ const local = require('./local');
 
 let win = null;
 let running = null; // { abortController }
+
+// Automated tests drive the real app from outside. With this set — and only
+// then — they can reach the agent's browser to play the user's part, such as
+// typing a password at their turn.
+if (process.env.OPERATOR_TEST_HOOKS === '1') global.__operatorTest = { browser };
 let tray = null;
 let quitting = false;   // a real quit, not the window closing into the tray
 // Started by Windows at sign-in: come up in the tray, not in your face.

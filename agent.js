@@ -392,10 +392,21 @@ async function createSession({ userDataDir, model, resume, bot, teammates, messa
     await browser.settle();
     browser.snap().catch(() => {});        // refresh the live view, don't block on it
     const p = browser.getPage();
+    const got = await downloadNote();
     let seen = '';
     try { seen = (await p.innerText('body')).slice(0, 2500); } catch (_) {}
-    const body = seen ? `${text}\nURL: ${p.url()}\n\n${seen}` : text;
+    const body = seen ? `${text}${got}\nURL: ${p.url()}\n\n${seen}` : `${text}${got}`;
     return { content: [{ type: 'text', text: body }] };
+  };
+
+  // A step that started a download says where the file went, so the agent
+  // (and a playbook's result) can tell the user — and knows it really landed.
+  // It only waits when a download is actually in flight.
+  const downloadNote = async () => {
+    const d = await browser.takeDownloads();
+    return d.map((x) => (x.file
+      ? `\nDownloaded ${require('path').basename(x.file)} to ${require('path').dirname(x.file)}`
+      : `\nA download failed: ${x.error}`)).join('');
   };
 
   // Always restate where this image came from and how many monitors exist —

@@ -656,10 +656,27 @@ async function run(id, { hands, inputs = {}, trigger = {}, dryRun = false, signa
     const secret = secretIn(step.args);
     if (secret) {
       if (dryRun || !ask) { skipped++; emit({ type: 'pb_step', i, state: 'skipped', note: `you would type the ${secret}` }); continue; }
-      const did = await ask({ what: `Type the ${secret} yourself — Operator does not keep passwords in a playbook. Press "I've done it" when it is in.`, kind: 'secret', browser: isBrowser(step.tool) });
+      // Everything in the step that is not the secret is still done for you —
+      // the email box filled in, the form sent — so only the password is yours.
+      const isSecret = (v) => /\{\{\s*secret/i.test(String(v || ''));
+      const plain = step.tool === 'browser_fill_form' ? (step.args.fields || []).filter((f) => !isSecret(f.text)) : [];
+      if (plain.length) {
+        const missingPlain = new Set();
+        const pre = await exec({ tool: 'browser_fill_form' }, { fields: mapStrings(plain, (s) => fillString(s, vars, at, missingPlain)), submit: false });
+        if (!pre.ok) return finish(false, { failedAt: i, error: `Step ${i + 1} (${step.text}) did not work: ${pre.error}` });
+      }
+      const where = probe && isBrowser(step.tool) ? await probe({ url: 'x' }).catch(() => null) : null;
+      emit({ type: 'pb_step', i, state: 'running', note: `your turn: type the ${secret}` });
+      const did = await ask({ what: `Type your ${secret} into the page${plain.length ? ' — the rest is filled in' : ''}, then press "I've done it". Operator never keeps passwords in a playbook.`, kind: 'secret', browser: isBrowser(step.tool) });
       if (signal && signal.aborted) return finish(false, { stopped: true, error: 'Stopped.' });
       if (did !== 'yes') return finish(false, { failedAt: i, error: `The ${secret} was not typed in, so the run stopped at step ${i + 1}.` });
-      emit({ type: 'pb_step', i, state: 'ok', note: 'you did this one' });
+      // Send the form, unless they already did (the page has moved on).
+      const wantsSubmit = step.args.submit || step.args.enter;
+      if (wantsSubmit && isBrowser(step.tool)) {
+        const now = probe ? await probe({ url: 'x' }).catch(() => null) : null;
+        if (!where || !now || now.url === where.url) await exec({ tool: 'browser_press_key' }, { key: 'Enter' });
+      }
+      emit({ type: 'pb_step', i, state: 'ok', note: 'you typed it' });
       continue;
     }
 
@@ -667,7 +684,14 @@ async function run(id, { hands, inputs = {}, trigger = {}, dryRun = false, signa
     // that one step out; no answer at all stops the run — an unattended run
     // fails closed rather than guessing.
     if (step.confirm && !dryRun && ask) {
-      const go = await ask({ what: `Allow this step? ${step.text}. Press "I've done it" to let it go ahead, or Skip to leave it out.`, kind: 'confirm' });
+      // Said with this run's values in it: "Invoices for September 2026", not "{last_month}".
+      const said = String(step.text).replace(/\{([a-z_]+)\}/gi, (m, raw) => {
+        const name = raw.toLowerCase();
+        const d = dayFor(name, at);
+        if (d) return formatDate(d, name.endsWith('month') ? 'MMMM YYYY' : 'D MMMM YYYY');
+        return vars[name] !== undefined && vars[name] !== '' ? String(vars[name]) : m;
+      });
+      const go = await ask({ what: `Allow this step? ${said}. Press "Allow it" to go ahead, or Skip to leave it out.`, kind: 'confirm' });
       if (signal && signal.aborted) return finish(false, { stopped: true, error: 'Stopped.' });
       if (go === 'skip') { skipped++; emit({ type: 'pb_step', i, state: 'skipped', note: 'you said no' }); continue; }
       if (go !== 'yes') return finish(false, { failedAt: i, error: `Nobody allowed step ${i + 1} (${step.text}), so the run stopped there.` });
@@ -706,6 +730,9 @@ async function run(id, { hands, inputs = {}, trigger = {}, dryRun = false, signa
         const last = String(res.text).split(/\r?\n/).map((l) => l.trim()).filter((l) => l && l !== '(no output)').pop();
         if (last) printed = last.slice(0, 200);
       }
+      // A download says where the file went (browser.js keeps it).
+      const dl = String(res.text || '').match(/^(Downloaded .+|A download failed: .+)$/m);
+      if (dl) printed = dl[1].slice(0, 200);
       emit({ type: 'pb_step', i, state: 'ok' });
       continue;
     }
