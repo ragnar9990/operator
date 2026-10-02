@@ -132,16 +132,21 @@
   function paintStats() {
     const s = (current && current.stats) || {};
     const el = $('pbStats');
-    const bits = ['<span class="pb-free">Runs with no AI</span>'];
-    if (!s.runs) {
-      bits.push('<span>Not run yet. <b>Rehearse</b> goes through it without changing anything.</span>');
-    } else {
-      bits.push(`<span>Ran <b>${s.runs}</b> time${s.runs === 1 ? '' : 's'} · <b>${s.ok || 0}</b> worked</span>`);
-      if (s.ok) bits.push(`<span>Usually takes <b>${secs((s.totalMs || 0) / s.ok)}</b></span>`);
-      if (s.heals) bits.push(`<span><b>${s.heals}</b> step${s.heals === 1 ? '' : 's'} repaired along the way</span>`);
-      bits.push(`<span>Last run ${stamp(s.lastRun)} — ${s.lastError ? '<i class="bad">stopped</i>' : '<i class="good">worked</i>'}</span>`);
-    }
-    el.innerHTML = bits.join('');
+    // One card per number, so they line up rather than wrap as a sentence.
+    const card = (value, label, cls) => `<div class="pb-stat${cls ? ' ' + cls : ''}"><b>${value}</b><span>${label}</span></div>`;
+    const head = '<div class="pb-stats-top"><span class="pb-free">Runs with no AI</span>' +
+      (s.runs ? '' : '<span class="pb-stats-note">Not run yet. <b>Rehearse</b> goes through it without changing anything.</span>') + '</div>';
+    if (!s.runs) { el.innerHTML = head; paintResult(); return; }
+    const cards = [
+      card(s.runs, s.runs === 1 ? 'run' : 'runs'),
+      card(`${s.ok || 0}<small>/${s.runs}</small>`, 'worked', s.ok === s.runs ? 'good' : ''),
+      s.ok ? card(secs((s.totalMs || 0) / s.ok), 'usually takes') : '',
+      s.heals ? card(s.heals, s.heals === 1 ? 'step repaired' : 'steps repaired', 'warn') : '',
+      // Today a time, before today just the day — a card is not wide enough for both.
+      card(dayOf(s.lastRun) === dayOf(Date.now()) ? clock(s.lastRun) : new Date(s.lastRun).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+        'last run', s.lastError ? 'stopped' : 'ok'),
+    ];
+    el.innerHTML = head + '<div class="pb-stat-grid">' + cards.join('') + '</div>';
     paintResult();
   }
 
@@ -186,16 +191,19 @@
     const lock = live && current && live.playbookId === current.id;
     li.innerHTML =
       `<span class="pb-n">${i + 1}</span>` +
-      '<span class="pb-dot" aria-hidden="true"></span>' +
       '<div class="pb-step-main">' +
         `<div class="pb-step-text">${esc(s.text)}</div>` +
-        `<div class="pb-step-meta"><span class="pb-kind">${KIND[s.kind] || 'Step'}</span>${tags.join('')}</div>` +
+        // What kind of step and how it went on the left, what you can do to it
+        // on the right — under the words, so they keep the whole width.
+        '<div class="pb-step-foot">' +
+          `<div class="pb-step-meta"><span class="pb-kind">${KIND[s.kind] || 'Step'}</span>${tags.join('')}</div>` +
+          '<div class="pb-step-acts">' +
+            `<label class="pb-ask" title="Stop and ask before doing this step"><input type="checkbox"${s.confirm ? ' checked' : ''}${lock ? ' disabled' : ''} /> Ask first</label>` +
+            (s.fields.length ? `<button class="mini" type="button" data-act="edit"${lock ? ' disabled' : ''}>Edit</button>` : '') +
+            `<button class="mini" type="button" data-act="remove"${lock ? ' disabled' : ''}>Remove</button>` +
+          '</div>' +
+        '</div>' +
         '<div class="pb-fields" hidden></div>' +
-      '</div>' +
-      '<div class="pb-step-acts">' +
-        `<label class="pb-ask" title="Stop and ask before doing this step"><input type="checkbox"${s.confirm ? ' checked' : ''}${lock ? ' disabled' : ''} /> Ask first</label>` +
-        (s.fields.length ? `<button class="mini" type="button" data-act="edit"${lock ? ' disabled' : ''}>Edit</button>` : '') +
-        `<button class="mini" type="button" data-act="remove"${lock ? ' disabled' : ''}>Remove</button>` +
       '</div>';
 
     li.querySelector('.pb-ask input').addEventListener('change', (e) => change({ step: { id: s.id, confirm: e.target.checked } }));
@@ -512,7 +520,7 @@
       row.disabled = r.saved || r.usedHelpers;
       const why = r.saved ? 'already saved' : r.usedHelpers ? 'used helpers — cannot be replayed' : r.ok ? 'worked' : 'did not finish';
       row.innerHTML = `<b>${esc(trim(r.prompt || '(no words)', 90))}</b>` +
-        `<small>${r.botName ? esc(r.botName) + ' · ' : ''}${stamp(r.at)} · ${r.steps} step${r.steps === 1 ? '' : 's'} · <span class="${r.ok ? 'good' : 'bad'}">${why}</span></small>`;
+        `<small>${r.botName ? esc(r.botName) + ' · ' : ''}${stamp(r.at)} · ${r.steps} step${r.steps === 1 ? '' : 's'} · <span class="${r.saved || r.usedHelpers ? 'muted' : r.ok ? 'good' : 'bad'}">${why}</span></small>`;
       row.addEventListener('click', async () => {
         row.disabled = true;
         const res = await window.operator.playbookFromTask(r.taskId);

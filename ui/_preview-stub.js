@@ -204,6 +204,54 @@ const AUDIT = (() => {
   return out;
 })();
 
+const PB = (() => {
+  const H = 3600e3;
+  const step = (id, kind, text, extra) => ({ id, tool: '', text, kind, brittle: false, confirm: false, healed: false, check: '', fields: [], ...extra });
+  return {
+    books: [
+      { id: 'pb1', name: "Download last month's invoices", goal: 'Log in to the supplier portal and download every invoice from last month into Documents\\Invoices',
+        source: { botName: 'Ada', at: Date.now() - 6 * 24 * H }, model: null, machine: null, usesBrowser: true,
+        stats: { runs: 7, ok: 6, totalMs: 6 * 14200, heals: 1, lastRun: Date.now() - 2 * H, lastError: null },
+        inputs: [{ name: 'month', value: 'September 2026' }],
+        steps: [
+          step('s1', 'web', 'Open portal.supplier.com/login', { check: 'portal.supplier.com', fields: [{ path: 'url', value: 'https://portal.supplier.com/login' }] }),
+          step('s2', 'you', 'Type the password yourself'),
+          step('s3', 'web', 'Click "Invoices"', { healed: true }),
+          step('s4', 'web', 'Set "Period" to {{month}}', { fields: [{ path: 'option', value: '{{month}}' }] }),
+          step('s5', 'web', 'Click "Download all as PDF"', { confirm: true }),
+          step('s6', 'wait', 'Wait for the download to finish'),
+          step('s7', 'shell', 'Move the downloaded PDFs into Documents\\Invoices\\{{month}}', { fields: [{ path: 'command', value: 'Move-Item "$env:USERPROFILE\\Downloads\\*.pdf" "$env:USERPROFILE\\Documents\\Invoices\\{{month}}"' }] }),
+          step('s8', 'screen', 'Click at (412, 288) in Excel', { brittle: true, check: 'Excel' }),
+          step('s9', 'mail', 'Email the folder link to accounts@example.com', { confirm: true }),
+        ] },
+      { id: 'pb2', name: 'Weekly sales report', goal: 'Export the weekly sales CSV and drop it in the shared drive',
+        source: { botName: 'Leo', at: Date.now() - 20 * 24 * H }, model: null, machine: null, usesBrowser: true,
+        stats: { runs: 3, ok: 2, totalMs: 2 * 31000, heals: 0, lastRun: Date.now() - 26 * H, lastError: 'The "Export" button was not on the page.' },
+        inputs: [],
+        steps: [
+          step('t1', 'web', 'Open dashboard.shop.com/reports'),
+          step('t2', 'web', 'Click "Export CSV"'),
+          step('t3', 'shell', 'Copy the newest CSV to S:\\Sales'),
+        ] },
+      { id: 'pb3', name: 'Tidy the Downloads folder', goal: 'Sort Downloads into folders by file type',
+        source: null, model: null, machine: null, usesBrowser: false,
+        stats: { runs: 0 }, inputs: [],
+        steps: [step('u1', 'shell', 'Make folders for PDFs, images and installers'), step('u2', 'shell', 'Move each file into its folder')] },
+    ],
+    watches: [
+      { id: 'w1', name: 'New invoice PDF → file it', kind: 'folder', enabled: true, folder: { path: 'C:\\Users\\you\\Downloads', pattern: '*.pdf' }, email: { from: '', subject: '' },
+        action: { kind: 'playbook', playbookId: 'pb1' }, perHour: 12, cooldown: 30, fired: 4, lastFired: Date.now() - 3 * H, waiting: 0, errors: 0, lastError: null,
+        lastResult: { at: Date.now() - 3 * H, ok: true, what: 'inv-0932.pdf' } },
+      { id: 'w2', name: 'Email from the bank', kind: 'email', enabled: false, folder: { path: '', pattern: '*' }, email: { from: 'bank.com', subject: 'Statement' },
+        action: { kind: 'task', botId: null, prompt: 'File the statement' }, perHour: 12, cooldown: 30, fired: 0, lastFired: null, waiting: 0, errors: 0, lastError: null, lastResult: null },
+    ],
+    recent: [
+      { taskId: 'r1', prompt: "Download last month's invoices from the supplier portal", botName: 'Ada', at: Date.now() - 6 * 24 * H, steps: 9, ok: true, saved: true },
+      { taskId: 'r2', prompt: 'Find me three florists in Brisbane with no website', botName: 'Leo', at: Date.now() - 5 * H, steps: 14, ok: true, usedHelpers: true },
+      { taskId: 'r3', prompt: 'Rename the screenshots on my desktop by date', botName: 'Ada', at: Date.now() - 50 * 60e3, steps: 5, ok: true },
+    ],
+  };
+})();
 const CRASH = { pending: 1 };
 const BACKGROUND = { tray: true, boot: false };
 const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
@@ -501,6 +549,45 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     crashSummary: async () => ({ count: 2, pending: CRASH.pending, last: new Date(Date.now() - 3 * 3600e3).toISOString(), canSend: false }),
     crashCopy: async () => { const n = CRASH.pending || 2; CRASH.pending = 0; return { ok: true, count: n }; },
     crashOpen: async () => ({ ok: true }),
+
+    /* computers and local models — none set up */
+    machines: async () => ({ machines: [], target: { kind: 'local' } }),
+    machineAdd: async () => ({ ok: false, error: 'Not in the preview.' }),
+    machineRename: async () => ({ ok: true }),
+    machineRemove: async () => ({ ok: true }),
+    machineUse: async () => ({ ok: true }),
+    onMachinesChanged: () => {},
+    localStatus: async () => ({ servers: [], custom: '' }),
+    localSetUrl: async () => ({ ok: false, error: 'Not in the preview.', status: { servers: [], custom: '' } }),
+
+    /* playbooks and watchers — a few, so the tab can be seen full */
+    playbooks: async () => PB.books.map((b) => ({ id: b.id, name: b.name, steps: b.steps.length, stats: b.stats, machine: b.machine, usesBrowser: b.usesBrowser })),
+    playbook: async (id) => { const b = PB.books.find((x) => x.id === id); return b ? JSON.parse(JSON.stringify(b)) : null; },
+    playbooksRecent: async () => PB.recent,
+    playbookFromTask: async () => ({ ok: false, error: 'Not in the preview.' }),
+    playbookUpdate: async (id, patch) => {
+      const b = PB.books.find((x) => x.id === id);
+      if (!b) return null;
+      if (patch.name) b.name = patch.name;
+      if (patch.step && patch.step.remove) b.steps = b.steps.filter((x) => x.id !== patch.step.id);
+      else if (patch.step && 'confirm' in patch.step) b.steps.find((x) => x.id === patch.step.id).confirm = patch.step.confirm;
+      if (patch.inputs) for (const [k, v] of Object.entries(patch.inputs)) { const i = b.inputs.find((x) => x.name === k); if (i) i.value = v; }
+      return JSON.parse(JSON.stringify(b));
+    },
+    playbookMakeInput: async (id) => window.operator.playbook(id),
+    playbookDelete: async (id) => { PB.books = PB.books.filter((x) => x.id !== id); return { ok: true }; },
+    playbookRun: async () => ({ ok: false, error: 'Playbooks do not run in the preview.' }),
+    playbookStop: async () => ({ ok: true }),
+    playbookSuggest: async () => ({ ok: true, suggestions: [{ value: 'September 2026', name: 'month', why: 'A date that changes every run' }] }),
+    onPlaybookEvent: () => {},
+    onPlaybooksChanged: () => {},
+    onPlaybookOpen: () => {},
+    watchers: async () => PB.watches,
+    watcherCreate: async () => ({ ok: false, error: 'Not in the preview.' }),
+    watcherUpdate: async (id, spec) => { const w = PB.watches.find((x) => x.id === id); if (w && 'enabled' in spec) w.enabled = spec.enabled; return { ok: true }; },
+    watcherDelete: async () => ({ ok: true }),
+    watcherTest: async () => ({ ok: true }),
+    onWatchersChanged: () => {},
 
     /* the tray and starting with Windows */
     backgroundGet: async () => ({ ...BACKGROUND }),
