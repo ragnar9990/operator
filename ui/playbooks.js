@@ -224,11 +224,12 @@
   /* ── the list ──────────────────────────────────────────────────── */
 
   function line(b) {
-    if (live && live.playbookId === b.id) return { text: live.dryRun ? 'Rehearsing now' : 'Running now', kind: 'busy' };
+    if (live && live.playbookId === b.id) return { text: live.dryRun ? 'Test run now' : 'Running now', kind: 'busy' };
     const s = b.stats || {};
-    if (!s.runs) return { text: `${b.steps} steps · not run yet`, kind: 'off' };
+    const n = `${b.steps} step${b.steps === 1 ? '' : 's'}`;
+    if (!s.runs) return { text: `${n} · not run yet`, kind: 'off' };
     if (s.lastError) return { text: `Stopped last time · ${stamp(s.lastRun)}`, kind: 'ask' };
-    return { text: `${b.steps} steps · worked ${stamp(s.lastRun)}`, kind: 'on' };
+    return { text: `${n} · worked ${stamp(s.lastRun)}`, kind: 'on' };
   }
 
   async function load() {
@@ -394,7 +395,9 @@
     if (r.ok) {
       el.innerHTML = r.dryRun
         ? '<b>✓ Test run passed</b> — nothing was changed.'
-        : `<b>✓ Done in ${secs(r.ms)}</b>${r.healed ? ` — ${r.healed === 1 ? 'one step had' : `${r.healed} steps had`} changed and ${r.healed === 1 ? 'was' : 'were'} fixed` : ''}${r.skipped ? ` · ${r.skipped} skipped` : ''}`;
+        : `<b>✓ Done in ${secs(r.ms)}</b>${r.healed ? ` — ${r.healed === 1 ? 'one step had' : `${r.healed} steps had`} changed and ${r.healed === 1 ? 'was' : 'were'} fixed` : ''}${r.skipped ? ` · ${r.skipped} skipped` : ''}` +
+          // What it printed is the proof of what it did.
+          (r.printed ? `<span class="pb-printed">${esc(r.printed)}</span>` : '');
     } else {
       el.innerHTML = `<b>${r.stopped ? 'Stopped' : '✕ Stopped'}</b>${r.error && !r.stopped ? ` — ${esc(r.error)}` : ''}`;
     }

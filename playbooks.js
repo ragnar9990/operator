@@ -581,6 +581,10 @@ async function run(id, { hands, inputs = {}, trigger = {}, dryRun = false, signa
   const steps = pb.steps.map(clone);
   let healed = 0;
   let skipped = 0;
+  // What the last command printed — "Copied 4 files" — so the result says
+  // what actually happened, not only that nothing went wrong. A run that
+  // copied nothing reported "Done" and looked like it had worked.
+  let printed = '';
 
   const stepsView = () => steps.map(stepView);
   emit({ type: 'pb_start', id, name: pb.name, steps: stepsView(), dryRun });
@@ -601,7 +605,7 @@ async function run(id, { hands, inputs = {}, trigger = {}, dryRun = false, signa
       pb.updatedAt = Date.now();
       flush();
     }
-    const result = { ok, ms, healed, skipped, steps: steps.length, dryRun, ...extra };
+    const result = { ok, ms, healed, skipped, steps: steps.length, dryRun, printed: dryRun ? '' : printed, ...extra };
     emit({ type: 'pb_end', id, ...result });
     return result;
   };
@@ -697,7 +701,14 @@ async function run(id, { hands, inputs = {}, trigger = {}, dryRun = false, signa
       if (m) vars.code = m[1];
     }
 
-    if (landed) { emit({ type: 'pb_step', i, state: 'ok' }); continue; }
+    if (landed) {
+      if (step.tool === 'run_command' && res.text) {
+        const last = String(res.text).split(/\r?\n/).map((l) => l.trim()).filter((l) => l && l !== '(no output)').pop();
+        if (last) printed = last.slice(0, 200);
+      }
+      emit({ type: 'pb_step', i, state: 'ok' });
+      continue;
+    }
 
     const reason = res.ok
       ? (step.check && step.check.url ? `it did not end up on ${checkLabel(step.check)}` : `the window "${appPart(step.check && step.check.window)}" never came up`)

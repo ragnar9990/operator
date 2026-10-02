@@ -4170,3 +4170,4 @@ body:not(.working) .composer > .halo-bloom { display: none; }
 .pb-more .pb-delete { width: auto; align-self: flex-start; }
 .pb-panel > .pb-more:last-child { margin-top: 0; }
 .pb-step .pb-cmd { display: inline-block; max-width: 100%; vertical-align: bottom; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pb-printed { display: block; margin-top: 3px; font: 12px var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
