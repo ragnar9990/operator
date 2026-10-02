@@ -1149,7 +1149,7 @@ function screenCard(v) {
 // are redrawn from the saved transcript.
 function offerCard(v) {
   return '<div class="pb-offer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg>' +
-    '<span class="pb-offer-text"><b>Save this as a playbook?</b><i>Its ' + Number(v.steps) + ' steps replay with no AI next time — free, in seconds.</i></span>' +
+    '<span class="pb-offer-text"><b>Save as a playbook?</b><i>Next time it runs by itself, in seconds.</i></span>' +
     '<button class="pill sm" type="button" data-pb-task="' + esc(v.taskId) + '">Save as playbook</button></div>';
 }
 
@@ -1161,16 +1161,15 @@ function routineOfferCard(v) {
   const who = bot ? esc(bot.name) : 'This agent';
   const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
   if (v.done) {
-    return `<div class="pb-offer routine-offer done">${icon}<span class="pb-offer-text"><b>Set up — ${who} does this ${EVERY_SAID[v.every] || 'every day'} at ${esc(v.at)}.</b>` +
-      `<i>You get a notification with what it found. Change or stop it in ${who}'s settings, under Routines.</i></span></div>`;
+    return `<div class="pb-offer routine-offer done">${icon}<span class="pb-offer-text"><b>Scheduled — ${EVERY_SAID[v.every] || 'every day'} at ${esc(v.at)}.</b>` +
+      '<i>You’ll get a notification with what it finds.</i></span></div>';
   }
   return `<div class="pb-offer routine-offer" data-prompt="${esc(v.prompt || '')}">${icon}` +
-    '<span class="pb-offer-text"><b>Want this again on a schedule?</b>' +
-    `<i>This job was reading and summing up, which needs the AI every time — so it can't be a playbook, which repeats clicks without it. ${who} can do it for you on a schedule and tell you what it finds.</i></span>` +
+    `<span class="pb-offer-text"><b>Do this again on a schedule?</b><i>${who} will look again each time and tell you what it finds.</i></span>` +
     '<span class="routine-offer-set">' +
       '<select class="ro-every" aria-label="How often"><option value="day">Every day</option><option value="weekday">Every weekday</option><option value="week">Every Monday</option></select>' +
       '<input class="ro-at" type="time" value="08:00" aria-label="At what time" />' +
-      '<button class="pill sm" type="button" data-routine-set>Set it up</button>' +
+      '<button class="pill sm" type="button" data-routine-set>Schedule</button>' +
     '</span></div>';
 }
 

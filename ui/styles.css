@@ -4118,3 +4118,55 @@ body:not(.working) .composer > .halo-bloom { display: none; }
 .pb-run-row .muted { color: var(--ink-4); }
 .pb-empty .pb-fit { max-width: 640px; margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--raise); font-size: 13px; line-height: 1.55; color: var(--ink-3); }
 .pb-empty .pb-fit b { color: var(--ink); font-weight: 600; }
+
+/* ── Playbooks, simpler: the job, its steps, Run (ui/playbooks.js) ─── */
+.pb-head .staff-who small { font-size: 12.5px; color: var(--ink-3); }
+.pb-help { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line-max); border-radius: 50%; background: transparent; color: var(--ink-3); font: 600 14px var(--sans); cursor: pointer; }
+.pb-help:hover, .pb-help.on { color: var(--ink); background: var(--raise-hi); }
+
+.pb-main { gap: 12px; }
+.pb-result { padding: 9px 13px; font-size: 13.5px; }
+
+.pb-steps { gap: 2px; }
+.pb-step { display: flex; align-items: flex-start; gap: 12px; padding: 11px 12px; border: 1px solid transparent; border-radius: 10px; background: transparent; }
+.pb-step:hover, .pb-step.editing { background: var(--raise); }
+.pb-step.editing { border-color: var(--line-hi); }
+.pb-step .pb-n { flex: none; width: 18px; padding-top: 3px; text-align: right; font: 500 12px var(--mono); color: var(--ink-4); }
+.pb-kicon { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; background: var(--raise-hi); color: var(--ink-3); }
+.pb-kicon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pb-step.k-you .pb-kicon { color: #f0a12e; background: rgba(240, 161, 46, 0.12); }
+.pb-step .pb-step-main { flex: 1; min-width: 0; gap: 8px; padding-top: 3px; }
+.pb-step .pb-step-text { font-size: 13.5px; line-height: 1.5; }
+.pb-mark-ask { display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 9999px; border: 1px solid rgba(240, 161, 46, 0.45); color: #f0a12e; font-size: 11px; line-height: 1.6; vertical-align: 1px; }
+.pb-step .pb-note { margin-left: 8px; font-size: 12px; color: var(--ink-3); }
+.pb-edit-btn { flex: none; margin-top: 1px; opacity: 0; transition: opacity .12s; }
+.pb-step:hover .pb-edit-btn, .pb-step:focus-within .pb-edit-btn, .pb-step.editing .pb-edit-btn { opacity: 1; }
+@media (hover: none) { .pb-edit-btn { opacity: 1; } }
+
+/* how a run is going, on the row */
+.pb-step.s-running { background: color-mix(in srgb, var(--accent) 8%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.pb-step.s-running .pb-kicon { color: var(--accent); }
+.pb-step.s-ok .pb-kicon { color: #46d17f; background: rgba(70, 209, 127, 0.12); }
+.pb-step.s-healing { background: rgba(240, 161, 46, 0.07); border-color: rgba(240, 161, 46, 0.4); }
+.pb-step.s-skipped { opacity: .55; }
+
+/* one step's editor */
+.pb-edit { display: flex; flex-direction: column; gap: 10px; }
+.pb-edit[hidden] { display: none; }
+.pb-edit-facts { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-4); }
+.pb-edit-facts code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+.pb-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+/* the side panel: what starts it, then everything else folded away */
+.pb-panel .pb-watches { margin: 0 -8px 6px; }
+.pb-more summary { cursor: pointer; list-style: none; font-size: 11.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--ink-4); }
+.pb-more summary::-webkit-details-marker { display: none; }
+.pb-more summary::after { content: '▸'; margin-left: 6px; }
+.pb-more[open] summary::after { content: '▾'; }
+.pb-more[open] { display: flex; flex-direction: column; gap: 12px; }
+.pb-more[open] summary { margin-bottom: 2px; }
+.pb-more-row { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.pb-more .field-hint { margin: -6px 0 0; }
+.pb-more .pb-delete { width: auto; align-self: flex-start; }
+.pb-panel > .pb-more:last-child { margin-top: 0; }
+.pb-step .pb-cmd { display: inline-block; max-width: 100%; vertical-align: bottom; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

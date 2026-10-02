@@ -38,14 +38,6 @@
   const secs = (ms) => (ms < 10000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)) + 's';
   // What kind of step, said the way the person using it would say it.
   const KIND = { web: 'Browser', screen: 'Screen', shell: 'Files & settings', mail: 'Email', you: 'Your turn', wait: 'Waits' };
-  const KIND_TIP = {
-    web: "Done in Operator's own browser",
-    screen: 'Done on the screen, with the mouse and keyboard',
-    shell: 'A Windows command (PowerShell): moving files, reading folders, changing settings',
-    mail: 'Done with the email account connected in Settings → Connectors',
-    you: 'Something only you can do. Operator stops and waits for you, then carries on',
-    wait: 'Waits for something to finish before the next step',
-  };
 
   // {{month}}, {yesterday} and the rest, in a step's words, as tags that say
   // what will go there — and, for an input, what it is set to now.
@@ -74,10 +66,10 @@
    * clicked. With motion off it holds still on whichever stage is chosen. */
 
   const HOW_STAGES = [
-    { key: 'learn', head: 'Do the job once', body: 'Give an agent a job. The AI works out every click and every word, the way a person would — that first time takes a while, and uses the AI.' },
-    { key: 'save', head: 'Save it as a playbook', body: 'When the job worked, its steps are kept: what it opened, clicked and typed, and where each one should end up. Never your passwords.' },
-    { key: 'replay', head: 'Run it again — no AI', body: 'Next time the same steps replay straight through. Nothing to pay, done in seconds, the same way every time. Press Run, or let a watcher start it when a file or an email arrives.' },
-    { key: 'repair', head: 'It fixes itself', body: 'If a screen has changed — a button renamed — only that one step goes back to the AI. Its fix is kept, so the run after that is free again.' },
+    { key: 'learn', head: 'Do it once', body: 'An agent does the job and works out each step.' },
+    { key: 'save', head: 'Save it', body: 'The steps are kept. Your passwords never are.' },
+    { key: 'replay', head: 'Run it again', body: 'It repeats the steps by itself, in seconds.' },
+    { key: 'repair', head: 'It fixes itself', body: 'If a button moved, just that step is worked out again.' },
   ];
 
   const DEMO_STEPS = ['Open the supplier portal', 'Click “Invoices”', 'Click “Download all”', 'Move the PDFs into Invoices\\September'];
@@ -136,43 +128,43 @@
     // Each scene, played. `my` is the run it belongs to.
     const SCENES = [
       async (my) => {           // the AI works it out, one step at a time
-        reset(); setBadge('AI working it out', 'ai');
+        reset(); setBadge('Learning', 'ai');
         let secs = 0;
         for (let i = 0; i < rows.length; i++) {
           setRow(i, 'active ai', 'thinking…');
           for (let t = 0; t < 4; t++) { await wait(260, my); secs += 3; clockEl.textContent = `${secs}s so far`; }
           setRow(i, 'done', '');
         }
-        clockEl.textContent = `took ${secs}s, with the AI`;
+        clockEl.textContent = `took ${secs}s`;
         await wait(1400, my);
       },
       async (my) => {           // kept
         rows.forEach((_r, i) => setRow(i, 'done', ''));
-        setBadge('Worked', 'ok');
+        setBadge('Done', 'ok');
         await wait(500, my);
         demo.classList.add('saved');
         clockEl.textContent = '';
         await wait(2600, my);
       },
       async (my) => {           // replayed with no AI
-        reset(); demo.classList.add('saved'); setBadge('No AI', 'free');
+        reset(); demo.classList.add('saved'); setBadge('Replaying', 'free');
         for (let i = 0; i < rows.length; i++) { setRow(i, 'active', ''); await wait(330, my); setRow(i, 'done', ''); }
-        clockEl.textContent = 'took 4s, no AI';
+        clockEl.textContent = 'took 4s';
         await wait(2400, my);
       },
       async (my) => {           // one step changed; only it is repaired
-        reset(); demo.classList.add('saved'); setBadge('No AI', 'free');
+        reset(); demo.classList.add('saved'); setBadge('Replaying', 'free');
         for (let i = 0; i < 2; i++) { setRow(i, 'active', ''); await wait(330, my); setRow(i, 'done', ''); }
         setRow(2, 'active', ''); await wait(500, my);
-        setRow(2, 'broken', 'not there any more'); setBadge('One step changed', 'warn');
+        setRow(2, 'broken', 'not there any more'); setBadge('A button moved', 'warn');
         await wait(1300, my);
-        setRow(2, 'active ai', 'the AI fixes just this step…'); setBadge('AI: this step only', 'ai');
+        setRow(2, 'active ai', 'working it out…'); setBadge('Fixing', 'ai');
         await wait(1700, my);
         rows[2].querySelector('.pb-demo-text').textContent = DEMO_FIXED;
-        setRow(2, 'done fixed', 'fixed — kept for next time'); setBadge('No AI', 'free');
+        setRow(2, 'done fixed', 'fixed'); setBadge('Replaying', 'free');
         await wait(600, my);
         setRow(3, 'active', ''); await wait(330, my); setRow(3, 'done', '');
-        clockEl.textContent = 'next run: no AI again';
+        clockEl.textContent = 'fixed for next time';
         await wait(2600, my);
       },
     ];
@@ -180,13 +172,13 @@
     // The final picture of a stage, for when nothing moves.
     function settle(i) {
       reset();
-      if (i === 0) { rows.forEach((_r, j) => setRow(j, 'done', '')); rows[1].className = 'active ai'; setBadge('AI working it out', 'ai'); clockEl.textContent = 'the first time takes a while'; }
-      if (i === 1) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('Worked', 'ok'); }
-      if (i === 2) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('No AI', 'free'); clockEl.textContent = 'took 4s, no AI'; }
+      if (i === 0) { rows.forEach((_r, j) => setRow(j, 'done', '')); rows[1].className = 'active ai'; setBadge('Learning', 'ai'); clockEl.textContent = 'the first time is slow'; }
+      if (i === 1) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('Done', 'ok'); }
+      if (i === 2) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('Replaying', 'free'); clockEl.textContent = 'took 4s'; }
       if (i === 3) {
         rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved');
         rows[2].querySelector('.pb-demo-text').textContent = DEMO_FIXED;
-        setRow(2, 'done fixed', 'fixed by the AI — kept for next time'); setBadge('No AI', 'free');
+        setRow(2, 'done fixed', 'fixed'); setBadge('Replaying', 'free');
       }
     }
 
@@ -289,11 +281,6 @@
     desk.hidden = false;
     paintList();
     paint();
-    // The first playbook anyone opens explains itself once; after that it is
-    // behind "How it works".
-    let seen = true;
-    try { seen = Boolean(localStorage.getItem(HOW_SEEN)); } catch { /* fine */ }
-    if (!seen) toggleHow(true);
   }
 
   // A playbook that only opens pages: running it opens them and says nothing,
@@ -309,12 +296,12 @@
     if (!agent) { el.hidden = true; return; }
     el.hidden = false;
     el.innerHTML =
-      '<b>This playbook only opens web pages — so running it shows you nothing.</b>' +
-      `<p>When ${esc(agent.name)} did this job, the useful part was reading those pages and writing down what it found. That was the AI, and a playbook replays the clicks without the AI. For news, prices, or anything that changes, let ${esc(agent.name)} do the job on a schedule instead: it reads everything fresh each time and sends you what it found.</p>` +
+      '<b>This one only opens web pages, so running it won’t show you anything.</b>' +
+      `<p>For news or anything that changes, have ${esc(agent.name)} do it on a schedule instead — it looks again each time and tells you what it found.</p>` +
       '<div class="pb-lookonly-set">' +
         '<select class="ro-every" aria-label="How often"><option value="day">Every day</option><option value="weekday">Every weekday</option><option value="week">Every Monday</option></select>' +
         '<input class="ro-at" type="time" value="08:00" aria-label="At what time" />' +
-        `<button class="pill solid sm" type="button" data-act="routine">Make it a routine for ${esc(agent.name)}</button>` +
+        '<button class="pill solid sm" type="button" data-act="routine">Schedule it</button>' +
       '</div>';
     el.querySelector('[data-act="routine"]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -324,8 +311,8 @@
       const r = await window.operator.addRoutine(agent.id, { name: current.name.slice(0, 50), prompt: current.goal || current.name, every, at, kind: 'task' });
       if (!r) { btn.disabled = false; return; }
       const when = { day: 'every day', weekday: 'every weekday', week: 'every Monday' }[every];
-      el.innerHTML = `<b>Done — ${esc(agent.name)} will do this ${when} at ${esc(at)}, and send you what it finds.</b>` +
-        `<p>You can change or stop it in ${esc(agent.name)}'s settings, under Routines. This playbook is no use for this job any more.</p>` +
+      el.innerHTML = `<b>Scheduled — ${esc(agent.name)} does this ${when} at ${esc(at)} and lets you know what it found.</b>` +
+        '<p>You can delete this playbook now.</p>' +
         '<div class="pb-lookonly-set"><button class="pill sm" type="button" data-act="delete">Delete this playbook</button></div>';
       el.querySelector('[data-act="delete"]').addEventListener('click', async () => {
         const id = current && current.id;
@@ -337,39 +324,19 @@
     });
   }
 
-  // What will happen when it runs, in a few sentences — read off the steps,
-  // the watchers that start it, where it runs and what fixes it.
-  function paintSummary() {
+  // One line under the name: how many steps, and how its runs have gone.
+  function paintSub() {
     const pb = current;
-    const el = $('pbSummary');
-    if (!pb || !el) return;
+    if (!pb) return;
+    const s = pb.stats || {};
     const n = pb.steps.length;
-    const starts = watches
-      .filter((w) => w.enabled && w.action && w.action.kind === 'playbook' && w.action.playbookId === pb.id)
-      .map((w) => (/^when\b/i.test(w.name) ? esc(w.name.replace(/^When/, 'when')) : `when its watcher “${esc(w.name)}” goes off`));
-    const fleet = window.__fleet ? window.__fleet.list() : [];
-    const machine = fleet.find((m) => m.id === pb.machine);
-    const kinds = new Set(pb.steps.map((s) => s.kind));
-    const how = [kinds.has('web') && 'in its own browser', kinds.has('screen') && 'on the screen', kinds.has('shell') && 'with Windows commands', kinds.has('mail') && 'with your email']
-      .filter(Boolean);
-    const list = (a) => (a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
-    const nums = (pred) => pb.steps.map((s, i) => (pred(s) ? i + 1 : 0)).filter(Boolean);
-    const yours = nums((s) => s.kind === 'you' || /\{\{?\s*secret/i.test(s.text) || s.fields.some((f) => /\{\{\s*secret/i.test(f.value)));
-    const asks = nums((s) => s.confirm);
-    const fixer = modelName(pb.model);
-
-    const lines = [];
-    lines.push(`<b>When you press Run</b>${starts.length ? `, or ${starts.join(', or ')},` : ','} Operator does these ${n} step${n === 1 ? '' : 's'} by itself, in order` +
-      `${machine ? ` on <b>${esc(machine.name)}</b>` : ''}${how.length ? ` — ${list(how)}` : ''}.`);
-    lines.push(`<b>No AI is used.</b> Only if a step stops working because a screen has changed does ${esc(fixer)} work out that one step again, and its fix is kept.`);
-    const stops = [];
-    if (yours.length) stops.push(`for you at step ${list(yours.map(String))}`);
-    if (asks.length) stops.push(`to ask before step${asks.length === 1 ? '' : 's'} ${list(asks.map(String))}`);
-    if (stops.length) lines.push(`<b>It stops</b> ${stops.join(', and ')}.`);
-    if (pb.inputs.length) {
-      lines.push(`<b>Changes each run:</b> ${pb.inputs.map((x) => `<span class="pb-var">${esc(x.name.replace(/_/g, ' '))}${x.value ? `: <i>${esc(x.value)}</i>` : ''}</span>`).join(' ')}`);
+    const bits = [`${n} step${n === 1 ? '' : 's'}`];
+    if (!s.runs) bits.push('not run yet');
+    else {
+      bits.push(`last ran ${stamp(s.lastRun)}${s.lastError ? ' — stopped' : ''}`);
+      if (s.ok) bits.push(`takes about ${secs((s.totalMs || 0) / s.ok)}`);
     }
-    el.innerHTML = lines.map((l) => `<p>${l}</p>`).join('');
+    $('pbSub').textContent = bits.join(' · ');
   }
 
   // A model's name, for the summary and the repair picker.
@@ -383,12 +350,10 @@
     const pb = current;
     if (!pb) return;
     $('pbName').textContent = pb.name;
-    const from = pb.source && pb.source.at ? ` · saved from ${pb.source.botName ? esc(pb.source.botName) + "'s" : 'a'} run on ${new Date(pb.source.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '';
-    $('pbSub').innerHTML = esc(trim(pb.goal || '', 110)) + from;
+    paintSub();
     paintState();
     paintLookOnly();
-    paintSummary();
-    paintStats();
+    paintResult();
     paintSteps();
     paintInputs();
     paintModel();
@@ -412,33 +377,12 @@
       const at = live.states.findIndex((x) => x === 'running' || x === 'healing');
       const fixing = at !== -1 && live.states[at] === 'healing';
       const where = at === -1 ? 'Starting' : `Step ${at + 1} of ${total}`;
-      st.textContent = live.dryRun ? `Rehearsing · ${where} · nothing is being changed`
-        : fixing ? `${where} · the AI is fixing this step` : `${where} · no AI`;
+      st.textContent = live.dryRun ? `Test run · ${where}`
+        : fixing ? `${where} · fixing a step that changed` : where;
       st.className = 'staff-state ' + (fixing ? 'st-ask' : 'st-busy');
     }
     else if (busyElsewhere) { st.textContent = 'Another playbook is running'; st.className = 'staff-state st-off'; }
     else { st.textContent = ''; st.className = 'staff-state'; }
-  }
-
-  function paintStats() {
-    const s = (current && current.stats) || {};
-    const el = $('pbStats');
-    // One card per number, so they line up rather than wrap as a sentence.
-    const card = (value, label, cls) => `<div class="pb-stat${cls ? ' ' + cls : ''}"><b>${value}</b><span>${label}</span></div>`;
-    const head = '<div class="pb-stats-top"><span class="pb-free">Runs with no AI</span>' +
-      (s.runs ? '' : '<span class="pb-stats-note">Not run yet. <b>Rehearse</b> goes through it without changing anything.</span>') + '</div>';
-    if (!s.runs) { el.innerHTML = head; paintResult(); return; }
-    const cards = [
-      card(s.runs, s.runs === 1 ? 'run' : 'runs'),
-      card(`${s.ok || 0}<small>/${s.runs}</small>`, 'worked', s.ok === s.runs ? 'good' : ''),
-      s.ok ? card(secs((s.totalMs || 0) / s.ok), 'usually takes') : '',
-      s.heals ? card(s.heals, s.heals === 1 ? 'step repaired' : 'steps repaired', 'warn') : '',
-      // Today a time, before today just the day — a card is not wide enough for both.
-      card(dayOf(s.lastRun) === dayOf(Date.now()) ? clock(s.lastRun) : new Date(s.lastRun).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-        'last run', s.lastError ? 'stopped' : 'ok'),
-    ];
-    el.innerHTML = head + '<div class="pb-stat-grid">' + cards.join('') + '</div>';
-    paintResult();
   }
 
   function paintResult() {
@@ -449,10 +393,10 @@
     el.className = 'pb-result ' + (r.ok ? 'good' : r.stopped ? 'off' : 'bad');
     if (r.ok) {
       el.innerHTML = r.dryRun
-        ? `<b>Rehearsed — nothing was changed.</b> All ${r.steps} steps went through. Run it for real when you are ready.`
-        : `<b>Done in ${secs(r.ms)}.</b> ${r.healed ? `${r.healed} step${r.healed === 1 ? ' had' : 's had'} changed and ${r.healed === 1 ? 'was' : 'were'} repaired by the AI — the repair is saved, so next time is free again.` : 'No AI was used.'}${r.skipped ? ` ${r.skipped} step${r.skipped === 1 ? ' was' : 's were'} left out.` : ''}`;
+        ? '<b>✓ Test run passed</b> — nothing was changed.'
+        : `<b>✓ Done in ${secs(r.ms)}</b>${r.healed ? ` — ${r.healed === 1 ? 'one step had' : `${r.healed} steps had`} changed and ${r.healed === 1 ? 'was' : 'were'} fixed` : ''}${r.skipped ? ` · ${r.skipped} skipped` : ''}`;
     } else {
-      el.innerHTML = `<b>${r.stopped ? 'Stopped.' : 'It stopped.'}</b> ${esc(r.error || '')}`;
+      el.innerHTML = `<b>${r.stopped ? 'Stopped' : '✕ Stopped'}</b>${r.error && !r.stopped ? ` — ${esc(r.error)}` : ''}`;
     }
   }
 
@@ -463,7 +407,6 @@
 
   function paintSteps() {
     const steps = (live && current && live.playbookId === current.id && live.steps) || current.steps;
-    $('pbStepsNote').textContent = `${steps.length} step${steps.length === 1 ? '' : 's'}, done in this order every time · point at a label to see what it means`;
     stepsEl.textContent = '';
     steps.forEach((s, i) => stepsEl.appendChild(stepRow(s, i)));
   }
@@ -471,70 +414,83 @@
   // A step's words as a sentence: a capital to start, and a shell command
   // said for what it is, with the command itself shown as code.
   function stepWords(s) {
-    const text = String(s.text || '');
+    let text = String(s.text || '');
     const cmd = s.kind === 'shell' && text.match(/^run:\s*([\s\S]*)$/i);
-    if (cmd) return `Runs a Windows command: <code class="pb-cmd">${withTags(cmd[1], current)}</code>`;
-    return withTags(text.charAt(0).toUpperCase() + text.slice(1), current);
+    if (cmd) return `Runs a Windows command <code class="pb-cmd" title="${esc(cmd[1])}">${withTags(cmd[1], current)}</code>`;
+    // "fill 2 field(s) and submit" — say which boxes.
+    if (s.tool === 'browser_fill_form') {
+      const boxes = s.fields.filter((f) => /\.target$/.test(f.path)).map((f) => f.value);
+      const secret = s.fields.some((f) => /\{\{\s*secret/i.test(f.value));
+      if (boxes.length) text = `fill in ${boxes.join(', ').replace(/, ([^,]*)$/, ' and $1')}${/submit/.test(text) ? ', then submit' : ''}${secret ? ' (you type the password)' : ''}`;
+    }
+    // The icon already says it is the browser.
+    text = text.replace(/ in the browser$/, '');
+    // A tag in quotes is still just the tag.
+    return withTags(text.charAt(0).toUpperCase() + text.slice(1), current)
+      .replace(/&quot;(<span class="pb-var[^"]*"[^>]*>(?:(?!<\/span>).)*<\/span>)&quot;/g, '$1');
   }
+
+  // A small picture of what kind of step it is, in place of a word for it.
+  const KIND_ICON = {
+    web: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5a13 13 0 0 1 0 17 13 13 0 0 1 0-17Z"/>',
+    screen: '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>',
+    shell: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="m7.5 10 3 2.5-3 2.5M12.5 15.5h4"/>',
+    mail: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="m4 7.5 8 6 8-6"/>',
+    you: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    wait: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  };
+
+  // The step whose editor is open, so a change that redraws the list leaves
+  // it open.
+  let openStep = null;
+
+  // What each value in a step is, in words, for its box in the editor.
+  const FIELD_SAID = {
+    url: 'Web address', target: 'Box', text: 'Text', field: 'Box', option: 'Choice', command: 'Command',
+    to: 'To', subject: 'Subject', body: 'Message', keys: 'Keys', key: 'Key', title: 'Window', name: 'Button',
+    what: 'What you do', until_gone: 'Done when this goes', from: 'From', args: 'Options',
+  };
 
   function stepRow(s, i) {
     const li = document.createElement('li');
     const { state, note } = stepState(i);
     li.className = `pb-step k-${s.kind}${state ? ' s-' + state : ''}`;
     li.dataset.id = s.id;
-    const tags = [];
-    if (s.check) {
-      const said = s.kind === 'web' ? `checks it is on ${esc(s.check)}` : `checks ${esc(s.check)} is in front`;
-      tags.push(`<span class="pb-then" title="After this step Operator checks this, without the AI. If it is not so, it waits, tries once more, and only then asks the AI to fix this one step.">✓ ${said}</span>`);
-    }
-    if (s.brittle) tags.push('<span class="pb-tag warn" title="It clicks a spot on the screen, not a button by its name — if the window moves or changes, this is the step most likely to need the AI to fix it">clicks a spot on screen</span>');
-    if (s.healed) tags.push('<span class="pb-tag fixed" title="A screen had changed, so the AI worked this step out again. The fix is saved — it runs with no AI now">fixed by the AI</span>');
-    if (note) tags.push(`<span class="pb-note">${esc(note)}</span>`);
     const lock = live && current && live.playbookId === current.id;
+    const marks = [];
+    if (s.confirm) marks.push('<span class="pb-mark-ask" title="Stops and asks you before doing this">asks first</span>');
+    if (note) marks.push(`<span class="pb-note">${esc(note)}</span>`);
     li.innerHTML =
       `<span class="pb-n">${i + 1}</span>` +
+      `<span class="pb-kicon" title="${esc(KIND[s.kind] || 'Step')}"><svg viewBox="0 0 24 24" aria-hidden="true">${KIND_ICON[s.kind] || KIND_ICON.screen}</svg></span>` +
       '<div class="pb-step-main">' +
-        `<div class="pb-step-text">${stepWords(s)}</div>` +
-        // What kind of step and how it went on the left, what you can do to it
-        // on the right — under the words, so they keep the whole width.
-        '<div class="pb-step-foot">' +
-          `<div class="pb-step-meta"><span class="pb-kind" title="${esc(KIND_TIP[s.kind] || '')}">${KIND[s.kind] || 'Step'}</span>${tags.join('')}</div>` +
-          '<div class="pb-step-acts">' +
-            `<label class="pb-ask" title="Stop and ask you before doing this step — on for anything that sends, pays, posts or deletes"><input type="checkbox"${s.confirm ? ' checked' : ''}${lock ? ' disabled' : ''} /> Ask me first</label>` +
-            (s.fields.length ? `<button class="mini" type="button" data-act="edit"${lock ? ' disabled' : ''}>Edit</button>` : '') +
-            `<button class="mini" type="button" data-act="remove"${lock ? ' disabled' : ''}>Remove</button>` +
-          '</div>' +
-        '</div>' +
-        '<div class="pb-fields" hidden></div>' +
-      '</div>';
-
-    li.querySelector('.pb-ask input').addEventListener('change', (e) => change({ step: { id: s.id, confirm: e.target.checked } }));
-    const edit = li.querySelector('[data-act="edit"]');
-    if (edit) edit.addEventListener('click', () => toggleFields(li, s));
-    li.querySelector('[data-act="remove"]').addEventListener('click', (e) => {
-      const b = e.currentTarget;
-      if (!b.classList.contains('armed')) {
-        b.classList.add('armed');
-        b.textContent = 'Sure?';
-        setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Remove'; }, 2500);
-        return;
-      }
-      change({ step: { id: s.id, remove: true } });
-    });
+        `<div class="pb-step-text">${stepWords(s)}${marks.join('')}</div>` +
+        '<div class="pb-edit" hidden></div>' +
+      '</div>' +
+      `<button class="mini pb-edit-btn" type="button"${lock ? ' disabled' : ''}>Edit</button>`;
+    li.querySelector('.pb-edit-btn').addEventListener('click', () => toggleEdit(li, s));
+    if (openStep === s.id && !lock) toggleEdit(li, s);
     return li;
   }
 
-  // The values a step types, sends or opens — editable, so a one-off value can
-  // become {{an_input}}.
-  function toggleFields(li, s) {
-    const box = li.querySelector('.pb-fields');
-    if (!box.hidden) { box.hidden = true; return; }
+  // Everything you can change about one step, folded away until asked for:
+  // what it types or opens, whether it asks first, and taking it out.
+  function toggleEdit(li, s) {
+    const box = li.querySelector('.pb-edit');
+    const btn = li.querySelector('.pb-edit-btn');
+    if (!box.hidden) {
+      box.hidden = true; btn.textContent = 'Edit'; li.classList.remove('editing'); openStep = null;
+      return;
+    }
+    openStep = s.id;
+    btn.textContent = 'Done';
+    li.classList.add('editing');
     box.textContent = '';
     for (const f of s.fields) {
       const row = document.createElement('label');
       row.className = 'pb-field';
       const name = f.path.split('.').filter((p) => !/^\d+$/.test(p)).pop() || f.path;
-      row.innerHTML = `<span>${esc(name)}</span>`;
+      row.innerHTML = `<span>${esc(FIELD_SAID[name] || name)}</span>`;
       const input = document.createElement(f.value.length > 60 ? 'textarea' : 'input');
       if (input.tagName === 'INPUT') input.type = 'text';
       input.value = f.value;
@@ -543,6 +499,34 @@
       row.appendChild(input);
       box.appendChild(row);
     }
+    const facts = [];
+    if (s.fields.length) facts.push('Put <code>{{name}}</code> where a word should change each run.');
+    if (s.check) facts.push(s.kind === 'web' ? `Afterwards it checks it’s on ${esc(s.check)}.` : `Afterwards it checks ${esc(s.check)} is open.`);
+    if (s.brittle) facts.push('It clicks a spot on the screen, so it may need fixing if the window moves.');
+    if (s.healed) facts.push('This step was fixed automatically after something changed.');
+    if (facts.length) {
+      const p = document.createElement('p');
+      p.className = 'pb-edit-facts';
+      p.innerHTML = facts.join(' ');
+      box.appendChild(p);
+    }
+    const row = document.createElement('div');
+    row.className = 'pb-edit-row';
+    row.innerHTML = `<label class="pb-ask"><input type="checkbox"${s.confirm ? ' checked' : ''} /> Ask me before this step</label>` +
+      '<button class="mini" type="button" data-act="remove">Remove step</button>';
+    row.querySelector('input').addEventListener('change', (e) => change({ step: { id: s.id, confirm: e.target.checked } }));
+    row.querySelector('[data-act="remove"]').addEventListener('click', (e) => {
+      const b = e.currentTarget;
+      if (!b.classList.contains('armed')) {
+        b.classList.add('armed');
+        b.textContent = 'Sure?';
+        setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Remove step'; }, 2500);
+        return;
+      }
+      openStep = null;
+      change({ step: { id: s.id, remove: true } });
+    });
+    box.appendChild(row);
     box.hidden = false;
   }
 
@@ -555,16 +539,12 @@
   function paintInputs() {
     const box = $('pbInputs');
     box.textContent = '';
-    if (!current.inputs.length) {
-      const p = document.createElement('p');
-      p.className = 'pb-none';
-      p.textContent = 'Nothing — it types the same things every time.';
-      box.appendChild(p);
-    }
+    // Only shown when there is something in it.
+    $('pbInputsBlock').hidden = !current.inputs.length;
     for (const inp of current.inputs) {
       const row = document.createElement('label');
       row.className = 'field pb-input';
-      row.innerHTML = `<span>${esc(inp.name.replace(/_/g, ' '))} <code>{{${esc(inp.name)}}}</code></span>`;
+      row.innerHTML = `<span>${esc(inp.name.replace(/_/g, ' '))}</span>`;
       const input = document.createElement('input');
       input.type = 'text';
       input.value = inp.value;
@@ -589,7 +569,7 @@
     sel.textContent = '';
     const auto = document.createElement('option');
     auto.value = '';
-    auto.textContent = defaultModel ? `Operator's default — ${modelName(null)}` : "Operator's default";
+    auto.textContent = defaultModel ? `Default (${modelName(null)})` : 'Default';
     sel.appendChild(auto);
     let group = null;
     let holder = sel;
@@ -607,7 +587,6 @@
       holder.appendChild(o);
     }
     sel.value = current.model && models.some((m) => m.id === current.model) ? current.model : '';
-    paintSummary();   // it names the model, which was not known until now
   }
 
   $('pbModel').addEventListener('change', (e) => change({ model: e.target.value || null }));
@@ -620,12 +599,12 @@
     if (!sel || !current || !window.__fleet) return;
     const fleet = window.__fleet.list();
     window.__fleet.fillSelect(sel, current.machine, fleet.length ? 'The one set in Settings → Computer' : 'This computer');
+    // Said only when there is something to warn about.
     const note = $('pbMachineNote');
     const m = window.__fleet.list().find((x) => x.id === current.machine);
-    note.textContent = !window.__fleet.list().length ? 'Add spare PCs in Settings → Computer, and this one can run there instead.'
-      : m && current.usesBrowser ? "Its web steps use Operator's own browser, which is only on this computer — they will stop there."
-      : m ? `Runs on ${m.name}${m.online === false ? ', which is not answering right now' : ''}, so this computer stays free.`
-      : 'Settings → Computer decides.';
+    note.textContent = m && current.usesBrowser ? 'Its web steps only work on this computer.'
+      : m && m.online === false ? `${m.name} isn’t answering right now.` : '';
+    note.hidden = !note.textContent;
   }
   $('pbMachine').addEventListener('change', (e) => change({ machine: e.target.value || null }));
   document.addEventListener('fleet:changed', () => { if (shown) paintMachine(); });
@@ -759,7 +738,7 @@
         if (live) { live.states[evt.i] = evt.state; live.notes[evt.i] = evt.note || ''; }
         break;
       case 'pb_heal_step':
-        if (live) live.notes[evt.i] = 'the AI is working this step out again…';
+        if (live) live.notes[evt.i] = 'fixing — something changed…';
         break;
       case 'pb_healed':
         // The repaired steps take the broken one's place; the ones before it
@@ -827,7 +806,7 @@
       row.className = 'pb-run-row';
       row.disabled = r.saved || r.usedHelpers || r.lookOnly;
       const why = r.saved ? 'already saved' : r.usedHelpers ? 'used helpers — cannot be replayed'
-        : r.lookOnly ? 'only looked things up — the AI did the reading, so make it a routine instead'
+        : r.lookOnly ? 'only looked things up — schedule it as an agent job instead'
         : r.ok ? 'worked' : 'did not finish';
       row.innerHTML = `<b>${esc(trim(r.prompt || '(no words)', 90))}</b>` +
         `<small>${r.botName ? esc(r.botName) + ' · ' : ''}${stamp(r.at)} · ${r.steps} step${r.steps === 1 ? '' : 's'} · <span class="${r.saved || r.usedHelpers || r.lookOnly ? 'muted' : r.ok ? 'good' : 'bad'}">${why}</span></small>`;
@@ -910,7 +889,6 @@
       box.appendChild(p);
     }
     for (const w of mine) box.appendChild(watchRow(w));
-    paintSummary();   // "or when a PDF lands in Downloads"
   }
 
   function showKind() {
