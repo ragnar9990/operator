@@ -296,6 +296,47 @@
     if (!seen) toggleHow(true);
   }
 
+  // A playbook that only opens pages: running it opens them and says nothing,
+  // because the reading and the answer were the AI. Said plainly, with the
+  // thing that does work for that kind of job — the agent, on a schedule.
+  async function paintLookOnly() {
+    const el = $('pbLookOnly');
+    if (!el) return;
+    if (!current || !current.lookOnly) { el.hidden = true; el.textContent = ''; return; }
+    let bots = [];
+    try { bots = (await window.operator.listBots()).filter((b) => !b.employee); } catch { bots = []; }
+    const agent = bots.find((b) => current.source && b.id === current.source.botId) || bots[0];
+    if (!agent) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML =
+      '<b>This playbook only opens web pages — so running it shows you nothing.</b>' +
+      `<p>When ${esc(agent.name)} did this job, the useful part was reading those pages and writing down what it found. That was the AI, and a playbook replays the clicks without the AI. For news, prices, or anything that changes, let ${esc(agent.name)} do the job on a schedule instead: it reads everything fresh each time and sends you what it found.</p>` +
+      '<div class="pb-lookonly-set">' +
+        '<select class="ro-every" aria-label="How often"><option value="day">Every day</option><option value="weekday">Every weekday</option><option value="week">Every Monday</option></select>' +
+        '<input class="ro-at" type="time" value="08:00" aria-label="At what time" />' +
+        `<button class="pill solid sm" type="button" data-act="routine">Make it a routine for ${esc(agent.name)}</button>` +
+      '</div>';
+    el.querySelector('[data-act="routine"]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const every = el.querySelector('.ro-every').value;
+      const at = el.querySelector('.ro-at').value || '08:00';
+      btn.disabled = true;
+      const r = await window.operator.addRoutine(agent.id, { name: current.name.slice(0, 50), prompt: current.goal || current.name, every, at, kind: 'task' });
+      if (!r) { btn.disabled = false; return; }
+      const when = { day: 'every day', weekday: 'every weekday', week: 'every Monday' }[every];
+      el.innerHTML = `<b>Done — ${esc(agent.name)} will do this ${when} at ${esc(at)}, and send you what it finds.</b>` +
+        `<p>You can change or stop it in ${esc(agent.name)}'s settings, under Routines. This playbook is no use for this job any more.</p>` +
+        '<div class="pb-lookonly-set"><button class="pill sm" type="button" data-act="delete">Delete this playbook</button></div>';
+      el.querySelector('[data-act="delete"]').addEventListener('click', async () => {
+        const id = current && current.id;
+        if (!id) return;
+        current = null;
+        await window.operator.playbookDelete(id);
+        await load();
+      });
+    });
+  }
+
   // What will happen when it runs, in a few sentences — read off the steps,
   // the watchers that start it, where it runs and what fixes it.
   function paintSummary() {
@@ -345,6 +386,7 @@
     const from = pb.source && pb.source.at ? ` · saved from ${pb.source.botName ? esc(pb.source.botName) + "'s" : 'a'} run on ${new Date(pb.source.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '';
     $('pbSub').innerHTML = esc(trim(pb.goal || '', 110)) + from;
     paintState();
+    paintLookOnly();
     paintSummary();
     paintStats();
     paintSteps();
@@ -783,10 +825,12 @@
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'pb-run-row';
-      row.disabled = r.saved || r.usedHelpers;
-      const why = r.saved ? 'already saved' : r.usedHelpers ? 'used helpers — cannot be replayed' : r.ok ? 'worked' : 'did not finish';
+      row.disabled = r.saved || r.usedHelpers || r.lookOnly;
+      const why = r.saved ? 'already saved' : r.usedHelpers ? 'used helpers — cannot be replayed'
+        : r.lookOnly ? 'only looked things up — the AI did the reading, so make it a routine instead'
+        : r.ok ? 'worked' : 'did not finish';
       row.innerHTML = `<b>${esc(trim(r.prompt || '(no words)', 90))}</b>` +
-        `<small>${r.botName ? esc(r.botName) + ' · ' : ''}${stamp(r.at)} · ${r.steps} step${r.steps === 1 ? '' : 's'} · <span class="${r.saved || r.usedHelpers ? 'muted' : r.ok ? 'good' : 'bad'}">${why}</span></small>`;
+        `<small>${r.botName ? esc(r.botName) + ' · ' : ''}${stamp(r.at)} · ${r.steps} step${r.steps === 1 ? '' : 's'} · <span class="${r.saved || r.usedHelpers || r.lookOnly ? 'muted' : r.ok ? 'good' : 'bad'}">${why}</span></small>`;
       row.addEventListener('click', async () => {
         row.disabled = true;
         const res = await window.operator.playbookFromTask(r.taskId);

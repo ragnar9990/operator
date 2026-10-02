@@ -396,6 +396,7 @@
         <div class="staff-empty pb-empty" id="pbEmpty">
           <h2>Do a job once. After that it runs by itself.</h2>
           <p>A playbook is a job Operator has already done, kept as the exact steps it took — so the next time, it can do the job again without the AI.</p>
+          <p class="pb-fit"><b>Good for</b> jobs that do things the same way each time: filling in forms, downloading reports, moving and renaming files. <b>Not for</b> jobs where the AI reads and decides — a news roundup, comparing prices. Those need the AI each time: set them up as a routine for the agent instead.</p>
           <!-- how it works, played out (ui/playbooks.js, howItWorks) -->
           <div class="pb-how" id="pbHowEmpty"></div>
           <div class="pb-empty-acts">
@@ -423,6 +424,8 @@
           <div class="staff-body">
             <div class="pb-main">
               <div class="pb-how pb-how-card" id="pbHow" hidden></div>
+              <!-- a playbook that only opens pages, said plainly, with the fix -->
+              <div class="pb-lookonly" id="pbLookOnly" hidden></div>
               <!-- what will happen when it runs, said in a sentence or three -->
               <div class="pb-summary" id="pbSummary"></div>
               <div class="pb-stats" id="pbStats"></div>

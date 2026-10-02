@@ -893,7 +893,11 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
     const worked = !failed && !abortController.signal.aborted && !(finalVerdict && finalVerdict.ok === false);
     const kept = employee ? null : playbooks.endRun(taskId, { ok: worked });
     if (kept && worked && !kept.usedHelpers && !dryRun && !silent && kept.steps >= 2) {
-      onEvent({ type: 'playbook_offer', taskId, steps: kept.steps });
+      // A job that only looked things up needs the AI every time — the
+      // reading and the answer were the work — so it is offered as something
+      // the agent does again on a schedule, not as a playbook.
+      if (kept.lookOnly) onEvent({ type: 'routine_offer', prompt: kept.prompt });
+      else onEvent({ type: 'playbook_offer', taskId, steps: kept.steps });
     }
     // Hand the screen back. A follow-up that needs it again can simply ask for
     // it; leaving the agent holding the user's mouse after the job is done is
@@ -1743,16 +1747,48 @@ async function fireRoutine(botId, routine) {
   store.saveChat(botId, chat.id, { title: routine.name });
 
   send('agent-event', { type: 'routine', name: routine.name, botId, chatId: chat.id });
+  // What it found is the point of most routines ("the AI news every
+  // morning"), so the answer comes to you, not just into a chat you would
+  // have to go looking for.
+  const record = makeRecorder(botId, chat.id, routine.prompt);
+  let answer = '';
+  let failedWith = null;
   await runOne({
     prompt: routine.prompt,
     botId,
     chatId: chat.id,
     silent: true,
-    record: makeRecorder(botId, chat.id, routine.prompt),
+    record: (evt) => {
+      if ((evt.type === 'say_end' || evt.type === 'assistant' || evt.type === 'done') && String(evt.text || '').trim()) answer = evt.text;
+      if (evt.type === 'error') failedWith = evt.text;
+      record(evt);
+    },
   });
   if (routine.every === 'once') store.removeRoutine(botId, routine.id);
   send('bots-changed', { botId });
+  const bot = store.getBot(botId);
+  notifyRoutine(failedWith ? `${routine.name} — it stopped` : `${(bot && bot.name) || 'Operator'}: ${routine.name}`,
+    failedWith || plainText(answer) || 'Done.', botId, chat.id);
 }
+
+// A notification for a finished routine; clicking it opens the conversation.
+function notifyRoutine(title, text, botId, chatId) {
+  if (process.env.OPERATOR_NO_NOTIFY === '1') return;   // automated tests
+  try { if (win && !win.isDestroyed() && !win.isFocused()) win.flashFrame(true); } catch (_) {}
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: String(title).slice(0, 80), body: String(text).slice(0, 220) });
+    n.on('click', () => {
+      if (!win || win.isDestroyed()) return;
+      win.show(); win.focus();
+      send('routine-open', { botId, chatId });
+    });
+    n.show();
+  } catch (_) { /* a missing notification is not worth failing anything over */ }
+}
+
+// Markdown read out as a notification is noise: keep the words.
+const plainText = (s) => String(s || '').replace(/```[\s\S]*?```/g, ' ').replace(/[#*_`>|]+/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/\s+/g, ' ').trim();
 
 // One physical desktop, one mouse: routines queue behind whatever is running
 // rather than fighting it for the screen. Reminders touch neither, so they

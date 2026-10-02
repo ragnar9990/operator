@@ -849,6 +849,7 @@ function replay(turns) {
     else if (t.k === 'note') turn('', noteCard(t.text));
     else if (t.k === 'check') turn('', checkCard(t));
     else if (t.k === 'offer') turn('', offerCard(t));
+    else if (t.k === 'routine_offer') turn('', routineOfferCard(t));
     else if (t.k === 'routine') turn('', routineCard(t.text));
     else if (t.k === 'screen') turn('', screenCard(t));
     else if (t.k === 'helpers') turn('', '').appendChild(helpersCard(t));
@@ -1150,6 +1151,27 @@ function offerCard(v) {
   return '<div class="pb-offer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg>' +
     '<span class="pb-offer-text"><b>Save this as a playbook?</b><i>Its ' + Number(v.steps) + ' steps replay with no AI next time — free, in seconds.</i></span>' +
     '<button class="pill sm" type="button" data-pb-task="' + esc(v.taskId) + '">Save as playbook</button></div>';
+}
+
+// A job that only looked things up — the news, prices, a summary. Its work
+// was the reading and the answer, which needs the AI every time, so it is
+// offered as a routine for this agent rather than a playbook.
+const EVERY_SAID = { day: 'every day', weekday: 'every weekday', week: 'every Monday' };
+function routineOfferCard(v) {
+  const who = bot ? esc(bot.name) : 'This agent';
+  const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+  if (v.done) {
+    return `<div class="pb-offer routine-offer done">${icon}<span class="pb-offer-text"><b>Set up — ${who} does this ${EVERY_SAID[v.every] || 'every day'} at ${esc(v.at)}.</b>` +
+      `<i>You get a notification with what it found. Change or stop it in ${who}'s settings, under Routines.</i></span></div>`;
+  }
+  return `<div class="pb-offer routine-offer" data-prompt="${esc(v.prompt || '')}">${icon}` +
+    '<span class="pb-offer-text"><b>Want this again on a schedule?</b>' +
+    `<i>This job was reading and summing up, which needs the AI every time — so it can't be a playbook, which repeats clicks without it. ${who} can do it for you on a schedule and tell you what it finds.</i></span>` +
+    '<span class="routine-offer-set">' +
+      '<select class="ro-every" aria-label="How often"><option value="day">Every day</option><option value="weekday">Every weekday</option><option value="week">Every Monday</option></select>' +
+      '<input class="ro-at" type="time" value="08:00" aria-label="At what time" />' +
+      '<button class="pill sm" type="button" data-routine-set>Set it up</button>' +
+    '</span></div>';
 }
 
 function routineCard(name) {
@@ -1948,6 +1970,12 @@ window.operator.onEvent((evt) => {
       rec({ k: 'offer', taskId: evt.taskId, steps: evt.steps });
       break;
 
+    case 'routine_offer':
+      closeGroup();
+      turn('', routineOfferCard(evt));
+      rec({ k: 'routine_offer', prompt: evt.prompt });
+      break;
+
     // text is null when the result just repeats what was already said
     case 'done':
       closeGroup();
@@ -2027,6 +2055,34 @@ async function run(override) {
     endRun();
   }
 }
+
+// "Set it up" on a reading job (routineOfferCard): the same job, on this
+// agent, on a schedule. The card then says what was set, and so does the
+// saved transcript.
+thread.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-routine-set]');
+  if (!b || b.disabled || !bot) return;
+  const card = b.closest('.routine-offer');
+  const prompt = card.dataset.prompt || '';
+  const every = card.querySelector('.ro-every').value;
+  const at = card.querySelector('.ro-at').value || '08:00';
+  if (!prompt) return;
+  b.disabled = true;
+  const name = trim(prompt.charAt(0).toUpperCase() + prompt.slice(1), 50);
+  const r = await window.operator.addRoutine(bot.id, { name, prompt, every, at, kind: 'task' });
+  if (!r) { b.disabled = false; return; }
+  card.outerHTML = routineOfferCard({ done: true, every, at });
+  const t = chat && [...chat.turns].reverse().find((x) => x.k === 'routine_offer' && x.prompt === prompt && !x.done);
+  if (t) { Object.assign(t, { done: true, every, at }); save(); }
+});
+
+// A routine's notification, clicked: open the conversation it wrote.
+window.operator.onRoutineOpen(({ botId, chatId }) => {
+  const agentsBtn = document.querySelector('.mode[data-mode="agents"]');
+  const agentsView = document.querySelector('.shell');
+  if (agentsBtn && agentsView && agentsView.hidden) agentsBtn.click();
+  if (botId) openAgent(botId, chatId);
+});
 
 // "Save as playbook" on a finished run (offerCard): make it, then go to it.
 thread.addEventListener('click', async (e) => {

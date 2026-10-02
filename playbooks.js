@@ -67,6 +67,28 @@ const REPLAY = new Set([
   'wait_for_user', 'get_verification_code', 'email_send',
 ]);
 
+// A run that only went and looked — opened pages, followed links, typed a
+// search — did its real work in its head: reading, and writing the answer.
+// Replaying the clicks reproduces none of that; it opens the same pages and
+// says nothing. Those jobs need the AI every time, so they are offered as a
+// routine for the agent instead of a playbook.
+const LOOKING = new Set(['browser_navigate', 'browser_click_text', 'browser_scroll', 'browser_wait_for', 'wait',
+  'focus_window', 'maximize_window', 'use_my_screen', 'use_own_screen', 'get_verification_code']);
+
+function looking(name, input) {
+  if (LOOKING.has(name)) return true;
+  const a = input || {};
+  if (name === 'browser_type_into') return /search|query|find|look ?up|\bq\b/i.test(String(a.target || ''));
+  if (name === 'browser_press_key') return /^(enter|return|pagedown|pageup|arrow\w*|end|home)$/i.test(String(a.key || ''));
+  return false;
+}
+
+// `steps` as recorded ({ name, input }) or as compiled ({ tool, args }).
+function lookOnly(steps) {
+  const acts = steps.filter((s) => REPLAY.has(s.name || s.tool) && s.ok !== false);
+  return acts.length > 0 && acts.every((s) => looking(s.name || s.tool, s.input || s.args));
+}
+
 // The same promise the rest of the app makes: anything that spends, sends,
 // publishes or deletes stops and asks — a playbook included. Each step can be
 // switched to just do it, by the user, in the editor.
@@ -181,7 +203,7 @@ function endRun(taskId, { ok } = {}) {
   };
   recent = [keep, ...recent.filter((x) => x.taskId !== taskId)].slice(0, MAX_RECENT);
   flushRecent();
-  return { taskId, steps: n, usedHelpers: r.usedHelpers };
+  return { taskId, steps: n, usedHelpers: r.usedHelpers, lookOnly: lookOnly(r.steps), prompt: r.prompt };
 }
 
 // A recording that is never kept — a repair's steps, taken straight into the
@@ -195,7 +217,7 @@ function takeRun(taskId) {
 function listRecent() {
   return recent.map((r) => ({
     taskId: r.taskId, prompt: r.prompt, botName: r.botName, at: r.at, ok: r.ok,
-    steps: replayable(r.steps).length, usedHelpers: r.usedHelpers,
+    steps: replayable(r.steps).length, usedHelpers: r.usedHelpers, lookOnly: lookOnly(r.steps), botId: r.botId || null,
     saved: books.some((b) => b.source && b.source.taskId === r.taskId),
   }));
 }
@@ -230,8 +252,15 @@ function dayFor(name, base) {
 }
 
 const DATE_WORDS = ['today', 'yesterday', 'tomorrow', 'last_month', 'this_month'];
-const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'D/M/YYYY', 'MM/DD/YYYY', 'DD-MM-YYYY', 'D MMMM YYYY', 'D MMM YYYY', 'MMMM D, YYYY', 'MMM D, YYYY', 'YYYYMMDD'];
+const DATE_FORMATS = ['YYYY-MM-DD', 'DD/MM/YYYY', 'D/M/YYYY', 'MM/DD/YYYY', 'DD-MM-YYYY', 'D MMMM YYYY', 'D MMM YYYY', 'MMMM D, YYYY', 'MMM D, YYYY', 'MMMM D YYYY', 'MMM D YYYY', 'YYYYMMDD'];
 const MONTH_FORMATS = ['MMMM YYYY', 'MMM YYYY', 'YYYY-MM'];
+
+// A date inside a web address has its spaces written as + or %20 — "news
+// October+3+2026" in a search link. Same date, so the same token, written the
+// same way.
+const inLinks = (formats) => formats.flatMap((f) => (f.includes(' ')
+  ? [f, f.replace(/,? /g, (m) => (m === ', ' ? '%2C+' : '+')), f.replace(/,? /g, (m) => (m === ', ' ? '%2C%20' : '%20'))]
+  : [f]));
 
 // Literal → token, longest literals first so "30 September 2026" is not
 // half-replaced by "September 2026".
@@ -239,11 +268,11 @@ function dateTokens(at) {
   const pairs = [];
   for (const word of ['today', 'yesterday']) {
     const d = dayFor(word, at);
-    for (const f of DATE_FORMATS) pairs.push([formatDate(d, f), `{{${word}:${f}}}`]);
+    for (const f of inLinks(DATE_FORMATS)) pairs.push([formatDate(d, f), `{{${word}:${f}}}`]);
   }
   for (const word of ['this_month', 'last_month']) {
     const d = dayFor(word, at);
-    for (const f of MONTH_FORMATS) pairs.push([formatDate(d, f), `{{${word}:${f}}}`]);
+    for (const f of inLinks(MONTH_FORMATS)) pairs.push([formatDate(d, f), `{{${word}:${f}}}`]);
   }
   // A literal two formats agree on (1/1/2026) goes to the first, which is the
   // way round this part of the world writes it.
@@ -258,8 +287,11 @@ function withDates(args, at) {
     let out = s;
     for (const [lit, tok] of pairs) {
       if (!out.includes(lit)) continue;
-      // Only where it stands on its own, not inside a longer number.
-      out = out.replace(new RegExp(`(^|[^0-9])${lit.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}(?![0-9])`, 'g'), (_m, pre) => pre + tok);
+      // Only where it stands on its own, not inside a longer number — which
+      // only matters at an end that is a digit ("…%20October" is fine).
+      const pre = /^\d/.test(lit) ? '(^|[^0-9])' : '()';
+      const post = /\d$/.test(lit) ? '(?![0-9])' : '';
+      out = out.replace(new RegExp(`${pre}${lit.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}${post}`, 'g'), (_m, p) => p + tok);
     }
     return out;
   });
@@ -309,6 +341,9 @@ function fromTask(taskId) {
   const r = recent.find((x) => x.taskId === taskId);
   if (!r) return { ok: false, error: 'That run is no longer in the list of recent runs, so it cannot be saved now. Run the job again, then save it.' };
   if (r.usedHelpers) return { ok: false, error: 'That run handed work to helpers in several tabs at once, and a playbook replays one step at a time. Run the job without helpers, then save it.' };
+  if (lookOnly(r.steps)) {
+    return { ok: false, lookOnly: true, error: 'That job only looked things up. The useful part — reading the pages and writing the answer — was the AI, and a playbook replays clicks without the AI, so it would open the same pages and tell you nothing. Make it a routine for the agent instead, and it will look again each time.' };
+  }
   const steps = compileSteps(r.steps, r.at);
   if (!steps.length) return { ok: false, error: 'Nothing in that run can be repeated — it only looked and answered.' };
   const pb = {
@@ -474,6 +509,7 @@ function view(pb) {
     id: pb.id, name: pb.name, goal: pb.goal, createdAt: pb.createdAt, updatedAt: pb.updatedAt,
     source: pb.source, model: pb.model, machine: pb.machine,
     usesBrowser: pb.steps.some((s) => isBrowser(s.tool)),
+    lookOnly: lookOnly(pb.steps),
     steps: pb.steps.map(stepView),
     inputs: inputsOf(pb),
     stats: pb.stats,

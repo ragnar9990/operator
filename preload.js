@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('operator', {
   updateRoutine: (id, rid, patch) => ipcRenderer.invoke('routines:update', id, rid, patch),
   removeRoutine: (id, rid) => ipcRenderer.invoke('routines:remove', id, rid),
   runRoutine: (id, rid) => ipcRenderer.invoke('routines:run', id, rid),
+  onRoutineOpen: (cb) => ipcRenderer.on('routine-open', (_e, payload) => cb(payload)),
 
   // chats, which live under a bot
   listChats: (botId) => ipcRenderer.invoke('chats:list', botId),
