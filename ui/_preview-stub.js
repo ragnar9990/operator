@@ -205,6 +205,7 @@ const AUDIT = (() => {
 })();
 
 const CRASH = { pending: 1 };
+const BACKGROUND = { tray: true, boot: false };
 const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
                 addresses: ['192.168.20.2', '100.123.254.56'], waiting: 0, lastSeen: null };
 
@@ -500,6 +501,11 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
     crashSummary: async () => ({ count: 2, pending: CRASH.pending, last: new Date(Date.now() - 3 * 3600e3).toISOString(), canSend: false }),
     crashCopy: async () => { const n = CRASH.pending || 2; CRASH.pending = 0; return { ok: true, count: n }; },
     crashOpen: async () => ({ ok: true }),
+
+    /* the tray and starting with Windows */
+    backgroundGet: async () => ({ ...BACKGROUND }),
+    backgroundSet: async (patch) => Object.assign(BACKGROUND, patch),
+    onBackground: () => {},
     crashSend: async () => ({ ok: false, error: 'No crash endpoint configured.' }),
 
     /* appearance — kept in memory so the preview can exercise the panel */

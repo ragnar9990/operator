@@ -143,8 +143,9 @@ function markConnector(id, patch) {
 // screen before the first paint instead of flashing the default first.
 
 // `verify` is on by default: an agent that reports work it did not do is worse
-// than a slow one, and the check costs about a cent. See verify.js.
-const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', edge: 'accent', motion: 'on', verify: true };
+// than a slow one, and the check costs about a cent. See verify.js. `tray` is on
+// too: a reminder that cannot go off because the window was closed is no reminder.
+const PREF_DEFAULTS = { theme: 'warm', accent: 'blue', glow: 'full', edge: 'accent', motion: 'on', verify: true, tray: true };
 
 function getPrefs() {
   return { ...PREF_DEFAULTS, ...(settings.prefs || {}) };

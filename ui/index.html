@@ -795,6 +795,24 @@
               <p class="set-hint">Run <code>start-operator-node.cmd</code> on the other machine; it prints an address and token. This link uses your network, so keep both machines on the same one (or on Tailscale).</p>
             </div>
           </div>
+
+          <div class="set-section">
+            <div class="set-label">In the background</div>
+            <label class="hands-off" id="trayRow">
+              <span class="ho-text">
+                <span class="ho-name">Keep running in the tray</span>
+                <span class="ho-sub">Closing the window leaves Operator in the tray by the clock, so reminders, routines and employees carry on. Right-click the icon to quit. Off, closing the window quits it.</span>
+              </span>
+              <span class="switch"><input type="checkbox" id="trayOn" /><span class="knob"></span></span>
+            </label>
+            <label class="hands-off" id="bootRow">
+              <span class="ho-text">
+                <span class="ho-name">Start with Windows</span>
+                <span class="ho-sub">Opens in the tray when you sign in, so a morning reminder does not wait for you to open the app.</span>
+              </span>
+              <span class="switch"><input type="checkbox" id="bootOn" /><span class="knob"></span></span>
+            </label>
+          </div>
           </div>
 
           <div class="tab-panel" data-panel="models" hidden>

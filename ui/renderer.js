@@ -5176,6 +5176,24 @@ document.addEventListener('keydown', (e) => {
 
 
 
+/* ── the tray, and starting with Windows (Settings → Computer) ─────── */
+
+(() => {
+  const trayOn = document.getElementById('trayOn');
+  const bootOn = document.getElementById('bootOn');
+  if (!trayOn || !window.operator.backgroundGet) return;
+  const paint = (st) => {
+    if (!st) return;
+    trayOn.checked = st.tray;
+    bootOn.checked = st.boot;
+  };
+  window.operator.backgroundGet().then(paint).catch(() => {});
+  // The tray's own menu can switch Start with Windows too.
+  window.operator.onBackground(paint);
+  trayOn.addEventListener('change', async () => paint(await window.operator.backgroundSet({ tray: trayOn.checked })));
+  bootOn.addEventListener('change', async () => paint(await window.operator.backgroundSet({ boot: bootOn.checked })));
+})();
+
 /* ── window buttons ────────────────────────────────────────────────── */
 
 (() => {

@@ -355,6 +355,9 @@ Point it somewhere else with `OPERATOR_WHISPER_DIR` / `OPERATOR_WHISPER_MODEL`.
   pays for its ~1s startup.
 - It won't magically defeat captchas designed to be unsolvable by bots; it clicks
   the ordinary checkbox / image challenges like a human, which works most of the time.
+- Closing the window leaves Operator in the tray by the clock, so reminders,
+  routines and employees keep going; right-click the icon to quit. Settings →
+  Computer turns that off, and turns on **Start with Windows** (it opens in the tray).
 - If Operator crashes, it saves a report on this computer (keys and card numbers
   taken out) and offers it on the next launch. Settings → Audit → **Crash reports**
   copies it for an email any time. Nothing is sent by itself.

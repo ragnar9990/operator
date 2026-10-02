@@ -14,7 +14,7 @@ if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === undefined) {
 // saved in Settings falls back to it rather than to nothing.
 const ENV_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 
-const { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard, shell, Notification, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -42,6 +42,16 @@ const files = require('./files');
 
 let win = null;
 let running = null; // { abortController }
+let tray = null;
+let quitting = false;   // a real quit, not the window closing into the tray
+// Started by Windows at sign-in: come up in the tray, not in your face.
+const startHidden = process.argv.includes('--hidden');
+
+// One Operator at a time. With the window hidden in the tray, opening it again
+// from the Start menu means "show me" — not a second copy fighting the first
+// over the mouse and the same files.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => showWindow());
 
 function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
@@ -53,6 +63,7 @@ function createWindow() {
     height: 840,
     minWidth: 900,
     minHeight: 600,
+    show: !(startHidden && store.getPrefs().tray),
     backgroundColor: '#131211',
     titleBarStyle: 'hidden',
     // No titleBarOverlay: the OS paints that strip itself, over the top of the
@@ -105,6 +116,16 @@ function createWindow() {
     if ((details.reason === 'crashed' || details.reason === 'oom') && win && !win.isDestroyed()) {
       try { win.webContents.reload(); } catch { /* nothing more to try */ }
     }
+  });
+
+  // With the tray on, closing the window only hides it: reminders, routines
+  // and employees all run in this process, so they carry on. Quit is in the
+  // tray. No tray icon (it failed, or it is switched off) means close is quit.
+  win.on('close', (e) => {
+    if (quitting || !tray) return;
+    e.preventDefault();
+    win.hide();
+    hintTray();
   });
 
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
@@ -182,6 +203,7 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+  syncTray();
 });
 
 app.on('window-all-closed', async () => {
@@ -197,8 +219,11 @@ app.on('window-all-closed', async () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// Signing out or shutting down is a real quit, not a close into the tray.
+app.on('session-end', () => { quitting = true; });
+
 // The helper is a separate process; a hard quit would otherwise orphan it.
-app.on('before-quit', () => { phone.stop(); agent.closeSession(); voice.close(); desktop.stop(); speech.stop(); piper.stop(); whisper.stop(); overlay.destroy(); });
+app.on('before-quit', () => { quitting = true; tray?.destroy(); tray = null; phone.stop(); agent.closeSession(); voice.close(); desktop.stop(); speech.stop(); piper.stop(); whisper.stop(); overlay.destroy(); });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -218,6 +243,8 @@ function surfacePendingCrashes() {
   let rows = [];
   try { rows = crash.pending(); } catch { return; }
   if (!rows.length || !win || win.isDestroyed()) return;
+  // Started hidden at sign-in: ask when the window is first opened, not then.
+  if (!win.isVisible()) { win.once('show', () => setTimeout(surfacePendingCrashes, 800)); return; }
   let choice = 2;
   try {
     choice = dialog.showMessageBoxSync(win, {
@@ -1369,6 +1396,64 @@ ipcMain.handle('window:maximize', () => {
   return win.isMaximized();
 });
 ipcMain.handle('window:close', () => { if (win) win.close(); });
+
+/* ── the tray, and starting with Windows ─────────────────────────── */
+
+function showWindow() {
+  if (!win || win.isDestroyed()) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+// The first time closing only hides it, say where it went — once.
+function hintTray() {
+  if (store.getPrefs().trayHinted) return;
+  store.setPrefs({ trayHinted: true });
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: 'Operator is still running', body: 'It is in the tray by the clock, so reminders and employees keep going. Right-click the icon to quit.' });
+    n.on('click', showWindow);
+    n.show();
+  } catch (_) { /* the hint is a nicety */ }
+}
+
+// Start with Windows: the same entry Windows' own Startup apps list shows,
+// opening hidden in the tray. A dev run registers electron.exe with this
+// folder, so the entry still starts this code.
+const loginItem = () => ({ path: process.execPath, args: app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden'] });
+function startsWithWindows() {
+  try { return app.getLoginItemSettings(loginItem()).openAtLogin; } catch { return false; }
+}
+const backgroundState = () => ({ tray: Boolean(store.getPrefs().tray), boot: startsWithWindows() });
+function setStartWithWindows(on) {
+  try { app.setLoginItemSettings({ ...loginItem(), openAtLogin: Boolean(on) }); } catch (_) { /* left as it was */ }
+  syncTray();
+  send('background-changed', backgroundState());
+}
+
+function syncTray() {
+  if (!store.getPrefs().tray) { tray?.destroy(); tray = null; return; }
+  if (!tray) {
+    try { tray = new Tray(path.join(__dirname, 'build', 'icon.ico')); } catch (_) { tray = null; return; }
+    tray.setToolTip('Operator');
+    tray.on('click', showWindow);
+  }
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Operator', click: showWindow },
+    { type: 'separator' },
+    { label: 'Start with Windows', type: 'checkbox', checked: startsWithWindows(), click: (item) => setStartWithWindows(item.checked) },
+    { type: 'separator' },
+    { label: 'Quit Operator', click: () => { quitting = true; app.quit(); } },
+  ]));
+}
+
+ipcMain.handle('background:get', () => backgroundState());
+ipcMain.handle('background:set', (_e, patch = {}) => {
+  if ('tray' in patch) { store.setPrefs({ tray: Boolean(patch.tray) }); syncTray(); }
+  if ('boot' in patch) setStartWithWindows(patch.boot);
+  return backgroundState();
+});
 
 ipcMain.handle('chats:list', async (_e, botId) => store.listChats(botId));
 ipcMain.handle('chats:get', async (_e, botId, id) => store.getChat(botId, id));

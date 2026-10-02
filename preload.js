@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld('operator', {
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
   windowMaximize: () => ipcRenderer.invoke('window:maximize'),
   windowClose: () => ipcRenderer.invoke('window:close'),
+  // the tray and starting with Windows (Settings → Computer)
+  backgroundGet: () => ipcRenderer.invoke('background:get'),
+  backgroundSet: (patch) => ipcRenderer.invoke('background:set', patch),
+  onBackground: (cb) => ipcRenderer.on('background-changed', (_e, payload) => cb(payload)),
   onBotsChanged: (cb) => ipcRenderer.on('bots-changed', (_e, payload) => cb(payload)),
   // Employees — agents that work on a loop and message you first (employees.js)
   employees: () => ipcRenderer.invoke('employees:list'),
