@@ -19,6 +19,14 @@ const RULES = [
     fix: 'Paste your Anthropic API key in Settings → Models (get one at console.anthropic.com → API keys). Or add a free NVIDIA key there and pick one of its models.',
   },
   {
+    // Run from source with no key, Claude runs on this PC's own Claude Code
+    // login (your subscription). When that login has run out, the answer is to
+    // sign in again — not to go looking for an API key you never had.
+    test: /oauth session expired|could not be refreshed|please run \/login|not logged in|loggedIn"?:\s*false/i,
+    title: 'Your Claude sign-in on this PC has run out',
+    fix: 'Sign in again: open PowerShell, run  claude auth login  and press Authorize in the browser, then restart Operator. Or paste an Anthropic API key in Settings → Models instead.',
+  },
+  {
     // A key or login that was refused.
     test: /signed[_ ]?out|not authenticated|unauthorized|\b401\b|invalid[_ ]api[_ ]key|authentication[_ ]error|refresh[_ ]failed|identity[_ ]changed|oauth/i,
     title: 'Claude refused the key',
