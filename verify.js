@@ -185,7 +185,7 @@ async function askClaude({ system, body, image, abortController }) {
 // A NIM run is checked by its own model. Reaching for Claude here would mean a
 // task the user deliberately put on NVIDIA quietly phoning Anthropic at the end.
 async function askNim({ system, body, image, model, abortController }) {
-  const info = nim.describe(nim.bareId(model));
+  const info = nim.infoFor(model);
   const message = image && info.vision
     ? [{ type: 'text', text: body }, { type: 'image_url', image_url: { url: `data:${image.mime};base64,${image.b64}` } }]
     : body;
@@ -205,7 +205,7 @@ async function askNim({ system, body, image, model, abortController }) {
 async function check({ goal, actions = [], reply, model, dryRun, usedScreen, usedBrowser, onTheirScreen, abortController }) {
   const started = Date.now();
   const onNim = nim.isNimModel(model);
-  const canSee = onNim ? Boolean(nim.describe(nim.bareId(model)).vision) : true;
+  const canSee = onNim ? Boolean(nim.infoFor(model).vision) : true;
 
   try {
     const ev = await evidence({ usedScreen: usedScreen && !dryRun, usedBrowser: usedBrowser && !dryRun, canSee, onTheirScreen });

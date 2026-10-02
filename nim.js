@@ -18,8 +18,23 @@ const BASE = (process.env.OPERATOR_NIM_URL || 'https://integrate.api.nvidia.com/
 // both "who runs it" and "which model" — `nim:meta/llama-3.3-70b-instruct`.
 const PREFIX = 'nim:';
 
-const isNimModel = (id) => typeof id === 'string' && id.startsWith(PREFIX);
-const bareId = (id) => (isNimModel(id) ? id.slice(PREFIX.length) : id);
+// A model on this computer (local.js) speaks the same chat-completions, so it
+// runs through this same loop — only the address differs, and there is no key.
+// "Is this a NIM model?" has always meant "does this go the OpenAI-shaped way
+// rather than through the Agent SDK", so a local one answers yes too.
+const LOCAL = 'local:';
+const isLocal = (id) => typeof id === 'string' && id.startsWith(LOCAL);
+const isNimModel = (id) => typeof id === 'string' && (id.startsWith(PREFIX) || id.startsWith(LOCAL));
+const bareId = (id) => (isLocal(id) ? id.slice(LOCAL.length) : isNimModel(id) ? id.slice(PREFIX.length) : id);
+
+// Everything about a model this file needs, local or on NVIDIA: what it can
+// do, and where to send it. Required late: local.js asks this file nothing,
+// but keeping the two loads independent costs nothing.
+function infoFor(model) {
+  if (isLocal(model)) return { ...require('./local').describe(bareId(model)), local: true };
+  return describe(bareId(model));
+}
+const whereFor = (info) => (info.local ? { base: info.base, key: null, local: true, who: info.server || 'this computer' } : { base: BASE, key: apiKey, who: 'NVIDIA' });
 
 /* ── who publishes what ──────────────────────────────────────────────
    NIM names a model "<publisher>/<model>", and the publisher is the actual
@@ -489,7 +504,7 @@ const CONNECT_MS = Number(process.env.OPERATOR_NIM_TIMEOUT || 150000);
 // When to admit out loud that we are still waiting, rather than looking frozen.
 const SLOW_MS = 15000;
 
-async function fetchIn(url, opts, signal, ms = CONNECT_MS, onSlow) {
+async function fetchIn(url, opts, signal, ms = CONNECT_MS, onSlow, who = 'NVIDIA') {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), ms);
   const slow = onSlow ? setTimeout(() => onSlow(Math.round(SLOW_MS / 1000)), SLOW_MS) : null;
@@ -499,7 +514,7 @@ async function fetchIn(url, opts, signal, ms = CONNECT_MS, onSlow) {
       return await fetch(url, { ...opts, signal: ctl.signal });
     } catch (err) {
       if (ctl.signal.aborted && !(signal && signal.aborted)) {
-        const e = new Error(`NVIDIA did not start answering within ${Math.round(ms / 1000)}s.`);
+        const e = new Error(`${who} did not start answering within ${Math.round(ms / 1000)}s.`);
         e.status = 504;
         e.timeout = true;
         throw e;
@@ -512,7 +527,10 @@ async function fetchIn(url, opts, signal, ms = CONNECT_MS, onSlow) {
   }
 }
 
-async function post(body, signal, onSlow) {
+// `where`: whereFor(info) — NVIDIA with the key, or a server on this computer
+// with none.
+async function post(body, signal, onSlow, where = whereFor({})) {
+  if (where.local) return postLocal(body, signal, onSlow, where);
   if (!apiKey) throw new Error('No NVIDIA API key. Add one in Settings → Models.');
   // A key with a stray character in it cannot even be put in a header — fetch
   // throws a ByteString error from deep inside undici, which tells nobody
@@ -546,6 +564,33 @@ async function post(body, signal, onSlow) {
           ? `NVIDIA is not serving ${body.model} to your account. It has been taken out of the model menu — pick another one.`
           : `NVIDIA NIM error ${res.status}: ${detail || res.statusText}`
     );
+    err.status = res.status;
+    err.detail = detail;
+    throw err;
+  }
+  return res;
+}
+
+// The same request to a server on this computer. Nothing here is NVIDIA's to
+// blame, so nothing is taken out of the picker and no key is asked about.
+async function postLocal(body, signal, onSlow, where) {
+  let res;
+  try {
+    res = await fetchIn(`${where.base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: body.stream ? 'text/event-stream' : 'application/json' },
+      body: JSON.stringify(body),
+    }, signal, CONNECT_MS, onSlow, where.who);
+  } catch (err) {
+    if (err.timeout || (signal && signal.aborted)) throw err;
+    throw new Error(`Nothing answered at ${where.base}. Start ${where.who === 'this computer' ? 'Ollama or LM Studio' : where.who} on this computer, or pick another model.`);
+  }
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.text()).slice(0, 400); } catch (_) {}
+    const err = new Error(res.status === 404
+      ? `${where.who} does not have ${body.model} — it may need pulling first (for Ollama: ollama pull ${body.model}).`
+      : `${where.who} answered ${res.status}: ${detail || res.statusText}`);
     err.status = res.status;
     err.detail = detail;
     throw err;
@@ -614,7 +659,8 @@ function keepThread(id, history) {
 // `params`: temperature and max_tokens from the dial beside the picker
 // (model-options.js). Missing ones keep the values this always used.
 async function runTask({ prompt, model, systemPrompt, tools, onEvent, abortController, resume, maxTurns = 80, params = {} }) {
-  const info = describe(bareId(model));
+  const info = infoFor(model);
+  const where = whereFor(info);
   const spec = toOpenAITools(tools);
   const byName = new Map(tools.map((t) => [t.name, t]));
 
@@ -667,25 +713,27 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
     const notice = () => {
       if (warned) return;
       warned = true;
-      onEvent({ type: 'assistant', text: `${info.name} is not loaded on NVIDIA's side yet — waiting for it to start up. The first reply from a large model can take a minute or two; after that it is quick.` });
+      onEvent({ type: 'assistant', text: info.local
+        ? `${info.name} is still loading on this computer — the first reply after it starts can take a minute; after that it is quick.`
+        : `${info.name} is not loaded on NVIDIA's side yet — waiting for it to start up. The first reply from a large model can take a minute or two; after that it is quick.` });
     };
 
     try {
-      return await post(body, abortController?.signal, notice);
+      return await post(body, abortController?.signal, notice, where);
     } catch (err) {
       // A cold model that timed out has, by timing out, asked NVIDIA to load
       // it. The second request usually lands on a warm one, so it is worth
       // exactly one more try before giving up.
       if (err.timeout && !retried) {
         retried = true;
-        onEvent({ type: 'assistant', text: `Still waiting on ${info.name}. NVIDIA should have it loaded by now — trying once more.` });
-        return post(body, abortController?.signal, notice);
+        onEvent({ type: 'assistant', text: `Still waiting on ${info.name}. ${info.local ? 'It' : 'NVIDIA'} should have it loaded by now — trying once more.` });
+        return post(body, abortController?.signal, notice, where);
       }
       if (toolsOff || !body.tools || err.status !== 400 || !/tool|function/i.test(err.detail || '')) throw err;
       toolsOff = true;
       onEvent({ type: 'assistant', text: `${info.name} will not take tools, so it cannot drive the computer — answering as a plain chat instead.` });
       delete body.tools; delete body.tool_choice;
-      return post(body, abortController?.signal, notice);
+      return post(body, abortController?.signal, notice, where);
     }
   };
 
@@ -700,6 +748,7 @@ YOU CANNOT SEE IMAGES. This model has no vision, so screenshots come back to you
       // third go either. Say which models are known to answer quickly rather
       // than leaving "try another one" as the only advice.
       if (!err.timeout) throw err;
+      if (info.local) throw new Error(`${info.name} never started answering on this computer. It may be too big for this machine — try a smaller model.`);
       const quick = catalog
         .filter((m) => !unavailable.has(m.modelId) && /flash|nano|lite|mini|small|8b|12b|30b/i.test(m.modelId))
         .slice(0, 3).map((m) => m.name);
@@ -858,14 +907,14 @@ function forgetOldScreens(history) {
    For a teammate bot answering a message: one turn, no tools. */
 
 async function ask({ model, system, message, abortController }) {
-  const info = describe(bareId(model));
+  const info = infoFor(model);
   const res = await post({
     model: info.modelId,
     messages: [{ role: 'system', content: system }, { role: 'user', content: message }],
     temperature: 0.3,
     max_tokens: 1024,
     stream: false,
-  }, abortController?.signal);
+  }, abortController?.signal, null, whereFor(info));
   const body = await res.json();
   const raw = body.choices?.[0]?.message?.content || '';
   return String(raw).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -873,7 +922,7 @@ async function ask({ model, system, message, abortController }) {
 
 module.exports = {
   PREFIX, BASE, PROVIDERS, PROVIDER_ORDER,
-  isNimModel, bareId, describe, listModels, refresh,
+  isNimModel, isLocal, bareId, describe, infoFor, listModels, refresh,
   setKey, hasKey, cleanKey, keyProblem, testKey, runTask, ask,
   sweep, setUnavailable, listUnavailable, onUnavailableChange, markUnavailable,
 };

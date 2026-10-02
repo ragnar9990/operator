@@ -41,6 +41,7 @@ const googleOAuth = require('./google-oauth');
 const files = require('./files');
 const playbooks = require('./playbooks');
 const watchers = require('./watchers');
+const local = require('./local');
 
 let win = null;
 let running = null; // { abortController }
@@ -198,6 +199,11 @@ app.whenReady().then(() => {
   agent.nim.onUnavailableChange((ids) => store.setNvidiaUnavailable(ids));
   agent.nim.refresh().catch(() => {});
 
+  // A model server on this computer, if one is running — found now, so a
+  // saved choice of a local model is ready before the first task.
+  local.setCustom(store.getLocal().url);
+  local.refresh().catch(() => {});
+
   // Hand Operator another machine at launch:
   //   set OPERATOR_REMOTE_URL=http://192.168.1.50:8391
   //   set OPERATOR_REMOTE_TOKEN=...
@@ -307,6 +313,10 @@ function computerLabel() {
 // in the background, so opening the picker never waits on the network.
 ipcMain.handle('list-models', async () => {
   agent.nim.refresh().catch(() => {});
+  // Quick when nothing is running locally (a refused connection comes back at
+  // once), and cached for a minute — so it is waited for, and a server started
+  // a moment ago is in the menu the next time it opens.
+  await local.refresh().catch(() => {});
   return {
     models: agent.listModels(),
     current: agent.DEFAULT_MODEL,
@@ -409,6 +419,27 @@ ipcMain.handle('anthropic:set', async (_e, raw) => {
   agent.closeSession();
   voice.close();
   return { ok: true, status: anthropicStatus() };
+});
+
+/* ── a model on this computer ────────────────────────────────────── */
+
+ipcMain.handle('local:status', async (_e, force) => {
+  await local.refresh({ force: Boolean(force) }).catch(() => {});
+  return local.status();
+});
+
+// A server somewhere other than the usual ports. Empty clears it. Checked by
+// looking, but kept either way: it may simply not be running yet.
+ipcMain.handle('local:set', async (_e, raw) => {
+  const text = String(raw || '').trim();
+  const url = text ? local.cleanUrl(text) : '';
+  if (text && !url) return { ok: false, error: 'That does not look like an address — something like http://127.0.0.1:11434.', status: local.status() };
+  store.setLocal(url);
+  local.setCustom(url);
+  await local.refresh({ force: true }).catch(() => {});
+  const st = local.status();
+  const found = !url || st.servers.some((s) => s.base === url);
+  return { ok: true, status: st, warning: found ? null : `Nothing answered at ${url} yet. It is saved, and will be used once it is running.` };
 });
 
 /* ── NVIDIA NIM key ──────────────────────────────────────────────── */

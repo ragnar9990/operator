@@ -2216,6 +2216,7 @@ function paintPicker() {
   // name in it — better than the button saying "Model" for a second.
   pickerName.textContent = m ? m.name
     : shown && shown.startsWith('nim:') ? shown.split('/').pop()
+    : shown && shown.startsWith('local:') ? shown.slice(6)
     : 'Model';
   // The label is clipped when the name is long, so the full one lives here.
   pickerBtn.title = m

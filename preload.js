@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('operator', {
   // Claude, on the customer's own Anthropic key
   anthropicStatus: () => ipcRenderer.invoke('anthropic:status'),
   anthropicSetKey: (key) => ipcRenderer.invoke('anthropic:set', key),
+  // a model on this computer — Ollama, LM Studio, llama.cpp (local.js)
+  localStatus: (force) => ipcRenderer.invoke('local:status', force),
+  localSetUrl: (url) => ipcRenderer.invoke('local:set', url),
   // NVIDIA NIM — one key, every vendor's models
   nvidiaStatus: () => ipcRenderer.invoke('nvidia:status'),
   nvidiaSetKey: (key) => ipcRenderer.invoke('nvidia:set', key),

@@ -311,6 +311,21 @@ function setAnthropic(key) {
   return anthropicStatus();
 }
 
+/* ── a model server on this computer ─────────────────────────────────
+   Ollama, LM Studio and llama.cpp are found by themselves (local.js); this is
+   only for one somewhere else — another port, or a box on the network. */
+
+function getLocal() {
+  return { url: ((settings.local || {}).url) || '' };
+}
+
+function setLocal(url) {
+  if (url) settings.local = { url, at: Date.now() };
+  else delete settings.local;
+  flushSettings();
+  return getLocal();
+}
+
 // Chats written before bots existed become the first bot's chats, so nobody
 // loses a transcript to the upgrade.
 function adopt() {
@@ -965,6 +980,7 @@ module.exports = {
   listConnectors, getConnector, setConnector, markConnector, removeConnector, getGoogle, setGoogle,
   getNvidia, setNvidia, setNvidiaUnavailable, nvidiaStatus,
   getAnthropic, setAnthropic, anthropicStatus,
+  getLocal, setLocal,
   hireEmployee, listEmployees, getEmployee, updateEmployee,
   addEmployeeTask, updateEmployeeTask, removeEmployeeTask, logEmployee, addTurn,
   listCodeChats, getCodeChat, createCodeChat, saveCodeChat, removeCodeChat,

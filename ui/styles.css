@@ -3867,3 +3867,9 @@ body.your-turn {
 #wtFolderBox, #wtEmailBox, #wtTaskRow { display: flex; flex-direction: column; gap: 18px; }
 #wtFolderBox[hidden], #wtEmailBox[hidden], #wtTaskRow[hidden], #wtPbRow[hidden] { display: none; }
 #wtFolderBox .field-hint, #wtEmailBox .field-hint { margin-top: -10px; }
+/* ── a model on this computer (ui/local.js) ────────────────────────── */
+.lc-models { display: flex; flex-direction: column; gap: 6px; }
+.lc-models[hidden] { display: none; }
+.lc-model { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raise); font-size: 12.5px; }
+.lc-model b { font-weight: 550; }
+.lc-model small { flex: 1; min-width: 0; color: var(--ink-4); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

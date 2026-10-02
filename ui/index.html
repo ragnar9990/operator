@@ -1009,6 +1009,31 @@
                 </div>
               </div>
 
+              <div class="connector" id="localProvider">
+                <div class="conn-head">
+                  <span class="conn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/><path d="M9 10.5h6"/></svg></span>
+                  <span class="conn-text">
+                    <span class="conn-name">On this computer</span>
+                    <span class="conn-sub" id="lcSub">Not looked yet</span>
+                  </span>
+                  <button class="pill ghost" id="lcLook" type="button">Look again</button>
+                </div>
+
+                <div class="conn-body">
+                  <p class="conn-lead">A model that runs on this PC, through Ollama or LM Studio. Nothing about a job leaves the building — not the screen, not the page, not the file — it works with the network unplugged, and nothing is billed per run. Operator finds them by itself while they are running.</p>
+                  <div class="lc-models" id="lcModels" hidden></div>
+                  <label class="field">
+                    <span>A server somewhere else — optional</span>
+                    <input id="lcUrl" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:11434" />
+                  </label>
+                  <div class="remote-actions">
+                    <button class="pill ghost" id="lcSave" type="button">Save address</button>
+                    <span class="remote-status" id="lcStatus"></span>
+                  </div>
+                  <p class="set-hint">To start: install Ollama from <a href="https://ollama.com" target="_blank" rel="noreferrer">ollama.com</a>, then run <code>ollama pull qwen3</code> in a terminal. Pick a model that can use tools; one that also sees the screen does desktop work best. Be realistic about it: a model small enough for a laptop is much weaker than Claude at driving a computer. It is at its best running and repairing playbooks, where it only ever has to work out one step.</p>
+                </div>
+              </div>
+
               <div class="connector" id="nvidiaProvider">
                 <div class="conn-head">
                   <span class="conn-ic nv"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5h5.5a5.5 5.5 0 0 1 0 11H4v-11Z"/><path d="M13 4.5h3.5a6 6 0 0 1 0 12"/></svg></span>
@@ -1356,6 +1381,7 @@
     <script src="renderer.js"></script>
     <script src="employees.js"></script>
     <script src="playbooks.js"></script>
+    <script src="local.js"></script>
     <script type="module" src="agentverse.js"></script>
   </body>
 </html>

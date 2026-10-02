@@ -52,7 +52,9 @@ const DEFAULT_MODEL = 'claude-sonnet-5';
 
 // Everything the picker can offer: Claude first, then every model NVIDIA NIM
 // is serving, grouped by whose model it is.
-const listModels = () => [...CLAUDE_MODELS, ...nim.listModels()];
+// Models on this computer (local.js) sit between the two: nothing leaves the
+// machine, and nothing is billed.
+const listModels = () => [...CLAUDE_MODELS, ...require('./local').listModels(), ...nim.listModels()];
 
 const isClaudeModel = (id) => CLAUDE_MODELS.some((m) => m.id === id);
 const isModel = (id) => isClaudeModel(id) || nim.isNimModel(id);

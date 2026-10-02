@@ -82,9 +82,9 @@ function specFor(model) {
     return out;
   }
 
-  // Everything else runs through NVIDIA's OpenAI-style endpoint, where these
-  // two are standard on every model.
-  if (String(id || '').startsWith('nim:')) {
+  // Everything else runs through NVIDIA's OpenAI-style endpoint, or the same
+  // shape of endpoint on this computer, where these two are standard.
+  if (/^(nim|local):/.test(String(id || ''))) {
     out.push({
       key: 'temperature',
       label: 'Temperature',
@@ -151,7 +151,7 @@ function sdkOptions(mode, id, saved) {
 
 // Request fields for an NVIDIA model.
 function nimParams(mode, id, saved) {
-  if (!String(id || '').startsWith('nim:')) return {};
+  if (!/^(nim|local):/.test(String(id || ''))) return {};
   const v = resolve(mode, id, saved);
   return { temperature: v.temperature, max_tokens: v.maxTokens };
 }
