@@ -36,7 +36,198 @@
   const stamp = (ms) => (dayOf(ms) === dayOf(Date.now()) ? clock(ms)
     : new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }));
   const secs = (ms) => (ms < 10000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)) + 's';
-  const KIND = { web: 'Web', screen: 'Screen', shell: 'Shell', mail: 'Email', you: 'You', wait: 'Wait' };
+  // What kind of step, said the way the person using it would say it.
+  const KIND = { web: 'Browser', screen: 'Screen', shell: 'Files & settings', mail: 'Email', you: 'Your turn', wait: 'Waits' };
+  const KIND_TIP = {
+    web: "Done in Operator's own browser",
+    screen: 'Done on the screen, with the mouse and keyboard',
+    shell: 'A Windows command (PowerShell): moving files, reading folders, changing settings',
+    mail: 'Done with the email account connected in Settings → Connectors',
+    you: 'Something only you can do. Operator stops and waits for you, then carries on',
+    wait: 'Waits for something to finish before the next step',
+  };
+
+  // {{month}}, {yesterday} and the rest, in a step's words, as tags that say
+  // what will go there — and, for an input, what it is set to now.
+  const SAID = {
+    today: "today's date", yesterday: "yesterday's date", tomorrow: "tomorrow's date",
+    last_month: 'last month', this_month: 'this month', now: 'the time',
+    code: 'the code it fetches', file: 'the new file', file_name: "the new file's name", folder: 'the folder',
+    email_from: 'who the email is from', email_subject: "the email's subject", email_uid: 'the email',
+  };
+  function withTags(text, pb) {
+    const inputs = new Map(((pb && pb.inputs) || []).map((x) => [x.name, x.value]));
+    return esc(text).replace(/\{\{?\s*([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\s*\}?\}/g, (_m, raw, fmt) => {
+      const name = raw.toLowerCase();
+      if (name === 'secret') return `<span class="pb-var you" title="Never kept — you type it">your ${esc(fmt || 'password')}</span>`;
+      if (SAID[name]) return `<span class="pb-var auto" title="Filled in by itself on every run">${SAID[name]}</span>`;
+      const v = inputs.get(name);
+      return `<span class="pb-var" title="Changes each run — set it under “Changes each run”">${esc(name.replace(/_/g, ' '))}${v ? `: <i>${esc(v)}</i>` : ''}</span>`;
+    });
+  }
+
+  /* ── how it works, played out ──────────────────────────────────────
+   * Four stages beside a small playbook that acts them out: the first time
+   * the AI works every step out (slow, and paid for); the run is saved; the
+   * next time it replays with no AI (seconds); and when a button has moved,
+   * only that step goes back to the AI, and the fix is kept. Each stage can be
+   * clicked. With motion off it holds still on whichever stage is chosen. */
+
+  const HOW_STAGES = [
+    { key: 'learn', head: 'Do the job once', body: 'Give an agent a job. The AI works out every click and every word, the way a person would — that first time takes a while, and uses the AI.' },
+    { key: 'save', head: 'Save it as a playbook', body: 'When the job worked, its steps are kept: what it opened, clicked and typed, and where each one should end up. Never your passwords.' },
+    { key: 'replay', head: 'Run it again — no AI', body: 'Next time the same steps replay straight through. Nothing to pay, done in seconds, the same way every time. Press Run, or let a watcher start it when a file or an email arrives.' },
+    { key: 'repair', head: 'It fixes itself', body: 'If a screen has changed — a button renamed — only that one step goes back to the AI. Its fix is kept, so the run after that is free again.' },
+  ];
+
+  const DEMO_STEPS = ['Open the supplier portal', 'Click “Invoices”', 'Click “Download all”', 'Move the PDFs into Invoices\\September'];
+  const DEMO_FIXED = 'Click “Download PDFs”';
+
+  const still = () => document.documentElement.dataset.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function howItWorks(box, { onClose } = {}) {
+    box.innerHTML =
+      '<div class="pb-how-stages" role="tablist" aria-label="How a playbook works">' +
+        HOW_STAGES.map((s, i) => `<button class="pb-how-stage" type="button" role="tab" data-i="${i}">` +
+          `<span class="pb-how-n">${i + 1}</span><span class="pb-how-words"><b>${s.head}</b><span>${s.body}</span></span></button>`).join('') +
+      '</div>' +
+      '<div class="pb-demo" aria-hidden="true">' +
+        '<div class="pb-demo-top"><b>Download last month\'s invoices</b><span class="pb-demo-badge"></span></div>' +
+        '<ol class="pb-demo-steps">' + DEMO_STEPS.map((t) => `<li><span class="pb-demo-dot"></span><span class="pb-demo-text">${t}</span><span class="pb-demo-note"></span></li>`).join('') + '</ol>' +
+        '<div class="pb-demo-foot"><span class="pb-demo-saved">Saved as a playbook</span><span class="pb-demo-clock"></span></div>' +
+      '</div>' +
+      (onClose ? '<button class="pb-how-close" type="button" aria-label="Hide how it works">×</button>' : '') +
+      '<p class="pb-how-caption" aria-live="polite"></p>';
+
+    const stages = [...box.querySelectorAll('.pb-how-stage')];
+    const demo = box.querySelector('.pb-demo');
+    const rows = [...demo.querySelectorAll('li')];
+    const badge = demo.querySelector('.pb-demo-badge');
+    const clockEl = demo.querySelector('.pb-demo-clock');
+    const caption = box.querySelector('.pb-how-caption');
+    if (onClose) box.querySelector('.pb-how-close').addEventListener('click', onClose);
+
+    let stage = 0;
+    let run = 0;            // bumped to cancel whatever scene is playing
+    const wait = (ms, my) => new Promise((r) => setTimeout(r, ms)).then(() => {
+      if (my !== run) throw new Error('cancelled');
+    });
+    // Off screen (another tab, a hidden page): hold, rather than play to nobody.
+    const visible = () => !document.hidden && box.offsetParent !== null;
+
+    const setRow = (i, state, note) => {
+      rows[i].className = state || '';
+      rows[i].querySelector('.pb-demo-note').textContent = note || '';
+    };
+    const setBadge = (text, cls) => { badge.textContent = text; badge.className = 'pb-demo-badge ' + (cls || ''); };
+    const reset = () => {
+      rows.forEach((_r, i) => { setRow(i, ''); rows[i].querySelector('.pb-demo-text').textContent = DEMO_STEPS[i]; });
+      demo.classList.remove('saved');
+      clockEl.textContent = '';
+    };
+
+    function show(i) {
+      stage = i;
+      stages.forEach((s, j) => { s.classList.toggle('on', j === i); s.setAttribute('aria-selected', String(j === i)); });
+      demo.dataset.stage = HOW_STAGES[i].key;
+      caption.textContent = HOW_STAGES[i].body;
+    }
+
+    // Each scene, played. `my` is the run it belongs to.
+    const SCENES = [
+      async (my) => {           // the AI works it out, one step at a time
+        reset(); setBadge('AI working it out', 'ai');
+        let secs = 0;
+        for (let i = 0; i < rows.length; i++) {
+          setRow(i, 'active ai', 'thinking…');
+          for (let t = 0; t < 4; t++) { await wait(260, my); secs += 3; clockEl.textContent = `${secs}s so far`; }
+          setRow(i, 'done', '');
+        }
+        clockEl.textContent = `took ${secs}s, with the AI`;
+        await wait(1400, my);
+      },
+      async (my) => {           // kept
+        rows.forEach((_r, i) => setRow(i, 'done', ''));
+        setBadge('Worked', 'ok');
+        await wait(500, my);
+        demo.classList.add('saved');
+        clockEl.textContent = '';
+        await wait(2600, my);
+      },
+      async (my) => {           // replayed with no AI
+        reset(); demo.classList.add('saved'); setBadge('No AI', 'free');
+        for (let i = 0; i < rows.length; i++) { setRow(i, 'active', ''); await wait(330, my); setRow(i, 'done', ''); }
+        clockEl.textContent = 'took 4s, no AI';
+        await wait(2400, my);
+      },
+      async (my) => {           // one step changed; only it is repaired
+        reset(); demo.classList.add('saved'); setBadge('No AI', 'free');
+        for (let i = 0; i < 2; i++) { setRow(i, 'active', ''); await wait(330, my); setRow(i, 'done', ''); }
+        setRow(2, 'active', ''); await wait(500, my);
+        setRow(2, 'broken', 'not there any more'); setBadge('One step changed', 'warn');
+        await wait(1300, my);
+        setRow(2, 'active ai', 'the AI fixes just this step…'); setBadge('AI: this step only', 'ai');
+        await wait(1700, my);
+        rows[2].querySelector('.pb-demo-text').textContent = DEMO_FIXED;
+        setRow(2, 'done fixed', 'fixed — kept for next time'); setBadge('No AI', 'free');
+        await wait(600, my);
+        setRow(3, 'active', ''); await wait(330, my); setRow(3, 'done', '');
+        clockEl.textContent = 'next run: no AI again';
+        await wait(2600, my);
+      },
+    ];
+
+    // The final picture of a stage, for when nothing moves.
+    function settle(i) {
+      reset();
+      if (i === 0) { rows.forEach((_r, j) => setRow(j, 'done', '')); rows[1].className = 'active ai'; setBadge('AI working it out', 'ai'); clockEl.textContent = 'the first time takes a while'; }
+      if (i === 1) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('Worked', 'ok'); }
+      if (i === 2) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('No AI', 'free'); clockEl.textContent = 'took 4s, no AI'; }
+      if (i === 3) {
+        rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved');
+        rows[2].querySelector('.pb-demo-text').textContent = DEMO_FIXED;
+        setRow(2, 'done fixed', 'fixed by the AI — kept for next time'); setBadge('No AI', 'free');
+      }
+    }
+
+    async function play(from) {
+      const my = ++run;
+      let i = from;
+      try {
+        for (;;) {
+          show(i);
+          if (still()) { settle(i); return; }
+          while (!visible()) await wait(500, my);
+          await SCENES[i](my);
+          i = (i + 1) % SCENES.length;
+        }
+      } catch { /* a newer play() took over */ }
+    }
+
+    stages.forEach((s, i) => s.addEventListener('click', () => play(i)));
+    play(0);
+    return { stop: () => { run++; }, restart: () => play(0) };
+  }
+
+  // The empty page explains itself; a playbook's page does when asked.
+  howItWorks($('pbHowEmpty'));
+  const HOW_SEEN = 'operator.pbHowSeen';
+  let deskHow = null;
+  function toggleHow(open) {
+    const box = $('pbHow');
+    const btn = $('pbHowBtn');
+    const show = open === undefined ? box.hidden : open;
+    box.hidden = !show;
+    btn.setAttribute('aria-expanded', String(show));
+    btn.classList.toggle('on', show);
+    if (show) {
+      if (!deskHow) deskHow = howItWorks(box, { onClose: () => toggleHow(false) });
+      else deskHow.restart();
+    } else if (deskHow) deskHow.stop();
+    try { localStorage.setItem(HOW_SEEN, '1'); } catch { /* fine */ }
+  }
+  $('pbHowBtn').addEventListener('click', () => toggleHow());
+  $('pbGoAgents').addEventListener('click', () => document.querySelector('.mode[data-mode="agents"]').click());
 
   /* ── the list ──────────────────────────────────────────────────── */
 
@@ -98,6 +289,53 @@
     desk.hidden = false;
     paintList();
     paint();
+    // The first playbook anyone opens explains itself once; after that it is
+    // behind "How it works".
+    let seen = true;
+    try { seen = Boolean(localStorage.getItem(HOW_SEEN)); } catch { /* fine */ }
+    if (!seen) toggleHow(true);
+  }
+
+  // What will happen when it runs, in a few sentences — read off the steps,
+  // the watchers that start it, where it runs and what fixes it.
+  function paintSummary() {
+    const pb = current;
+    const el = $('pbSummary');
+    if (!pb || !el) return;
+    const n = pb.steps.length;
+    const starts = watches
+      .filter((w) => w.enabled && w.action && w.action.kind === 'playbook' && w.action.playbookId === pb.id)
+      .map((w) => (/^when\b/i.test(w.name) ? esc(w.name.replace(/^When/, 'when')) : `when its watcher “${esc(w.name)}” goes off`));
+    const fleet = window.__fleet ? window.__fleet.list() : [];
+    const machine = fleet.find((m) => m.id === pb.machine);
+    const kinds = new Set(pb.steps.map((s) => s.kind));
+    const how = [kinds.has('web') && 'in its own browser', kinds.has('screen') && 'on the screen', kinds.has('shell') && 'with Windows commands', kinds.has('mail') && 'with your email']
+      .filter(Boolean);
+    const list = (a) => (a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
+    const nums = (pred) => pb.steps.map((s, i) => (pred(s) ? i + 1 : 0)).filter(Boolean);
+    const yours = nums((s) => s.kind === 'you' || /\{\{?\s*secret/i.test(s.text) || s.fields.some((f) => /\{\{\s*secret/i.test(f.value)));
+    const asks = nums((s) => s.confirm);
+    const fixer = modelName(pb.model);
+
+    const lines = [];
+    lines.push(`<b>When you press Run</b>${starts.length ? `, or ${starts.join(', or ')},` : ','} Operator does these ${n} step${n === 1 ? '' : 's'} by itself, in order` +
+      `${machine ? ` on <b>${esc(machine.name)}</b>` : ''}${how.length ? ` — ${list(how)}` : ''}.`);
+    lines.push(`<b>No AI is used.</b> Only if a step stops working because a screen has changed does ${esc(fixer)} work out that one step again, and its fix is kept.`);
+    const stops = [];
+    if (yours.length) stops.push(`for you at step ${list(yours.map(String))}`);
+    if (asks.length) stops.push(`to ask before step${asks.length === 1 ? '' : 's'} ${list(asks.map(String))}`);
+    if (stops.length) lines.push(`<b>It stops</b> ${stops.join(', and ')}.`);
+    if (pb.inputs.length) {
+      lines.push(`<b>Changes each run:</b> ${pb.inputs.map((x) => `<span class="pb-var">${esc(x.name.replace(/_/g, ' '))}${x.value ? `: <i>${esc(x.value)}</i>` : ''}</span>`).join(' ')}`);
+    }
+    el.innerHTML = lines.map((l) => `<p>${l}</p>`).join('');
+  }
+
+  // A model's name, for the summary and the repair picker.
+  let defaultModel = null;
+  function modelName(id) {
+    const m = models.find((x) => x.id === (id || defaultModel));
+    return m ? m.name : 'the AI';
   }
 
   function paint() {
@@ -107,6 +345,7 @@
     const from = pb.source && pb.source.at ? ` · saved from ${pb.source.botName ? esc(pb.source.botName) + "'s" : 'a'} run on ${new Date(pb.source.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '';
     $('pbSub').innerHTML = esc(trim(pb.goal || '', 110)) + from;
     paintState();
+    paintSummary();
     paintStats();
     paintSteps();
     paintInputs();
@@ -124,7 +363,17 @@
     $('pbRun').disabled = Boolean(busyElsewhere);
     $('pbRehearse').disabled = Boolean(busyElsewhere);
     const st = $('pbState');
-    if (running) { st.textContent = live.dryRun ? 'Rehearsing — nothing is being changed' : 'Running'; st.className = 'staff-state st-busy'; }
+    if (running) {
+      // Which step, and whether the AI is involved right now — the whole idea,
+      // visible while it happens.
+      const total = (live.steps || current.steps).length;
+      const at = live.states.findIndex((x) => x === 'running' || x === 'healing');
+      const fixing = at !== -1 && live.states[at] === 'healing';
+      const where = at === -1 ? 'Starting' : `Step ${at + 1} of ${total}`;
+      st.textContent = live.dryRun ? `Rehearsing · ${where} · nothing is being changed`
+        : fixing ? `${where} · the AI is fixing this step` : `${where} · no AI`;
+      st.className = 'staff-state ' + (fixing ? 'st-ask' : 'st-busy');
+    }
     else if (busyElsewhere) { st.textContent = 'Another playbook is running'; st.className = 'staff-state st-off'; }
     else { st.textContent = ''; st.className = 'staff-state'; }
   }
@@ -172,10 +421,18 @@
 
   function paintSteps() {
     const steps = (live && current && live.playbookId === current.id && live.steps) || current.steps;
-    $('pbStepsNote').textContent = `${steps.length} step${steps.length === 1 ? '' : 's'}` +
-      (steps.some((s) => s.brittle) ? ' · some click a place on the screen rather than a named button' : '');
+    $('pbStepsNote').textContent = `${steps.length} step${steps.length === 1 ? '' : 's'}, done in this order every time · point at a label to see what it means`;
     stepsEl.textContent = '';
     steps.forEach((s, i) => stepsEl.appendChild(stepRow(s, i)));
+  }
+
+  // A step's words as a sentence: a capital to start, and a shell command
+  // said for what it is, with the command itself shown as code.
+  function stepWords(s) {
+    const text = String(s.text || '');
+    const cmd = s.kind === 'shell' && text.match(/^run:\s*([\s\S]*)$/i);
+    if (cmd) return `Runs a Windows command: <code class="pb-cmd">${withTags(cmd[1], current)}</code>`;
+    return withTags(text.charAt(0).toUpperCase() + text.slice(1), current);
   }
 
   function stepRow(s, i) {
@@ -184,21 +441,24 @@
     li.className = `pb-step k-${s.kind}${state ? ' s-' + state : ''}`;
     li.dataset.id = s.id;
     const tags = [];
-    if (s.check) tags.push(`<span class="pb-then">then: ${esc(s.check)}</span>`);
-    if (s.brittle) tags.push('<span class="pb-tag warn" title="It clicks a position, not a named button — if the window moves or changes, this is the step that will need repairing">clicks a position</span>');
-    if (s.healed) tags.push('<span class="pb-tag" title="This step was worked out again by the AI when the screen changed">repaired</span>');
+    if (s.check) {
+      const said = s.kind === 'web' ? `checks it is on ${esc(s.check)}` : `checks ${esc(s.check)} is in front`;
+      tags.push(`<span class="pb-then" title="After this step Operator checks this, without the AI. If it is not so, it waits, tries once more, and only then asks the AI to fix this one step.">✓ ${said}</span>`);
+    }
+    if (s.brittle) tags.push('<span class="pb-tag warn" title="It clicks a spot on the screen, not a button by its name — if the window moves or changes, this is the step most likely to need the AI to fix it">clicks a spot on screen</span>');
+    if (s.healed) tags.push('<span class="pb-tag fixed" title="A screen had changed, so the AI worked this step out again. The fix is saved — it runs with no AI now">fixed by the AI</span>');
     if (note) tags.push(`<span class="pb-note">${esc(note)}</span>`);
     const lock = live && current && live.playbookId === current.id;
     li.innerHTML =
       `<span class="pb-n">${i + 1}</span>` +
       '<div class="pb-step-main">' +
-        `<div class="pb-step-text">${esc(s.text)}</div>` +
+        `<div class="pb-step-text">${stepWords(s)}</div>` +
         // What kind of step and how it went on the left, what you can do to it
         // on the right — under the words, so they keep the whole width.
         '<div class="pb-step-foot">' +
-          `<div class="pb-step-meta"><span class="pb-kind">${KIND[s.kind] || 'Step'}</span>${tags.join('')}</div>` +
+          `<div class="pb-step-meta"><span class="pb-kind" title="${esc(KIND_TIP[s.kind] || '')}">${KIND[s.kind] || 'Step'}</span>${tags.join('')}</div>` +
           '<div class="pb-step-acts">' +
-            `<label class="pb-ask" title="Stop and ask before doing this step"><input type="checkbox"${s.confirm ? ' checked' : ''}${lock ? ' disabled' : ''} /> Ask first</label>` +
+            `<label class="pb-ask" title="Stop and ask you before doing this step — on for anything that sends, pays, posts or deletes"><input type="checkbox"${s.confirm ? ' checked' : ''}${lock ? ' disabled' : ''} /> Ask me first</label>` +
             (s.fields.length ? `<button class="mini" type="button" data-act="edit"${lock ? ' disabled' : ''}>Edit</button>` : '') +
             `<button class="mini" type="button" data-act="remove"${lock ? ' disabled' : ''}>Remove</button>` +
           '</div>' +
@@ -256,13 +516,13 @@
     if (!current.inputs.length) {
       const p = document.createElement('p');
       p.className = 'pb-none';
-      p.textContent = 'None — it types the same thing every time.';
+      p.textContent = 'Nothing — it types the same things every time.';
       box.appendChild(p);
     }
     for (const inp of current.inputs) {
       const row = document.createElement('label');
       row.className = 'field pb-input';
-      row.innerHTML = `<span><code>{{${esc(inp.name)}}}</code></span>`;
+      row.innerHTML = `<span>${esc(inp.name.replace(/_/g, ' '))} <code>{{${esc(inp.name)}}}</code></span>`;
       const input = document.createElement('input');
       input.type = 'text';
       input.value = inp.value;
@@ -278,12 +538,16 @@
   async function paintModel() {
     const sel = $('pbModel');
     if (!models.length) {
-      try { models = ((await window.operator.listModels()) || {}).models || []; } catch { models = []; }
+      try {
+        const got = (await window.operator.listModels()) || {};
+        models = got.models || [];
+        defaultModel = got.current || null;
+      } catch { models = []; }
     }
     sel.textContent = '';
     const auto = document.createElement('option');
     auto.value = '';
-    auto.textContent = "Operator's default";
+    auto.textContent = defaultModel ? `Operator's default — ${modelName(null)}` : "Operator's default";
     sel.appendChild(auto);
     let group = null;
     let holder = sel;
@@ -301,6 +565,7 @@
       holder.appendChild(o);
     }
     sel.value = current.model && models.some((m) => m.id === current.model) ? current.model : '';
+    paintSummary();   // it names the model, which was not known until now
   }
 
   $('pbModel').addEventListener('change', (e) => change({ model: e.target.value || null }));
@@ -311,7 +576,8 @@
   function paintMachine() {
     const sel = $('pbMachine');
     if (!sel || !current || !window.__fleet) return;
-    window.__fleet.fillSelect(sel, current.machine, 'Wherever Operator is pointed');
+    const fleet = window.__fleet.list();
+    window.__fleet.fillSelect(sel, current.machine, fleet.length ? 'The one set in Settings → Computer' : 'This computer');
     const note = $('pbMachineNote');
     const m = window.__fleet.list().find((x) => x.id === current.machine);
     note.textContent = !window.__fleet.list().length ? 'Add spare PCs in Settings → Computer, and this one can run there instead.'
@@ -600,6 +866,7 @@
       box.appendChild(p);
     }
     for (const w of mine) box.appendChild(watchRow(w));
+    paintSummary();   // "or when a PDF lands in Downloads"
   }
 
   function showKind() {

@@ -298,7 +298,11 @@ function compileSteps(raw, at) {
 function nameFrom(prompt) {
   const line = String(prompt || '').split('\n').map((l) => l.trim()).find(Boolean) || 'New playbook';
   const t = line.replace(/^\/\S+\s*/, '').replace(/\s+/g, ' ');
-  return (t.charAt(0).toUpperCase() + t.slice(1)).slice(0, 60);
+  const name = t.charAt(0).toUpperCase() + t.slice(1);
+  if (name.length <= 60) return name;
+  // Cut at a word, not through one: "…then note" rather than "…then no".
+  const cut = name.slice(0, 60);
+  return cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : 60).replace(/[\s,;:—-]+$/, '');
 }
 
 function fromTask(taskId) {

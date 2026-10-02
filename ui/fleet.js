@@ -155,7 +155,7 @@
   const fMachine = $('fMachine');
   function paintAgentChoice() {
     if (!fMachine || typeof bot === 'undefined' || !bot) return;
-    fillSelect(fMachine, bot.machine, 'Wherever Operator is pointed');
+    fillSelect(fMachine, bot.machine, machines.length ? 'The one set in Settings → Computer' : 'This computer');
   }
   if (fMachine) {
     fMachine.addEventListener('change', async () => {

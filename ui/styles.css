@@ -4020,3 +4020,82 @@ body:not(.working) .composer > .halo-bloom { display: none; }
 .fleet-add .ss-row > .field { min-width: 150px; }
 .fleet-add { display: flex; flex-direction: column; gap: 12px; }
 .fleet-add .set-hint { margin: 0; }
+
+/* ── how a playbook works, played out (ui/playbooks.js howItWorks) ──── */
+.pbview .staff-empty.pb-empty { max-width: 900px; gap: 14px; }
+.pb-empty > p { max-width: 560px; }
+.pb-empty-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.pbview .staff-empty .pb-empty-acts .pill { display: inline-flex; align-items: center; justify-content: center; height: 34px; padding: 0 18px; border-radius: 9999px; }
+
+.pb-how { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 14px 22px; align-items: start; width: 100%; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--raise); text-align: left; }
+.pb-how[hidden] { display: none; }
+.pb-how-card { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+
+.pb-how-stages { display: flex; flex-direction: column; gap: 4px; }
+.pb-how-stage { display: flex; gap: 11px; align-items: flex-start; width: 100%; padding: 9px 11px; border: 1px solid transparent; border-radius: 11px; background: transparent; color: var(--ink-3); font: inherit; text-align: left; cursor: pointer; transition: background .2s, border-color .2s, color .2s; }
+.pb-how-stage:hover { background: var(--raise); color: var(--ink-2); }
+.pb-how-stage.on { background: var(--raise-hi); border-color: var(--line-hi); color: var(--ink); }
+.pb-how-n { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-max); font-size: 11.5px; font-weight: 600; color: var(--ink-3); transition: all .2s; }
+.pb-how-stage.on .pb-how-n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.pb-how-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pb-how-words b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.2px; }
+.pb-how-words span { font-size: 12.5px; line-height: 1.5; color: var(--ink-4); display: none; }
+.pb-how-stage.on .pb-how-words span { display: block; color: var(--ink-3); }
+
+.pb-how-caption { display: none; }
+.pb-how-close { position: absolute; top: 8px; right: 10px; width: 26px; height: 26px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-4); font-size: 18px; line-height: 1; cursor: pointer; }
+.pb-how-close:hover { background: var(--raise-hi); color: var(--ink); }
+
+/* the little playbook that acts it out */
+.pb-demo { align-self: center; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line-hi); border-radius: 13px; background: var(--panel); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); font-size: 12.5px; }
+.pb-demo-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pb-demo-top b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-demo-badge { flex: none; padding: 3px 9px; border-radius: 9999px; font-size: 11px; font-weight: 600; border: 1px solid var(--line-hi); color: var(--ink-3); transition: all .25s; }
+.pb-demo-badge.ai { color: #b28cff; border-color: rgba(178, 140, 255, 0.4); background: rgba(178, 140, 255, 0.1); }
+.pb-demo-badge.free, .pb-demo-badge.ok { color: #46d17f; border-color: rgba(70, 209, 127, 0.35); background: rgba(70, 209, 127, 0.1); }
+.pb-demo-badge.warn { color: #f0a12e; border-color: rgba(240, 161, 46, 0.45); background: rgba(240, 161, 46, 0.1); }
+.pb-demo-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.pb-demo-steps li { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink-3); transition: border-color .2s, background .2s, color .2s; }
+.pb-demo-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line-max); transition: background .2s; }
+.pb-demo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-demo-note { flex: none; font-size: 11px; color: var(--ink-4); }
+.pb-demo-steps li.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--ink); }
+.pb-demo-steps li.active .pb-demo-dot { background: var(--accent); animation: pb-pulse 1s infinite ease-in-out; }
+.pb-demo-steps li.ai { border-color: rgba(178, 140, 255, 0.45); background: rgba(178, 140, 255, 0.07); }
+.pb-demo-steps li.ai .pb-demo-dot { background: #b28cff; }
+.pb-demo-steps li.ai .pb-demo-note { color: #b28cff; }
+.pb-demo-steps li.done { color: var(--ink-2); }
+.pb-demo-steps li.done .pb-demo-dot { background: #46d17f; }
+.pb-demo-steps li.broken { border-color: rgba(240, 161, 46, 0.55); background: rgba(240, 161, 46, 0.07); color: var(--ink); }
+.pb-demo-steps li.broken .pb-demo-dot { background: #f0a12e; }
+.pb-demo-steps li.broken .pb-demo-note { color: #f0a12e; }
+.pb-demo-steps li.fixed .pb-demo-note { color: #46d17f; }
+.pb-demo-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; font-size: 11.5px; color: var(--ink-4); }
+.pb-demo-saved { padding: 2px 9px; border-radius: 9999px; background: var(--accent); color: var(--on-accent); font-weight: 600; opacity: 0; transform: translateY(4px); transition: opacity .3s, transform .3s; }
+.pb-demo.saved .pb-demo-saved { opacity: 1; transform: none; }
+.pb-demo-clock { font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1180px) {
+  .pb-how { grid-template-columns: minmax(0, 1fr); }
+  .pb-demo { width: 100%; max-width: 440px; justify-self: center; }
+}
+@media (prefers-reduced-motion: reduce) { .pb-demo *, .pb-how-stage { transition: none !important; animation: none !important; } }
+:root[data-motion="off"] .pb-demo * { transition: none !important; animation: none !important; }
+
+/* what will happen, in sentences */
+.pb-summary { display: flex; flex-direction: column; gap: 6px; padding: 13px 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); border-radius: 2px 10px 10px 2px; background: var(--raise); font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.pb-summary p { margin: 0; }
+.pb-summary b { color: var(--ink); font-weight: 600; }
+
+/* a word that changes each run, as a tag */
+.pb-var { display: inline-block; padding: 0 7px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); font-size: .92em; line-height: 1.55; white-space: nowrap; }
+.pb-var i { font-style: normal; color: var(--ink-2); }
+.pb-var.auto { border-color: rgba(70, 209, 127, 0.35); background: rgba(70, 209, 127, 0.1); }
+.pb-var.you { border-color: rgba(240, 161, 46, 0.45); background: rgba(240, 161, 46, 0.1); }
+.pb-input > span code { margin-left: 4px; font-family: var(--mono); font-size: 11px; color: var(--ink-4); }
+.pb-tag.fixed { border-color: rgba(70, 209, 127, 0.35); color: #46d17f; }
+.pb-kind { cursor: help; }
+.pb-then { cursor: help; }
+.pbview .staff-actions #pbHowBtn.on { border-color: var(--line-max); background: var(--raise-hi); color: var(--ink); }
+.pb-then { font-family: inherit; font-size: 11.5px; color: var(--ink-3); }
+.pb-cmd { font-family: var(--mono); font-size: 12px; color: var(--ink-2); padding: 1px 6px; border-radius: 5px; background: var(--raise-hi); overflow-wrap: anywhere; }

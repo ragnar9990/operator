@@ -393,11 +393,15 @@
       </aside>
 
       <main class="staff-main">
-        <div class="staff-empty" id="pbEmpty">
-          <div class="staff-empty-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11"/><path d="m3.6 5 2.2 1.5-2.2 1.5Z"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/></svg></div>
+        <div class="staff-empty pb-empty" id="pbEmpty">
           <h2>Do a job once. After that it runs by itself.</h2>
-          <p>When Operator finishes a job, save it as a playbook. Next time the same steps replay straight through — no AI, nothing to pay, done in seconds, the same way every time. If a screen has changed since, only that one step goes back to the AI to be repaired, and the repair is kept.</p>
-          <button class="pill solid" id="pbNewBig" type="button">Save a recent run</button>
+          <p>A playbook is a job Operator has already done, kept as the exact steps it took — so the next time, it can do the job again without the AI.</p>
+          <!-- how it works, played out (ui/playbooks.js, howItWorks) -->
+          <div class="pb-how" id="pbHowEmpty"></div>
+          <div class="pb-empty-acts">
+            <button class="pill" id="pbGoAgents" type="button">Give an agent a job first</button>
+            <button class="pill solid" id="pbNewBig" type="button">Save a recent run</button>
+          </div>
         </div>
 
         <section class="staff-desk" id="pbDesk" hidden>
@@ -409,14 +413,18 @@
             </div>
             <span class="staff-state" id="pbState"></span>
             <div class="staff-actions">
-              <button class="pill" id="pbRehearse" type="button" title="Go through it without changing anything">Rehearse</button>
-              <button class="pill solid" id="pbRun" type="button">Run</button>
+              <button class="pill" id="pbHowBtn" type="button" aria-expanded="false" aria-controls="pbHow">How it works</button>
+              <button class="pill" id="pbRehearse" type="button" title="Go through every step without clicking or typing anything — to check it would still work">Rehearse</button>
+              <button class="pill solid" id="pbRun" type="button" title="Do the job for real, now">Run</button>
               <button class="pill" id="pbStop" type="button" hidden>Stop</button>
             </div>
           </header>
 
           <div class="staff-body">
             <div class="pb-main">
+              <div class="pb-how pb-how-card" id="pbHow" hidden></div>
+              <!-- what will happen when it runs, said in a sentence or three -->
+              <div class="pb-summary" id="pbSummary"></div>
               <div class="pb-stats" id="pbStats"></div>
               <div class="pb-turn" id="pbTurn" hidden></div>
               <div class="pb-result" id="pbResult" hidden></div>
@@ -430,11 +438,11 @@
 
             <aside class="staff-panel pb-panel">
               <div class="sp-block">
-                <div class="sp-head">Inputs</div>
+                <div class="sp-head">Changes each run</div>
                 <div class="pb-inputs" id="pbInputs"></div>
-                <button class="pill sm" id="pbSuggest" type="button">Suggest inputs</button>
+                <button class="pill sm" id="pbSuggest" type="button" title="Ask the AI once which typed words look like they will be different next time">Suggest some</button>
                 <div class="pb-suggest" id="pbSuggestions"></div>
-                <p class="field-hint">Write <code>{{name}}</code> in a step to fill it in when it runs. Dates fill themselves: <code>{{today}}</code>, <code>{{yesterday:DD/MM/YYYY}}</code>, <code>{{last_month:MMMM YYYY}}</code>.</p>
+                <p class="field-hint">Words that are different every time — a month, a customer, an amount. In the steps they show as a <span class="pb-var">tag</span>. To make one, press <b>Edit</b> on a step and put <code>{{name}}</code> where the word goes. Dates work themselves out: <code>{{yesterday}}</code>, <code>{{last_month}}</code>.</p>
               </div>
               <div class="sp-block">
                 <div class="sp-head">Starts by itself</div>
@@ -447,9 +455,9 @@
                 <p class="field-hint" id="pbMachineNote">Add spare PCs in Settings → Computer.</p>
               </div>
               <div class="sp-block" id="pbComputerBlock">
-                <div class="sp-head">Repairs a step with</div>
-                <select class="pb-select" id="pbModel"></select>
-                <p class="field-hint">Only used when a screen has changed and one step needs working out again. A model on this computer keeps that private too.</p>
+                <div class="sp-head">If a screen has changed</div>
+                <select class="pb-select" id="pbModel" aria-label="Which AI fixes a step that stopped working"></select>
+                <p class="field-hint">This AI only steps in when a step stops working — a button renamed, a page redesigned — and only for that one step. Its fix is saved, so the next run needs no AI again. A model on this computer keeps even that private.</p>
               </div>
               <div class="sp-block pb-live" id="pbLive" hidden>
                 <div class="sp-head">On screen</div>
