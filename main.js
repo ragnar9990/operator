@@ -231,12 +231,35 @@ function surfacePendingCrashes() {
       noLink: true,
     });
   } catch { return; }
+  // The report is the crashes being offered, not every one ever logged.
+  const ids = rows.map((r) => r.id);
   try {
-    if (choice === 0) { clipboard.writeText(crash.reportText()); crash.markHandled(); }
-    else if (choice === 1) { shell.openPath(crash.dir()); crash.markHandled(); }
+    if (choice === 0) { clipboard.writeText(crash.reportText(ids)); crash.markHandled(ids); }
+    else if (choice === 1) { shell.openPath(crash.dir()); crash.markHandled(ids); }
     // "Not now" leaves them pending, to be offered again next launch.
   } catch { /* the offer failing is not worth a crash of its own */ }
 }
+
+// Settings → Audit: the same crashes, any time. A report is the ones not yet
+// sent, or the latest few if all of them have been; copying or sending it is
+// what marks them dealt with.
+const crashIds = () => { const rows = crash.pending(); return (rows.length ? rows : crash.all(20)).map((r) => r.id); };
+ipcMain.handle('crash:summary', () => {
+  const rows = crash.all();
+  return { count: rows.length, pending: crash.pending().length, last: rows[0] ? rows[0].t : null, canSend: Boolean(process.env.OPERATOR_CRASH_URL) };
+});
+ipcMain.handle('crash:copy', () => {
+  const ids = crashIds();
+  if (!ids.length) return { ok: false, error: 'No crash reports.' };
+  clipboard.writeText(crash.reportText(ids));
+  crash.markHandled(ids);
+  return { ok: true, count: ids.length };
+});
+ipcMain.handle('crash:open', async () => {
+  const err = await shell.openPath(crash.dir());
+  return err ? { ok: false, error: err } : { ok: true };
+});
+ipcMain.handle('crash:send', () => crash.upload(crashIds()));
 
 const profileDir = () => path.join(app.getPath('userData'), 'agent-profile');
 

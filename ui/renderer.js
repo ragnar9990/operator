@@ -5133,6 +5133,45 @@ document.addEventListener('keydown', (e) => {
       window.operator.prefsSet({ verify: verifyOn.checked }).catch(() => {});
     });
   }
+
+  // Crash reports (crash.js), in the same panel: the failures nothing handled.
+  const crCount = document.getElementById('crCount');
+  const crCopy = document.getElementById('crCopy');
+  const crFolder = document.getElementById('crFolder');
+  const crSend = document.getElementById('crSend');
+  if (crCount && window.operator.crashSummary) {
+    const refreshCrashes = async () => {
+      let s = null;
+      try { s = await window.operator.crashSummary(); } catch { /* leave it blank */ }
+      if (!s) { crCount.textContent = ''; return; }
+      crCount.textContent = !s.count ? 'No crashes — nothing has gone wrong.'
+        : `${s.count} saved` + (s.pending ? ` · ${s.pending} not sent yet` : '') +
+          (s.last ? ` · last ${new Date(s.last).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}` : '');
+      crCopy.disabled = !s.count;
+      crSend.hidden = !s.canSend;
+      crSend.disabled = !s.count;
+    };
+    const flash = (btn, text) => {
+      const was = btn.dataset.label || (btn.dataset.label = btn.textContent);
+      btn.textContent = text;
+      setTimeout(() => { btn.textContent = was; }, 2200);
+    };
+    crCopy.addEventListener('click', async () => {
+      const r = await window.operator.crashCopy();
+      flash(crCopy, r && r.ok ? 'Copied — paste it into an email' : 'Nothing to copy');
+      refreshCrashes();
+    });
+    crFolder.addEventListener('click', () => window.operator.crashOpen());
+    crSend.addEventListener('click', async () => {
+      crSend.disabled = true;
+      const r = await window.operator.crashSend();
+      flash(crSend, r && r.ok ? 'Sent — thank you' : 'Could not send');
+      refreshCrashes();
+    });
+    document.querySelectorAll('#settingsTabs .tab').forEach((t) => {
+      if (t.dataset.tab === 'audit') t.addEventListener('click', refreshCrashes);
+    });
+  }
 })();
 
 

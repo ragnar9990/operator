@@ -304,6 +304,8 @@ npm run dist     # produces dist\Operator Setup <version>.exe
 | `agent.js` | The brain — builds the tools and the prompt, then hands them to Claude or to NIM |
 | `voice.js` | The other brain — hands-free mode, which drives the app itself rather than the computer |
 | `employees.js` + `ui/employees.js` | Employees — the loop that wakes them for check-ins, and the tab you watch them from |
+| `web.js` | An employee's web: a search and a page read over plain HTTP, never onto this computer or its network |
+| `crash.js` | Crash reports — the errors nothing else caught, saved locally with secrets taken out |
 | `piper.js` + `ui/vox.js` | The neural voice: a warm Piper process streaming PCM, played through Web Audio |
 | `verify.js` | The second pass that decides whether a run actually met its goal |
 | `nim.js` | The other brain — NVIDIA's catalog, and the tool-calling loop that drives it |
@@ -353,3 +355,6 @@ Point it somewhere else with `OPERATOR_WHISPER_DIR` / `OPERATOR_WHISPER_MODEL`.
   pays for its ~1s startup.
 - It won't magically defeat captchas designed to be unsolvable by bots; it clicks
   the ordinary checkbox / image challenges like a human, which works most of the time.
+- If Operator crashes, it saves a report on this computer (keys and card numbers
+  taken out) and offers it on the next launch. Settings → Audit → **Crash reports**
+  copies it for an email any time. Nothing is sent by itself.

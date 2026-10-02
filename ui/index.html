@@ -1098,6 +1098,17 @@
             </div>
 
             <div class="set-section">
+              <div class="set-label">Crash reports</div>
+              <p class="set-hint">When Operator hits an error nothing else caught, it writes it down — on this computer only, with keys and card numbers taken out. Copy the report into an email to get the bug fixed. Nothing is sent by itself.</p>
+              <div class="audit-bar">
+                <span class="audit-count" id="crCount"></span>
+                <button class="pill ghost sm" id="crCopy" type="button">Copy report</button>
+                <button class="pill ghost sm" id="crFolder" type="button">Show the file</button>
+                <button class="pill ghost sm" id="crSend" type="button" hidden>Send report</button>
+              </div>
+            </div>
+
+            <div class="set-section">
               <div class="set-label">Audit — every action, on the record</div>
               <p class="set-hint">Written as it happens and never edited afterwards. Passwords, card numbers and tokens are replaced with a fingerprint before anything reaches the disk, so this file is safe to hand to someone else.</p>
 

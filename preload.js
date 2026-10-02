@@ -146,6 +146,12 @@ contextBridge.exposeInMainWorld('operator', {
   auditFacets: () => ipcRenderer.invoke('audit:facets'),
   auditExport: (format, filter) => ipcRenderer.invoke('audit:export', format, filter),
 
+  // crash reports (Settings → Audit) — saved locally; sending is the user's click
+  crashSummary: () => ipcRenderer.invoke('crash:summary'),
+  crashCopy: () => ipcRenderer.invoke('crash:copy'),
+  crashOpen: () => ipcRenderer.invoke('crash:open'),
+  crashSend: () => ipcRenderer.invoke('crash:send'),
+
   connectorsList: () => ipcRenderer.invoke('connectors:list'),
   connectEmail: (cfg) => ipcRenderer.invoke('connectors:connectEmail', cfg),
   disconnectConnector: (id) => ipcRenderer.invoke('connectors:disconnect', id),

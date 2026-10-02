@@ -3,6 +3,9 @@
 // instead of the screen and the browser (agent.js), so a check-in never takes
 // over anything you can see, and never touches your own browser.
 
+const dns = require('dns').promises;
+const net = require('net');
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 const TIMEOUT_MS = 15000;
 
@@ -18,11 +21,11 @@ function decode(s) {
 }
 const strip = (html) => decode(String(html || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
 
-async function get(url, accept) {
+async function get(url, accept, redirect) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
   try {
-    return await fetch(url, { signal: ac.signal, redirect: 'follow', headers: { 'user-agent': UA, 'accept-language': 'en', accept: accept || 'text/html,*/*' } });
+    return await fetch(url, { signal: ac.signal, redirect: redirect || 'follow', headers: { 'user-agent': UA, 'accept-language': 'en', accept: accept || 'text/html,*/*' } });
   } finally {
     clearTimeout(timer);
   }
@@ -52,23 +55,52 @@ async function search(query, count = 8) {
 
 // Somewhere on this machine or its network is not the web — a page could
 // otherwise talk an employee into poking at the router or a local service.
+const LOCAL = 'That address is on this computer or its local network, not the web.';
+function localHost(raw) {
+  const h = String(raw || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/^::ffff:/, '');
+  return h === 'localhost' || h.endsWith('.local') || h.endsWith('.localhost') || h === '0.0.0.0' || h === '::1' || h === '::' ||
+    /^(127|10|0)\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) ||   // carrier-grade NAT, and Tailscale
+    (/^(f[cd]|fe[89ab])/.test(h) && h.includes(':'));
+}
+
 function publicUrl(raw) {
   let u;
   try { u = new URL(String(raw || '').trim()); } catch { throw new Error('That is not a web address. Give the full link, starting https://'); }
   if (!/^https?:$/.test(u.protocol)) throw new Error('Only http and https pages can be read.');
-  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.localhost') || h === '0.0.0.0' || h === '::1' ||
-    /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || (/^f[cd]/.test(h) && h.includes(':'))) {
-    throw new Error('That address is on this computer or its local network, not the web.');
-  }
+  if (localHost(u.hostname)) throw new Error(LOCAL);
   return u;
+}
+
+// A public-looking name can point at the local network too, so it is checked
+// by where it actually resolves. A name that will not resolve is left for the
+// request itself to report.
+async function publicHost(u) {
+  const h = u.hostname.replace(/^\[|\]$/g, '');
+  if (net.isIP(h)) return;
+  let addrs = [];
+  try { addrs = await dns.lookup(h, { all: true }); } catch { return; }
+  if (addrs.some((a) => localHost(a.address))) throw new Error(LOCAL);
 }
 
 // A page as text: its title, the words, and the links on it (so the next
 // page can be read the same way).
 async function read(raw, max = 12000) {
-  const u = publicUrl(raw);
-  const res = await get(u.href);
+  // Redirects are followed by hand, so a public page cannot bounce the
+  // request onto the local network either.
+  let u = publicUrl(raw);
+  let res;
+  for (let hop = 0; ; hop++) {
+    await publicHost(u);
+    res = await get(u.href, null, 'manual');
+    const to = res.status >= 300 && res.status < 400 && res.headers.get('location');
+    if (!to) break;
+    try { await res.body?.cancel(); } catch { /* only freeing the socket */ }
+    if (hop >= 5) throw new Error('The page redirected too many times.');
+    let next;
+    try { next = new URL(to, u).href; } catch { throw new Error('The page redirected somewhere that is not a web address.'); }
+    u = publicUrl(next);
+  }
   const type = res.headers.get('content-type') || '';
   if (!res.ok) throw new Error(`The page answered ${res.status}${res.statusText ? ' ' + res.statusText : ''}.`);
   const final = res.url || u.href;

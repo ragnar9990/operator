@@ -204,6 +204,7 @@ const AUDIT = (() => {
   return out;
 })();
 
+const CRASH = { pending: 1 };
 const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
                 addresses: ['192.168.20.2', '100.123.254.56'], waiting: 0, lastSeen: null };
 
@@ -494,6 +495,12 @@ const PHONE = { on: false, port: 8392, token: 'Qx7pL2mNv8RtYw3z',
       count: AUDIT.length,
     }),
     auditExport: async (_fmt, f) => ({ ok: true, count: (await window.operator.auditQuery({ ...f, limit: 1e9 })).rows.length }),
+
+    /* crash reports — two saved, one not yet sent */
+    crashSummary: async () => ({ count: 2, pending: CRASH.pending, last: new Date(Date.now() - 3 * 3600e3).toISOString(), canSend: false }),
+    crashCopy: async () => { const n = CRASH.pending || 2; CRASH.pending = 0; return { ok: true, count: n }; },
+    crashOpen: async () => ({ ok: true }),
+    crashSend: async () => ({ ok: false, error: 'No crash endpoint configured.' }),
 
     /* appearance — kept in memory so the preview can exercise the panel */
     prefsGet: async () => JSON.parse(localStorage.getItem('prefs') || '{}'),
