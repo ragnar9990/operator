@@ -59,144 +59,115 @@
   }
 
   /* ── how it works, played out ──────────────────────────────────────
-   * Four stages beside a small playbook that acts them out: the first time
-   * the AI works every step out (slow, and paid for); the run is saved; the
-   * next time it replays with no AI (seconds); and when a button has moved,
-   * only that step goes back to the AI, and the fix is kept. Each stage can be
-   * clicked. With motion off it holds still on whichever stage is chosen. */
+   * One job, run three times, side by side: the first time an agent works
+   * every step out (slow, and it uses the AI); every time after, the saved
+   * steps run by themselves (seconds, free); and when a site has changed, only
+   * the step that broke goes back to the AI, and the fix is kept. All three
+   * are on screen at once, so the difference reads at a glance — the clocks
+   * and the bars under them are on the same scale. The one playing is lit, and
+   * a click plays any of them again. With motion off they hold still, finished. */
 
-  const HOW_STAGES = [
-    { key: 'learn', head: 'Do it once', body: 'An agent does the job and works out each step.' },
-    { key: 'save', head: 'Save it', body: 'The steps are kept. Your passwords never are.' },
-    { key: 'replay', head: 'Run it again', body: 'It repeats the steps by itself, in seconds.' },
-    { key: 'repair', head: 'It fixes itself', body: 'If a button moved, just that step is worked out again.' },
+  const HOW_STEPS = ['Open the supplier site', 'Click “Invoices”', 'Click “Download all”', 'File the PDFs'];
+  const HOW_FIXED = 'Click “Download PDFs”';
+  const HOW_RUNS = [
+    { k: 'ai', head: 'The first time', body: 'An agent works out every step.', secs: 72, chip: 'Uses AI' },
+    { k: 'free', head: 'Every time after', body: 'The saved steps run by themselves.', secs: 4, chip: 'No AI · free' },
+    { k: 'fix', head: 'When a site changes', body: 'Only the step that broke is worked out again.', secs: 9, chip: 'AI for one step' },
   ];
-
-  const DEMO_STEPS = ['Open the supplier portal', 'Click “Invoices”', 'Click “Download all”', 'Move the PDFs into Invoices\\September'];
-  const DEMO_FIXED = 'Click “Download PDFs”';
+  const HOW_LONGEST = 72;
+  const HOW_ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6.5 18.5 12 13 17.5"/></svg>';
 
   const still = () => document.documentElement.dataset.motion === 'off' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const took = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`);
 
   function howItWorks(box, { onClose } = {}) {
     box.innerHTML =
-      '<div class="pb-how-stages" role="tablist" aria-label="How a playbook works">' +
-        HOW_STAGES.map((s, i) => `<button class="pb-how-stage" type="button" role="tab" data-i="${i}">` +
-          `<span class="pb-how-n">${i + 1}</span><span class="pb-how-words"><b>${s.head}</b><span>${s.body}</span></span></button>`).join('') +
+      (onClose ? '<div class="pb-how-top"><b>How a playbook works</b><button class="pb-how-close" type="button" aria-label="Hide how it works">×</button></div>' : '') +
+      '<div class="pb-how-runs">' +
+        HOW_RUNS.map((r, i) => (i ? `<span class="pb-how-arrow">${HOW_ARROW}</span>` : '') +
+          `<div class="pb-run" data-k="${r.k}" role="button" tabindex="0" aria-label="${r.head}: ${r.body} Press to play it.">` +
+            `<div class="pb-run-head"><b>${r.head}</b><span>${r.body}</span></div>` +
+            '<ol class="pb-run-steps">' + HOW_STEPS.map((t) => `<li><span class="pb-run-dot"></span><span class="pb-run-text">${t}</span><span class="pb-run-note"></span></li>`).join('') + '</ol>' +
+            `<div class="pb-run-foot"><div class="pb-run-time"><b class="pb-run-clock"></b><span class="pb-run-chip">${r.chip}</span></div><div class="pb-run-bar"><i></i></div></div>` +
+          '</div>').join('') +
       '</div>' +
-      '<div class="pb-demo" aria-hidden="true">' +
-        '<div class="pb-demo-top"><b>Download last month\'s invoices</b><span class="pb-demo-badge"></span></div>' +
-        '<ol class="pb-demo-steps">' + DEMO_STEPS.map((t) => `<li><span class="pb-demo-dot"></span><span class="pb-demo-text">${t}</span><span class="pb-demo-note"></span></li>`).join('') + '</ol>' +
-        '<div class="pb-demo-foot"><span class="pb-demo-saved">Saved as a playbook</span><span class="pb-demo-clock"></span></div>' +
-      '</div>' +
-      (onClose ? '<button class="pb-how-close" type="button" aria-label="Hide how it works">×</button>' : '') +
-      '<p class="pb-how-caption" aria-live="polite"></p>';
+      '<p class="pb-how-note">Your passwords are never saved. A step that needs one stops, and you type it.</p>';
 
-    const stages = [...box.querySelectorAll('.pb-how-stage')];
-    const demo = box.querySelector('.pb-demo');
-    const rows = [...demo.querySelectorAll('li')];
-    const badge = demo.querySelector('.pb-demo-badge');
-    const clockEl = demo.querySelector('.pb-demo-clock');
-    const caption = box.querySelector('.pb-how-caption');
+    const cards = [...box.querySelectorAll('.pb-run')];
     if (onClose) box.querySelector('.pb-how-close').addEventListener('click', onClose);
 
-    let stage = 0;
-    let run = 0;            // bumped to cancel whatever scene is playing
+    let run = 0;            // bumped to cancel whatever is playing
     const wait = (ms, my) => new Promise((r) => setTimeout(r, ms)).then(() => {
       if (my !== run) throw new Error('cancelled');
     });
     // Off screen (another tab, a hidden page): hold, rather than play to nobody.
     const visible = () => !document.hidden && box.offsetParent !== null;
 
-    const setRow = (i, state, note) => {
-      rows[i].className = state || '';
-      rows[i].querySelector('.pb-demo-note').textContent = note || '';
-    };
-    const setBadge = (text, cls) => { badge.textContent = text; badge.className = 'pb-demo-badge ' + (cls || ''); };
-    const reset = () => {
-      rows.forEach((_r, i) => { setRow(i, ''); rows[i].querySelector('.pb-demo-text').textContent = DEMO_STEPS[i]; });
-      demo.classList.remove('saved');
-      clockEl.textContent = '';
-    };
+    const parts = (c) => ({ rows: [...c.querySelectorAll('li')], clock: c.querySelector('.pb-run-clock'), bar: c.querySelector('.pb-run-bar i') });
+    const setRow = (row, state, note) => { row.className = state || ''; row.querySelector('.pb-run-note').textContent = note || ''; };
+    const setTime = (p, s) => { p.clock.textContent = took(s); p.bar.style.width = s ? `${Math.max(2, (s / HOW_LONGEST) * 100)}%` : '0'; };
+    const reset = (p, state) => p.rows.forEach((row, j) => { row.querySelector('.pb-run-text').textContent = HOW_STEPS[j]; setRow(row, state); });
 
-    function show(i) {
-      stage = i;
-      stages.forEach((s, j) => { s.classList.toggle('on', j === i); s.setAttribute('aria-selected', String(j === i)); });
-      demo.dataset.stage = HOW_STAGES[i].key;
-      caption.textContent = HOW_STAGES[i].body;
+    // A run as it ends — what a card shows while another one plays, and with motion off.
+    function finish(i) {
+      const p = parts(cards[i]);
+      reset(p, 'done');
+      if (i === 2) { p.rows[2].querySelector('.pb-run-text').textContent = HOW_FIXED; setRow(p.rows[2], 'done fixed', 'fixed'); }
+      setTime(p, HOW_RUNS[i].secs);
     }
 
-    // Each scene, played. `my` is the run it belongs to.
+    // The clock runs while the steps do: from `a` to `b` seconds over `ms`.
+    async function count(p, a, b, ms, my) {
+      const n = Math.max(1, Math.round(ms / 90));
+      for (let k = 1; k <= n; k++) { await wait(ms / n, my); setTime(p, Math.round(a + ((b - a) * k) / n)); }
+    }
+
     const SCENES = [
-      async (my) => {           // the AI works it out, one step at a time
-        reset(); setBadge('Learning', 'ai');
-        let secs = 0;
-        for (let i = 0; i < rows.length; i++) {
-          setRow(i, 'active ai', 'thinking…');
-          for (let t = 0; t < 4; t++) { await wait(260, my); secs += 3; clockEl.textContent = `${secs}s so far`; }
-          setRow(i, 'done', '');
+      async (p, my) => {        // the first time: each step worked out, slowly
+        for (let j = 0; j < 4; j++) {
+          setRow(p.rows[j], 'active ai', 'thinking…');
+          await count(p, j * 18, (j + 1) * 18, 1100, my);
+          setRow(p.rows[j], 'done');
         }
-        clockEl.textContent = `took ${secs}s`;
-        await wait(1400, my);
       },
-      async (my) => {           // kept
-        rows.forEach((_r, i) => setRow(i, 'done', ''));
-        setBadge('Done', 'ok');
-        await wait(500, my);
-        demo.classList.add('saved');
-        clockEl.textContent = '';
-        await wait(2600, my);
+      async (p, my) => {        // every time after: nothing to work out
+        for (let j = 0; j < 4; j++) { setRow(p.rows[j], 'active'); await count(p, j, j + 1, 260, my); setRow(p.rows[j], 'done'); }
       },
-      async (my) => {           // replayed with no AI
-        reset(); demo.classList.add('saved'); setBadge('Replaying', 'free');
-        for (let i = 0; i < rows.length; i++) { setRow(i, 'active', ''); await wait(330, my); setRow(i, 'done', ''); }
-        clockEl.textContent = 'took 4s';
-        await wait(2400, my);
-      },
-      async (my) => {           // one step changed; only it is repaired
-        reset(); demo.classList.add('saved'); setBadge('Replaying', 'free');
-        for (let i = 0; i < 2; i++) { setRow(i, 'active', ''); await wait(330, my); setRow(i, 'done', ''); }
-        setRow(2, 'active', ''); await wait(500, my);
-        setRow(2, 'broken', 'not there any more'); setBadge('A button moved', 'warn');
-        await wait(1300, my);
-        setRow(2, 'active ai', 'working it out…'); setBadge('Fixing', 'ai');
-        await wait(1700, my);
-        rows[2].querySelector('.pb-demo-text').textContent = DEMO_FIXED;
-        setRow(2, 'done fixed', 'fixed'); setBadge('Replaying', 'free');
-        await wait(600, my);
-        setRow(3, 'active', ''); await wait(330, my); setRow(3, 'done', '');
-        clockEl.textContent = 'fixed for next time';
-        await wait(2600, my);
+      async (p, my) => {        // a button moved: only that step goes back to the AI
+        for (let j = 0; j < 2; j++) { setRow(p.rows[j], 'active'); await count(p, j, j + 1, 260, my); setRow(p.rows[j], 'done'); }
+        setRow(p.rows[2], 'active'); await wait(400, my);
+        setRow(p.rows[2], 'broken', 'not there'); await wait(1100, my);
+        setRow(p.rows[2], 'active ai', 'fixing…'); await count(p, 2, 8, 1400, my);
+        p.rows[2].querySelector('.pb-run-text').textContent = HOW_FIXED;
+        setRow(p.rows[2], 'done fixed', 'fixed'); await wait(500, my);
+        setRow(p.rows[3], 'active'); await count(p, 8, 9, 260, my); setRow(p.rows[3], 'done');
       },
     ];
 
-    // The final picture of a stage, for when nothing moves.
-    function settle(i) {
-      reset();
-      if (i === 0) { rows.forEach((_r, j) => setRow(j, 'done', '')); rows[1].className = 'active ai'; setBadge('Learning', 'ai'); clockEl.textContent = 'the first time is slow'; }
-      if (i === 1) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('Done', 'ok'); }
-      if (i === 2) { rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved'); setBadge('Replaying', 'free'); clockEl.textContent = 'took 4s'; }
-      if (i === 3) {
-        rows.forEach((_r, j) => setRow(j, 'done', '')); demo.classList.add('saved');
-        rows[2].querySelector('.pb-demo-text').textContent = DEMO_FIXED;
-        setRow(2, 'done fixed', 'fixed'); setBadge('Replaying', 'free');
-      }
-    }
-
     async function play(from) {
       const my = ++run;
+      cards.forEach((_c, i) => finish(i));
+      if (still()) { box.classList.remove('playing'); cards.forEach((c) => c.classList.remove('on')); return; }
       let i = from;
       try {
         for (;;) {
-          show(i);
-          if (still()) { settle(i); return; }
           while (!visible()) await wait(500, my);
-          await SCENES[i](my);
+          box.classList.add('playing');
+          cards.forEach((c, j) => c.classList.toggle('on', j === i));
+          const p = parts(cards[i]);
+          reset(p, ''); setTime(p, 0);
+          await wait(450, my);
+          await SCENES[i](p, my);
+          await wait(i === 2 ? 2600 : 1600, my);
           i = (i + 1) % SCENES.length;
         }
-      } catch { /* a newer play() took over */ }
+      } catch { /* a newer play() took over, or it was stopped */ }
     }
 
-    stages.forEach((s, i) => s.addEventListener('click', () => play(i)));
+    cards.forEach((c, i) => {
+      c.addEventListener('click', () => play(i));
+      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); play(i); } });
+    });
     play(0);
     return { stop: () => { run++; }, restart: () => play(0) };
   }
@@ -336,6 +307,7 @@
     else {
       bits.push(`last ran ${stamp(s.lastRun)}${s.lastError ? ' — stopped' : ''}`);
       if (s.ok) bits.push(`takes about ${secs((s.totalMs || 0) / s.ok)}`);
+      if (s.runs > 1) bits.push(`worked ${s.ok || 0} of ${s.runs} times`);
     }
     $('pbSub').textContent = bits.join(' · ');
   }
@@ -412,6 +384,19 @@
     const steps = (live && current && live.playbookId === current.id && live.steps) || current.steps;
     stepsEl.textContent = '';
     steps.forEach((s, i) => stepsEl.appendChild(stepRow(s, i)));
+    paintLegend();
+  }
+
+  // What the coloured words in the steps mean — only the ones this playbook has.
+  function paintLegend() {
+    const has = (sel) => Boolean(stepsEl.querySelector(sel));
+    const keys = [
+      ['.pb-var:not(.auto):not(.you)', 'set', 'changes each run'],
+      ['.pb-var.auto', 'auto', 'filled in by itself'],
+      ['.pb-var.you, .k-you', 'you', 'you do this part'],
+      ['.pb-mark-ask', 'ask', 'waits for your OK'],
+    ].filter(([sel]) => has(sel));
+    $('pbLegend').innerHTML = keys.map(([, cls, words]) => `<span class="pb-key ${cls}">${words}</span>`).join('');
   }
 
   // A step's words as a sentence: a capital to start, and a shell command
