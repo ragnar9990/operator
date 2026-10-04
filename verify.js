@@ -38,6 +38,8 @@ How to judge:
 - An action list full of errors that still ends in the right place is a PASS — how it got there is not your problem.
 - If the request was vague or conversational and what happened is a fair reading of it, that is a PASS. Do not invent requirements the user never asked for.
 - If the evidence genuinely does not show you either way, say UNSURE rather than guessing. UNSURE is not a polite FAIL.
+- FAIL needs something you can point to: a step that went wrong, a part of the goal no action touched, or a screen or page that shows the wrong result. Not being able to see the result is UNSURE, not FAIL.
+- A window is named by its title at the moment the agent switched to it — whichever tab happened to be in front. Where the agent went after that is in the steps that follow: an address it typed, a link it opened.
 - A reminder or repeating job set with the schedule tool is done the moment it is set: it cannot have gone off yet. That it goes off while Operator is open is how Operator works, not something missing. A "task" job is carried out at that time by this same agent with all its tools, so judge only that it is set for the right time and that its instruction asks for the right thing.
 
 Reply with ONE line, in exactly this shape, and nothing else — no preamble, no markdown:
@@ -66,11 +68,30 @@ function actionList(actions) {
   return [...head, `… ${actions.length - 60} more steps …`, ...tail].join('\n');
 }
 
+// The text a person would see in the window right now, top to bottom.
+function inView(p, max) {
+  return p.evaluate((max) => {
+    const out = [];
+    let n = 0;
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t && n < max; t = walk.nextNode()) {
+      const s = t.textContent.replace(/\s+/g, ' ').trim();
+      const el = t.parentElement;
+      if (!s || !el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom <= 0 || r.top >= innerHeight || !r.width || !r.height) continue;
+      out.push(s);
+      n += s.length + 1;
+    }
+    return out.join(' ').slice(0, max);
+  }, max);
+}
+
 // What the world looks like now. This only ever asks for evidence the run
 // already paid for: a task that never touched the desktop must not boot the
 // desktop helper just to be checked, and a task that never opened the browser
 // has no page to read.
-async function evidence({ usedScreen, usedBrowser, canSee, onTheirScreen }) {
+async function evidence({ usedScreen, usedBrowser, canSee, onTheirScreen, since }) {
   const parts = [];
   let image = null;
 
@@ -84,14 +105,26 @@ async function evidence({ usedScreen, usedBrowser, canSee, onTheirScreen }) {
     for (const p of tabs) {
       try {
         const text = (await p.innerText('body')).slice(0, each);
-        seen.push(`${p.url()}\n${text}`);
+        // The top of a long page is not where the work shows: a comment under a
+        // video, a row added at the bottom of a list. So also what is in view,
+        // when it has scrolled away from the top.
+        const view = await inView(p, each).catch(() => '');
+        const below = view && !text.includes(view.slice(0, 80)) ? `\n— IN VIEW NOW, scrolled down —\n${view}` : '';
+        seen.push(`${p.url()}\n${text}${below}`);
       } catch { /* the page moved on or closed — say nothing rather than guess */ }
     }
     if (seen.length === 1) parts.push(`THE BROWSER PAGE NOW:\n${seen[0]}`);
     else if (seen.length) parts.push(`THE BROWSER TABS NOW:\n\n${seen.map((s, i) => `Tab ${i + 1}: ${s}`).join('\n\n')}`);
   }
 
-  if (usedScreen && canSee) {
+  // Work done on the user's own screen is judged on their screen as the agent
+  // left it — the last frame it took there — not on the hidden desktop it went
+  // back to. A posted comment showed in that frame and nowhere else.
+  const theirs = onTheirScreen && canSee ? desktop.lastOnTheirScreen(since) : null;
+  if (theirs) {
+    image = { mime: theirs.mime || 'image/jpeg', b64: theirs.image };
+    parts.push(`THE USER'S SCREEN as the agent left it (the last screenshot it took there, just before handing the screen back): attached, display ${theirs.display || 1}${theirs.displays ? ` of ${theirs.displays}` : ''}. Foreground window: ${theirs.foreground || 'unknown'}.`);
+  } else if (usedScreen && canSee) {
     try {
       const shot = await desktop.screenshot(1, SHOT);
       image = { mime: shot.mime || 'image/jpeg', b64: shot.image };
@@ -202,13 +235,13 @@ async function askNim({ system, body, image, model, abortController }) {
  * ok === false it was not, and `why` says what is missing
  * ok === null  could not tell — no verdict, and nothing is re-run on it
  */
-async function check({ goal, actions = [], reply, model, dryRun, usedScreen, usedBrowser, onTheirScreen, abortController }) {
+async function check({ goal, actions = [], reply, model, dryRun, usedScreen, usedBrowser, onTheirScreen, since = 0, abortController }) {
   const started = Date.now();
   const onNim = nim.isNimModel(model);
   const canSee = onNim ? Boolean(nim.infoFor(model).vision) : true;
 
   try {
-    const ev = await evidence({ usedScreen: usedScreen && !dryRun, usedBrowser: usedBrowser && !dryRun, canSee, onTheirScreen });
+    const ev = await evidence({ usedScreen: usedScreen && !dryRun, usedBrowser: usedBrowser && !dryRun, canSee, onTheirScreen: onTheirScreen && !dryRun, since });
     const body = brief({ goal, actions, reply, dry: dryRun, ev });
     const system = dryRun ? RULES_DRY : RULES;
 

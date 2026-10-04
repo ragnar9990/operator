@@ -514,6 +514,24 @@ ipcMain.handle('nvidia:sweep', async () => {
   }
 });
 
+// A screen_do batch for the check at the end, part by part: "type "i love your
+// content" → click (702, 567)", not "type → click". Masked the way the audit
+// log masks it.
+function screenParts(input) {
+  const steps = (audit.scrub(input || {}, null, []).steps) || [];
+  return steps.map((s) => {
+    switch (s.action) {
+      case 'type': return `type "${String(s.text || '').slice(0, 300)}"`;
+      case 'key': return `press ${s.keys}`;
+      case 'click_text': return `click "${s.name || s.text}"`;
+      case 'focus': return `switch to "${s.title}"`;
+      case 'scroll': return `scroll ${s.direction}`;
+      case 'wait': return `wait ${s.seconds || 1}s`;
+      default: return s.x !== undefined ? `${String(s.action).replace('_', '-')} at (${s.x}, ${s.y})` : String(s.action);
+    }
+  }).join(' → ') || '(nothing)';
+}
+
 // `employee`: an employee's run (employees.js) — its hands for message_boss and
 // its to-do list. `noCheck`: skip the check at the end (a check-in has no goal
 // it could judge).
@@ -564,6 +582,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
   // did, the last thing it said about it, and which hands it used — so the
   // check only asks for evidence this run already paid for.
   const acts = [];
+  const runStarted = Date.now();   // the check only trusts a frame of the user's screen taken since
   let tookTheScreen = false;
   let lastReply = null;
   let usedScreen = false;
@@ -586,6 +605,11 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
         acts.push({ text: `run: ${String((evt.input || {}).command || '').slice(0, 800)}${evt.output ? `\n   it printed: ${evt.output}` : ''}`, long: true, ok: evt.ok !== false, error: evt.error || null });
       } else if (evt.output) {
         acts.push({ text: `${evt.text || evt.name} → ${evt.output}`, long: true, ok: evt.ok !== false, error: evt.error || null });
+      } else if (evt.name === 'screen_do') {
+        // Each part of the batch with what it typed, pressed and clicked. "on
+        // screen: click → wait → type → wait" told the check nothing, and it
+        // failed a YouTube comment that had been posted.
+        acts.push({ text: `on screen: ${screenParts(evt.input)}`, long: true, ok: evt.ok !== false, error: evt.error || null });
       } else if (evt.name !== 'run_helpers') acts.push({ text: evt.text || evt.name, ok: evt.ok !== false, error: evt.error || null });
       if (/^(screen_|launch_app|focus_window|list_windows)/.test(evt.name)) usedScreen = true;
       if (evt.name.startsWith('browser_')) usedBrowser = true;
@@ -783,7 +807,7 @@ async function runOne({ prompt, model, botId, chatId, silent, record, dryRun, em
       onEvent({ type: 'verify_start' });
       const v = await verify.check({
         goal: prompt, actions: acts, reply: lastReply, model,
-        dryRun, usedScreen, usedBrowser, onTheirScreen: tookTheScreen, abortController,
+        dryRun, usedScreen, usedBrowser, onTheirScreen: tookTheScreen, since: runStarted, abortController,
       });
       if (abortController.signal.aborted) return null;
 

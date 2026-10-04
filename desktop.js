@@ -239,8 +239,18 @@ async function screenshot(display, opts) {
   if (opts && opts.q !== undefined) payload.q = opts.q;
   const res = await call(payload, 45000);
   if (onFrame) onFrame(res.image, `Display ${res.display}${res.foreground ? ' — ' + res.foreground : ''}`, res.mime);
+  if (!isPrivate() && !remote && res.image) {
+    lastTheirs = { image: res.image, mime: res.mime, display: res.display, displays: res.displays, foreground: res.foreground, at: Date.now() };
+  }
   return res;
 }
+
+// The last screenshot taken on the user's own screen, if it was taken since
+// `since`. A run that borrows their screen hands it back before the check at
+// the end, which then sees only the hidden desktop — this is their screen as
+// the agent left it.
+let lastTheirs = null;
+const lastOnTheirScreen = (since) => (lastTheirs && lastTheirs.at >= since ? lastTheirs : null);
 
 const move = (x, y, display) => { pointer('move', x, y, display); return call({ cmd: 'move', x, y, display }); };
 const click = (x, y, button, clicks, display) => { pointer('click', x, y, display); return call({ cmd: 'click', x, y, button, clicks, display }); };
@@ -306,6 +316,7 @@ module.exports = {
   ping,
   info,
   screenshot,
+  lastOnTheirScreen,
   move,
   click,
   drag,
